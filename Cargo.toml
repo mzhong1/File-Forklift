@@ -6,3 +6,4 @@ authors = ["mzhong215"]
 [dependencies]
 rendezvous_hash = "0.2.1"
 zmq = "0.8.2"
+local-ip = "0.1"
