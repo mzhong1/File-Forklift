@@ -8,6 +8,14 @@ use std::io::BufReader;
 use std::time::{SystemTime, UNIX_EPOCH};
 mod node;
 use node::Node;
+
+fn current_time_in_millis(start: SystemTime) -> u64 {
+    let since_epoch = start
+        .duration_since(UNIX_EPOCH)
+        .expect("Time went backwards whoops");
+    since_epoch.as_secs() * 1000 + since_epoch.subsec_nanos() as u64 / 1_000_000
+}
+
 //Heartbeat protocol
 //In a worker (Dealer socket):
 //Calculate liveness (how many missed heartbeats before assuming death)
@@ -32,11 +40,7 @@ fn main() {
     let interval = 1000; //msecs
                          //set heartbeat_at
     let start = SystemTime::now();
-    let since_epoch = start
-        .duration_since(UNIX_EPOCH)
-        .expect("Time went backwards whoops");
-    let mut heartbeat_at =
-        (since_epoch.as_secs() * 1000 + since_epoch.subsec_nanos() as u64 / 1_000_000) + interval;
+    let mut heartbeat_at = current_time_in_millis(start) + interval;
 
     //create mutable hashmapof nodes
     let mut nodes = HashMap::new();
@@ -112,10 +116,8 @@ fn main() {
         //tick down liveness of associated node
         //after ticking down, reset has_heartbeat values to false
         //if liveness becomes 0 or less than 0, assume node is dead (handle it however necessary)
-        let since_epoch = start
-            .duration_since(UNIX_EPOCH)
-            .expect("Time went backwards whoops");
-        let c_time = since_epoch.as_secs() * 1000 + since_epoch.subsec_nanos() as u64 / 1_000_000;
+
+        let c_time = current_time_in_millis(start);
         if c_time > heartbeat_at {
             //update heartbeat time
             heartbeat_at = c_time + interval;
@@ -133,8 +135,7 @@ fn main() {
                             .and_modify(|e| e.has_heartbeat = false)
                             .or_insert(Node::new(node_ip));
                     }
-                    if nodes[node_ip].liveness <= 0
-                    {
+                    if nodes[node_ip].liveness <= 0 {
                         //Handle this however (we'll probably remove the node from
                         //the rendezvous hash once it's been implemented
                     }

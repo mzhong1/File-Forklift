@@ -13,8 +13,4 @@ impl Node {
             has_heartbeat: false,
         }
     }
-
-    pub fn get_name(&self) -> String{
-        self.name.to_string()
-    }
 }
