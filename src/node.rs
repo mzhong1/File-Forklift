@@ -1,3 +1,4 @@
+#[derive(Debug)]
 pub struct Node {
     ///name of node
     name: String,
