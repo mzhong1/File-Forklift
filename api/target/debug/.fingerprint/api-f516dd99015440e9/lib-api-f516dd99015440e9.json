@@ -1,0 +1,1 @@
+{"rustc":443796734116236010,"features":"[]","target":13855165987693999598,"profile":358325160858768742,"path":10872709659218687626,"deps":[["flatbuffers v0.5.0","flatbuffers",4825208835999383883]],"local":[{"MtimeBased":[[1538669538,226422285],".fingerprint/api-f516dd99015440e9/dep-lib-api-f516dd99015440e9"]}],"rustflags":[],"edition":"Edition2015"}

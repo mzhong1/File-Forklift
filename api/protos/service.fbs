@@ -1,0 +1,18 @@
+enum ResultType: bool{
+    Ok = 0,
+    Err
+}
+
+enum MessageType: {
+    OHAI = 0,
+    GETLIST,
+    NODELIST,
+    HEARTBEAT,
+}
+
+table Message{
+    mtype: MessageType;
+    members: [string];
+}
+
+root_type Message;
