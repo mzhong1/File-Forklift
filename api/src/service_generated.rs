@@ -69,15 +69,14 @@ pub fn enum_name_result_type(e: ResultType) -> &'static str {
 #[repr(u8)]
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum MessageType {
-  OHAI = 0,
-  GETLIST = 1,
-  NODELIST = 2,
-  HEARTBEAT = 3,
+  GETLIST = 0,
+  NODELIST = 1,
+  HEARTBEAT = 2,
 
 }
 
 const ENUM_MIN_MESSAGE_TYPE: u8 = 0;
-const ENUM_MAX_MESSAGE_TYPE: u8 = 3;
+const ENUM_MAX_MESSAGE_TYPE: u8 = 2;
 
 impl<'a> flatbuffers::Follow<'a> for MessageType {
   type Inner = Self;
@@ -111,16 +110,14 @@ impl flatbuffers::Push for MessageType {
 }
 
 #[allow(non_camel_case_types)]
-const ENUM_VALUES_MESSAGE_TYPE:[MessageType; 4] = [
-  MessageType::OHAI,
+const ENUM_VALUES_MESSAGE_TYPE:[MessageType; 3] = [
   MessageType::GETLIST,
   MessageType::NODELIST,
   MessageType::HEARTBEAT
 ];
 
 #[allow(non_camel_case_types)]
-const ENUM_NAMES_MESSAGE_TYPE:[&'static str; 4] = [
-    "OHAI",
+const ENUM_NAMES_MESSAGE_TYPE:[&'static str; 3] = [
     "GETLIST",
     "NODELIST",
     "HEARTBEAT"
@@ -170,7 +167,7 @@ impl<'a> Message<'a> {
 
   #[inline]
   pub fn mtype(&self) -> MessageType {
-    self._tab.get::<MessageType>(Message::VT_MTYPE, Some(MessageType::OHAI)).unwrap()
+    self._tab.get::<MessageType>(Message::VT_MTYPE, Some(MessageType::GETLIST)).unwrap()
   }
   #[inline]
   pub fn members(&self) -> Option<flatbuffers::Vector<flatbuffers::ForwardsUOffset<&'a str>>> {
@@ -186,7 +183,7 @@ impl<'a> Default for MessageArgs<'a> {
     #[inline]
     fn default() -> Self {
         MessageArgs {
-            mtype: MessageType::OHAI,
+            mtype: MessageType::GETLIST,
             members: None,
         }
     }
@@ -198,7 +195,7 @@ pub struct MessageBuilder<'a: 'b, 'b> {
 impl<'a: 'b, 'b> MessageBuilder<'a, 'b> {
   #[inline]
   pub fn add_mtype(&mut self, mtype: MessageType) {
-    self.fbb_.push_slot::<MessageType>(Message::VT_MTYPE, mtype, MessageType::OHAI);
+    self.fbb_.push_slot::<MessageType>(Message::VT_MTYPE, mtype, MessageType::GETLIST);
   }
   #[inline]
   pub fn add_members(&mut self, members: flatbuffers::WIPOffset<flatbuffers::Vector<'b , flatbuffers::ForwardsUOffset<&'b  str>>>) {

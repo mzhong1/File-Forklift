@@ -14,4 +14,11 @@ impl Node {
             has_heartbeat: false,
         }
     }
+    pub fn node_new(n: &str, l: i64, h: bool) -> Self {
+        Node {
+            name: n.to_string(),
+            liveness: l,
+            has_heartbeat: h,
+        }
+    }
 }

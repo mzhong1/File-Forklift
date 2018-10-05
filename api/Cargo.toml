@@ -2,6 +2,7 @@
 name = "api"
 version = "0.1.0"
 authors = ["Michelle Zhong <Michelle_Zhong@comcast.com>", "Chris Holcombe <xfactor973@gmail.com>"]
+build = "build.rs"
 
 [dependencies]
 flatbuffers = "~0.5"
