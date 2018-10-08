@@ -23,7 +23,7 @@ use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 mod error;
-mod mess;
+mod message;
 mod node;
 mod node_address;
 
@@ -260,7 +260,7 @@ fn send_getlist(
         Err(err) => {debug!("Time went backwards!"); panic!(err)}, //If time runs backwards well, PANIC
     };
     if request.get_fds()[0].can_write() && c_time > *heartbeat_at {
-        let message = mess::create_message(MessageType::GETLIST, &vec![name.to_string()]);
+        let message = message::create_message(MessageType::GETLIST, &vec![name.to_string()]);
         match router.nb_write(message.as_slice()) {
             Ok(..) => debug!("Getlist sent"),
             Err(Error::TryAgain) => debug!("Receiver not ready, message can't be sent"),
@@ -278,7 +278,7 @@ fn send_nodelist(
     router: &mut Socket,
 ) {
     let address_names = to_string_vector(node_names);
-    let buffer = mess::create_message(MessageType::NODELIST, &address_names);
+    let buffer = message::create_message(MessageType::NODELIST, &address_names);
 
     if msg_body.len() > 0 {
         let sent_address = &msg_body[0];
@@ -294,7 +294,7 @@ fn send_nodelist(
 
 fn send_heartbeat(name: &str, router: &mut Socket) {
     let buffer = vec![name.to_string()];
-    let msg = mess::create_message(MessageType::HEARTBEAT, &buffer);
+    let msg = message::create_message(MessageType::HEARTBEAT, &buffer);
     match router.nb_write(msg.as_slice()) {
         Ok(_) => {
             println!("Heartbeat sent !");
@@ -363,7 +363,7 @@ fn parse_nodelist_message(
     router: &mut Socket,
     has_nodelist: &mut bool
 ) {
-    let list = match mess::read_message(buf) {
+    let list = match message::read_message(buf) {
         Some(t) => t,
         None => vec![],
     };
@@ -405,8 +405,8 @@ fn read_and_heartbeat(
     if request.get_fds()[0].can_read() {
         //check message type
         let msg = read_message_to_u8(router);
-        let msgtype = mess::get_message_type(&msg);
-        let msg_body = match mess::read_message(&msg) {
+        let msgtype = message::get_message_type(&msg);
+        let msg_body = match message::read_message(&msg) {
             Some(t) => t,
             None => vec![],
         };
@@ -625,7 +625,10 @@ fn main() -> ForkliftResult<()> {
     debug!("current ip address, port: {}", &ip_address);
     let mut router = init_router(&ip_address, &mut node_names)?; //Make the node
     debug!("router created");
-    let full_address = get_full_address_from_ip(&ip_address, &mut node_names).unwrap(); //handle later
+    let full_address = match get_full_address_from_ip(&ip_address, &mut node_names){
+        Ok(address) => address,
+        Err(err) => {debug!("full address not in the list of nodes: {}", err); panic!(err)},
+    }; //handle later
 
     //sleep for a bit to let other nodes start up
     std::thread::sleep(std::time::Duration::from_millis(10));
