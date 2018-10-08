@@ -11,11 +11,15 @@ pub enum ForkliftError {
     IoError(IoError),
     SystemTimeError(SystemTimeError),
     NanomsgError(NanomsgError),
+    AddressNotFoundError,
 }
 
 impl fmt::Display for ForkliftError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.write_str(self.description())
+        match *self{
+            ForkliftError::AddressNotFoundError => f.write_str("AddressNotFoundError"),
+            _ => f.write_str(self.description()),
+        }
     }
 }
 
@@ -25,6 +29,7 @@ impl err for ForkliftError {
             ForkliftError::IoError(ref e) => e.description(),
             ForkliftError::SystemTimeError(ref e) => e.description(),
             ForkliftError::NanomsgError(ref e) => e.description(),
+            ForkliftError::AddressNotFoundError => "Address Not Found",
         }
     }
 
@@ -33,6 +38,7 @@ impl err for ForkliftError {
             ForkliftError::IoError(ref e) => e.cause(),
             ForkliftError::SystemTimeError(ref e) => e.cause(),
             ForkliftError::NanomsgError(ref e) => e.cause(),
+            ForkliftError::AddressNotFoundError => Some(&ForkliftError::AddressNotFoundError),
         }
     }
 }
