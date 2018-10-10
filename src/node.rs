@@ -12,7 +12,7 @@ impl Node {
         Node {
             name: n.to_string(),
             lifetime: lt,
-            liveness: 0,
+            liveness: lt,
             has_heartbeat: false,
         }
     }
@@ -29,7 +29,13 @@ impl Node {
         self.has_heartbeat = true;
     }
     pub fn tickdown(&mut self){
-        self.liveness = self.liveness - 1;
+        self.liveness -= 1;
         self.has_heartbeat = false;
+    }
+}
+
+impl PartialEq for Node{
+    fn eq(&self, other: &Node) -> bool{
+        self.name == other.name && self.lifetime == other.lifetime
     }
 }

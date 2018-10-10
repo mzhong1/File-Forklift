@@ -1,51 +1,31 @@
 use std::error::Error as err;
 use std::fmt;
 use std::io::Error as IoError;
+use std::net::AddrParseError;
 use std::time::SystemTimeError;
 use nanomsg::Error as NanomsgError;
-use serde_json::error::Error as JSONError;
 
 pub type ForkliftResult<T> = Result<T, ForkliftError>;
-
-#[derive(Debug)]
-pub enum NodeError{
-    AddressNotFoundError,
-    IpNotFoundError,
-    PortNotFoundError,
-}
-
-impl fmt::Display for NodeError{
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result{
-        match *self{
-            NodeError::AddressNotFoundError => f.write_str("AddressNotFound"),
-            NodeError::IpNotFoundError => f.write_str("IpNotFound"),
-            NodeError::PortNotFoundError => f.write_str("PortNotFound"),
-        }
-    }
-}
-
-impl err for NodeError{
-    fn description(&self) -> &str{
-        match &self{
-            NodeError::AddressNotFoundError => "Full Address not found",
-            NodeError::IpNotFoundError => "Ip address not found",
-            NodeError::PortNotFoundError => "Port number not found",
-        }
-    }
-}
 
 #[derive(Debug)]
 pub enum ForkliftError {
     IoError(IoError),
     SystemTimeError(SystemTimeError),
     NanomsgError(NanomsgError),
-    JSONError(JSONError),
-    NodeNotFoundError(NodeError),
+    AddrParseError(AddrParseError),
+    IpLocalError,
+    InvalidConfigError,
+    IpConfigError,
 }
 
 impl fmt::Display for ForkliftError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.write_str(self.description())
+        match *self {
+            ForkliftError::InvalidConfigError => f.write_str("InvalidConfigError"),
+            ForkliftError::IpConfigError => f.write_str("IpConfigError"),
+            ForkliftError::IpLocalError => f.write_str("IpLocalError"),
+            _ => f.write_str(self.description()),
+        }
     }
 }
 
@@ -55,8 +35,10 @@ impl err for ForkliftError {
             ForkliftError::IoError(ref e) => e.description(),
             ForkliftError::SystemTimeError(ref e) => e.description(),
             ForkliftError::NanomsgError(ref e) => e.description(),
-            ForkliftError::JSONError(ref e) => e.description(),
-            ForkliftError::NodeNotFoundError(ref e) => e.description(),
+            ForkliftError::AddrParseError(ref e) => e.description(),
+            ForkliftError::IpLocalError => "Could not determine local ip address",
+            ForkliftError::InvalidConfigError => "Invalid config formatting",
+            ForkliftError::IpConfigError => "Unable to get ip address from ifconfig",
         }
     }
 
@@ -65,8 +47,10 @@ impl err for ForkliftError {
             ForkliftError::IoError(ref e) => e.cause(),
             ForkliftError::SystemTimeError(ref e) => e.cause(),
             ForkliftError::NanomsgError(ref e) => e.cause(),
-            ForkliftError::JSONError(ref e) => e.cause(),
-            ForkliftError::NodeNotFoundError(ref e) => e.cause(),
+            ForkliftError::AddrParseError(ref e) => e.cause(),
+            ForkliftError::IpLocalError => None,
+            ForkliftError::InvalidConfigError => None,
+            ForkliftError::IpConfigError => None,
         }
     }
 }
@@ -89,14 +73,8 @@ impl From<NanomsgError> for ForkliftError {
     }
 }
 
-impl From<JSONError> for ForkliftError{
-    fn from(err: JSONError) -> ForkliftError{
-        ForkliftError::JSONError(err)
-    }
-}
-
-impl From<NodeError> for ForkliftError{
-    fn from(err: NodeError) -> ForkliftError{
-        ForkliftError::NodeNotFoundError(err)
+impl From<AddrParseError> for ForkliftError{
+    fn from(err: AddrParseError) -> ForkliftError{
+        ForkliftError::AddrParseError(err)
     }
 }
