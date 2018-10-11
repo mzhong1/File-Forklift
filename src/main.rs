@@ -589,7 +589,7 @@ fn send_getlist(
     let beat = match pulse.beat()
     {
         Ok(t) => t,
-        Err(e) => {debug!("Time went backwards! Abort! {}", e); error!("Time went backwards! Abort! {}", e);false},
+        Err(e) => {debug!("Time went backwards! Abort! {}", e); error!("Time went backwards! Abort! {}", e);panic!("Time went backwards! Abort! {}", e)},
     };
     if request.get_fds()[0].can_write() && beat {
         let message = message::create_message(MessageType::GETLIST, &[name.to_string()]);
@@ -702,7 +702,7 @@ fn send_and_tickdown(
     if request.get_fds()[0].can_write() {
        let beat = match pulse.beat(){
         Ok(t) => t,
-        Err(e) => {debug!("Time went backwards! Abort! {}", e); error!("Time went backwards! Abort! {}", e);false},
+        Err(e) => {debug!("Time went backwards! Abort! {}", e); error!("Time went backwards! Abort! {}", e);panic!("Time went backwards! Abort! {}", e)},
         };
 
         if beat {
