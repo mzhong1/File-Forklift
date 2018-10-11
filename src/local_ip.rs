@@ -56,6 +56,7 @@ pub fn get_ip() -> ForkliftResult<Option<SocketAddr>> {
     Err(ForkliftError::IpLocalError)
 }
 
+//get the ip in ipv6.  
 pub fn get_ipv6() -> ForkliftResult<Option<SocketAddr>> {
     let default_iface = get_default_v4_iface()?;
     let default_iface = default_iface.unwrap();

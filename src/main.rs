@@ -7,7 +7,6 @@ extern crate dirs;
 extern crate nanomsg;
 extern crate simplelog;
 
-
 use self::api::service_generated::*;
 use clap::{App, Arg};
 use nanomsg::{Error, PollFd, PollInOut, PollRequest, Protocol, Socket};
@@ -16,7 +15,6 @@ use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::net::SocketAddr;
 use std::path::Path;
-use std::time::{SystemTime, Duration};
 
 mod error;
 mod local_ip;
@@ -24,9 +22,9 @@ mod message;
 mod node;
 mod pulse;
 
-use pulse::Pulse;
 use error::{ForkliftError, ForkliftResult};
 use node::Node;
+use pulse::Pulse;
 use simplelog::{CombinedLogger, Config, SharedLogger, TermLogger, WriteLogger};
 
 /*
@@ -38,8 +36,6 @@ use simplelog::{CombinedLogger, Config, SharedLogger, TermLogger, WriteLogger};
     if no message count down
     if liveness reaches zero, consider the node dead.
 */
-
-
 
 #[test]
 fn test_init_node_names() {
@@ -506,7 +502,7 @@ fn add_node_to_map(
 /**
  * make_and_add_node: &mut Vec<SocketAddr> * &str * &mut HashMap<String,Node> * i64 * vool * &mut Socket -> null
  * REQUIRES: makes a new node given that the node names does not previously exist, and adds itself to both the
- * node_Names and the nodes.  Otherwise it does nothing.
+ * node_Names and the nodes, and connects the node to given.  Otherwise it does nothing.
  */
 fn make_and_add_node(
     node_names: &mut Vec<SocketAddr>,
@@ -519,15 +515,24 @@ fn make_and_add_node(
     if !nodenames_contain_full_address(&sent_address.to_string(), node_names) {
         match add_node_to_list(&sent_address, node_names) {
             Ok(t) => t,
-            Err(e) => error!(
-                "Unable to parse socket address, should be in the form ip:port:{:?}",
-                e
-            ),
+            Err(e) => {
+                debug!(
+                    "Unable to parse socket address, should be in the form ip:port:{:?}",
+                    e
+                );
+                error!(
+                    "Unable to parse socket address, should be in the form ip:port:{:?}",
+                    e
+                )
+            }
         };
         add_node_to_map(nodes, &sent_address, liveness, heartbeat);
         match connect_node(&sent_address, router) {
             Ok(t) => t,
-            Err(e) => error!("Unable to connect to the node at ip address: {}", e),
+            Err(e) => {
+                debug!("Unable to connect to the node at ip address: {}", e);
+                error!("Unable to connect to the node at ip address: {}", e)
+            }
         };
     }
 }
@@ -586,10 +591,13 @@ fn send_getlist(
     name: &str,
     router: &mut Socket,
 ) -> ForkliftResult<()> {
-    let beat = match pulse.beat()
-    {
+    let beat = match pulse.beat() {
         Ok(t) => t,
-        Err(e) => {debug!("Time went backwards! Abort! {}", e); error!("Time went backwards! Abort! {}", e);panic!("Time went backwards! Abort! {}", e)},
+        Err(e) => {
+            debug!("Time went backwards! Abort! {}", e);
+            error!("Time went backwards! Abort! {}", e);
+            panic!("Time went backwards! Abort! {}", e)
+        }
     };
     if request.get_fds()[0].can_write() && beat {
         let message = message::create_message(MessageType::GETLIST, &[name.to_string()]);
@@ -641,12 +649,17 @@ fn send_heartbeat(name: &str, router: &mut Socket) {
     let msg = message::create_message(MessageType::HEARTBEAT, &buffer);
     match router.nb_write(msg.as_slice()) {
         Ok(_) => {
+            debug!("Heartbeat sent!");
             println!("Heartbeat sent !");
         }
         Err(Error::TryAgain) => {
+            debug!("Receiver not ready, message can't be sent for the moment ...");
             println!("Receiver not ready, message can't be sent for the moment ...");
         }
-        Err(err) => error!("Problem while writing: {}", err),
+        Err(err) => {
+            debug!("Problem while writing: {}", err);
+            error!("Problem while writing: {}", err)
+        }
     };
 }
 
@@ -686,7 +699,7 @@ fn tickdown_nodes(nodes: &mut HashMap<String, Node>, node_names: &[String]) {
 /**
  * send_and_tickdown: &PollRequest * &mut u64 * &str * &mut Socket * u64 * &mut HashMap<String, Node> * &mut Vec<SocketAddr> -> ForkliftRequest<()>
  * REQUIRES: request is a valid vector of PollRequests, pulse a valid Pulse object
- * name is your full address in the form ip:port, router a valid Socket, 
+ * name is your full address in the form ip:port, router a valid Socket,
  * nodes not empty, node_names not empty
  * ENSURES: returns Ok(()) if successfully sending a heartbeat to connected nodes and ticking down,
  * otherwise return Err
@@ -700,9 +713,13 @@ fn send_and_tickdown(
     node_names: &mut Vec<SocketAddr>,
 ) -> ForkliftResult<()> {
     if request.get_fds()[0].can_write() {
-       let beat = match pulse.beat(){
-        Ok(t) => t,
-        Err(e) => {debug!("Time went backwards! Abort! {}", e); error!("Time went backwards! Abort! {}", e);panic!("Time went backwards! Abort! {}", e)},
+        let beat = match pulse.beat() {
+            Ok(t) => t,
+            Err(e) => {
+                debug!("Time went backwards! Abort! {}", e);
+                error!("Time went backwards! Abort! {}", e);
+                panic!("Time went backwards! Abort! {}", e)
+            }
         };
 
         if beat {
@@ -849,12 +866,17 @@ fn parse_nodelist_message(
     if !*has_nodelist {
         let list = match message::read_message(buf) {
             Some(t) => t,
-            None => vec![],
+            None => {
+                debug!("NodeList message is empty");
+                vec![]
+            }
         };
-        for l in list {
+        for l in &list {
             make_and_add_node(node_names, &l, nodes, liveness, false, router)
         }
-        *has_nodelist = true;
+        if list.len() > 0 {
+            *has_nodelist = true;
+        }
     }
 }
 
@@ -939,7 +961,7 @@ fn heartbeat_heard(
 /**
  * read_and_heartbeat: &PollRequest * &mut Socket * &mut Vec<SocketAddr> * &mut HashMap<String, Node> * i64 * &mut bool * &mut u64 * &str * u64 -> null
  * REQUIRES: request not empty, router is connected, node_names not empty, nodes not empty, liveness > 0, pulse a valid Pulse object,
- * full_address is properly formatted as ip:port, 
+ * full_address is properly formatted as ip:port,
  * ENSURES: reads incoming messages and sends out heartbeats every interval milliseconds.  
  */
 fn read_and_heartbeat(
@@ -958,7 +980,10 @@ fn read_and_heartbeat(
         let msgtype = message::get_message_type(&msg);
         let msg_body = match message::read_message(&msg) {
             Some(t) => t,
-            None => vec![],
+            None => {
+                debug!("Message body is empty. Ignore the message");
+                vec![]
+            }
         };
         match msgtype {
             MessageType::NODELIST => {
@@ -970,7 +995,11 @@ fn read_and_heartbeat(
                 if !*has_nodelist {
                     match send_getlist(request, pulse, full_address, router) {
                         Ok(t) => t,
-                        Err(e) => error!("Time ran backwards!  Abort! {}", e),
+                        Err(e) => {
+                            debug!("Time ran backwards! Abort! {}", e);
+                            error!("Time ran backwards!  Abort! {}", e);
+                            panic!("Time ran backwards! Abort! {}", e)
+                        }
                     };
                 }
             }
@@ -1016,7 +1045,7 @@ fn read_and_heartbeat(
 fn heartbeat_loop(
     router: &mut Socket,
     has_nodelist: &mut bool,
-    pulse : &mut Pulse,
+    pulse: &mut Pulse,
     full_address: &str,
     node_names: &mut Vec<SocketAddr>,
     nodes: &mut HashMap<String, Node>,
@@ -1034,7 +1063,11 @@ fn heartbeat_loop(
         if !*has_nodelist {
             match send_getlist(&request, pulse, full_address, router) {
                 Ok(t) => t,
-                Err(e) => error!("Time ran backwards!  Abort! {}", e),
+                Err(e) => {
+                    debug!("Time ran backwards! Abort! {}", e);
+                    error!("Time ran backwards!  Abort! {}", e);
+                    panic!("Time ran backwards! Abort! {}", e)
+                }
             };
         }
 
@@ -1049,16 +1082,13 @@ fn heartbeat_loop(
             full_address,
         );
 
-        match send_and_tickdown(
-            &request,
-            pulse,
-            full_address,
-            router,
-            nodes,
-            node_names,
-        ) {
+        match send_and_tickdown(&request, pulse, full_address, router, nodes, node_names) {
             Ok(t) => t,
-            Err(e) => error!("Time ran backwards!  Abort! {}", e),
+            Err(e) => {
+                debug!("Time ran backwards! Abort! {}", e);
+                error!("Time ran backwards!  Abort! {}", e);
+                panic!("Time ran backwards! Abort! {}", e)
+            }
         };
     }
     //Ok(())
@@ -1069,7 +1099,16 @@ fn init_connect(node_names: &mut Vec<SocketAddr>, full_address: &str, router: &m
         if node_ip.to_string() != full_address {
             match connect_node(&node_ip.to_string(), router) {
                 Ok(t) => t,
-                Err(e) => error!("Unable to connect to the node at ip address: {}", e),
+                Err(e) => {
+                    debug!(
+                        "Error: {} Unable to connect to the node at ip address: {}",
+                        e, full_address
+                    );
+                    error!(
+                        "Error: {} Unable to connect to the node at ip address: {}",
+                        e, full_address
+                    )
+                }
             };
         }
     }
@@ -1079,10 +1118,13 @@ fn heartbeat(matches: &clap::ArgMatches) -> ForkliftResult<()> {
     //Variables that don't depend on command line args
     let liveness = 5; //The amount of times we can tick down before assuming death
     let interval = 1000; //set heartbeat interval in msecs
-    let mut pulse = match Pulse::new(interval)
-    {
+    let mut pulse = match Pulse::new(interval) {
         Ok(p) => p,
-        Err(e) => {debug!("System Time went backwards! Abort! {}", e); error!("System Time went backwards! Abort! {}", e); panic!("System Time went backwards! Abort! {}", e)}
+        Err(e) => {
+            debug!("System Time went backwards! Abort! {}", e);
+            error!("System Time went backwards! Abort! {}", e);
+            panic!("System Time went backwards! Abort! {}", e)
+        }
     };
     let mut has_nodelist = false;
     let joined = match matches.values_of("join") {

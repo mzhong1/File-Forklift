@@ -1,7 +1,7 @@
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Node {
     ///name of node
-    name: String,
+    pub name: String,
     pub lifetime: i64,
     pub liveness: i64,
     pub has_heartbeat: bool,
