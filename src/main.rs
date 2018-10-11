@@ -6,7 +6,7 @@ extern crate api;
 extern crate dirs;
 extern crate nanomsg;
 extern crate simplelog;
-extern crate zmq;
+
 
 use self::api::service_generated::*;
 use clap::{App, Arg};
@@ -521,7 +521,7 @@ fn add_node_to_map(
 }
 /**
  * make_and_add_node: &mut Vec<SocketAddr> * &str * &mut HashMap<String,Node> * i64 * vool * &mut Socket -> null
- * REQUIRES: makes a new node given that the node names does not previously exist, and adds itself to both the 
+ * REQUIRES: makes a new node given that the node names does not previously exist, and adds itself to both the
  * node_Names and the nodes.  Otherwise it does nothing.
  */
 fn make_and_add_node(
@@ -682,7 +682,7 @@ fn test_tickdown_nodes() {
  * tickdown_nodes: &mut HashMap<String, Node> * &[String] -> null
  * REQUIRES: nodes not empty, node_names not empty
  * ENSURES: for all nodes that have not sent a HEARTBEAT message to you within
- * a second, tickdown their liveness.  For all nodes that HAVE sent you a 
+ * a second, tickdown their liveness.  For all nodes that HAVE sent you a
  * HEARTBEAT message, reset their has_heartbeat value to false
  */
 fn tickdown_nodes(nodes: &mut HashMap<String, Node>, node_names: &[String]) {
@@ -729,7 +729,6 @@ fn send_and_tickdown(
     Ok(())
 }
 
-
 /**
  * read_message_to_u8: &mut Socket -> Vec<u8>
  * REQUIRES: router a valid working socket
@@ -745,11 +744,114 @@ fn read_message_to_u8(router: &mut Socket) -> Vec<u8> {
     buffer
 }
 
+/*
+    NOTE: This test can only check if the function can successfully parse a &[u8] message 
+    into the hashmap and list of nodes.  It cannot check if the router successfully connects to the 
+    message input nodes
+*/
+#[test]
+fn test_parse_nodelist_message() {
+    let msg: Vec<u8> = vec![
+        12, 0, 0, 0, 8, 0, 12, 0, 7, 0, 8, 0, 8, 0, 0, 0, 0, 0, 0, 1, 4, 0, 0, 0, 3, 0, 0, 0, 12,
+        0, 0, 0, 32, 0, 0, 0, 52, 0, 0, 0, 16, 0, 0, 0, 49, 57, 50, 46, 49, 54, 56, 46, 49, 46, 49,
+        58, 53, 50, 53, 48, 0, 0, 0, 0, 16, 0, 0, 0, 49, 55, 50, 46, 49, 49, 49, 46, 50, 46, 50,
+        58, 53, 53, 53, 53, 0, 0, 0, 0, 14, 0, 0, 0, 55, 50, 46, 49, 50, 46, 56, 46, 56, 58, 56,
+        48, 56, 48, 0, 0,
+    ];
+    let mut names = vec![
+        "123.45.67.89:9999".parse::<SocketAddr>().unwrap(),
+        "231.54.76.98:1111".parse::<SocketAddr>().unwrap(),
+    ];
+
+    let mut testnames = vec![
+        "123.45.67.89:9999".parse::<SocketAddr>().unwrap(),
+        "231.54.76.98:1111".parse::<SocketAddr>().unwrap(),
+    ];
+
+    let mut nodes: HashMap<String, Node> = HashMap::new();
+    nodes.insert(
+        "222.33.44.55:5555".to_string(),
+        Node::new("222.33.44.55:5555", 7),
+    );
+    nodes.insert(
+        "66.77.88.99:8080".to_string(),
+        Node::new("66.77.88.99:8080", 5),
+    );
+
+    let mut cmpnodes: HashMap<String, Node> = HashMap::new();
+    cmpnodes.insert(
+        "222.33.44.55:5555".to_string(),
+        Node::new("222.33.44.55:5555", 7),
+    );
+    cmpnodes.insert(
+        "66.77.88.99:8080".to_string(),
+        Node::new("66.77.88.99:8080", 5),
+    );
+
+    let mut router = Socket::new(Protocol::Bus).unwrap();
+    let mut has_nodelist = true;
+
+    parse_nodelist_message(
+        &msg,
+        &mut names,
+        &mut nodes,
+        5,
+        &mut router,
+        &mut has_nodelist,
+    );
+
+    assert_eq!(names, testnames);
+    assert_eq!(nodes, cmpnodes);
+    assert_eq!(has_nodelist, true);
+
+    testnames.push("192.168.1.1:5250".parse::<SocketAddr>().unwrap());
+    testnames.push("172.111.2.2:5555".parse::<SocketAddr>().unwrap());
+    testnames.push("72.12.8.8:8080".parse::<SocketAddr>().unwrap());
+
+    cmpnodes.insert(
+        "192.168.1.1:5250".to_string(),
+        Node::new("192.168.1.1:5250", 5),
+    );
+    cmpnodes.insert(
+        "172.111.2.2:5555".to_string(),
+        Node::new("172.111.2.2:5555", 5),
+    );
+    cmpnodes.insert("72.12.8.8:8080".to_string(), Node::new("72.12.8.8:8080", 5));
+
+    has_nodelist = false;
+    parse_nodelist_message(
+        &msg,
+        &mut names,
+        &mut nodes,
+        5,
+        &mut router,
+        &mut has_nodelist,
+    );
+
+    assert_eq!(names, testnames);
+    assert_eq!(nodes, cmpnodes);
+    assert_eq!(has_nodelist, true);
+
+    has_nodelist = false;
+    parse_nodelist_message(
+        &msg,
+        &mut names,
+        &mut nodes,
+        5,
+        &mut router,
+        &mut has_nodelist,
+    );
+
+    assert_eq!(names, testnames);
+    assert_eq!(nodes, cmpnodes);
+    assert_eq!(has_nodelist, true);
+}
+
 /**
  * parse_nodelist_message: &[u8] * &mut Vec<SocketAddr> * &mut HashMap<String, Node> * i64 * &mut Socket, &mut bool -> null
- * REQUIRES: buf a message read from the socket, node_names not empty, nodes not empty, liveness the lifetime value of a new node > 0, 
- * router a working, valid Socket, has_nodelist is true if you have the list of nodes in the cluster, else false
- * ENSURES: parses a NODELIST message into a node_list and creates/adds the nodes received to the cluster 
+ * REQUIRES: buf a message read from the socket, node_names not empty, nodes not empty, liveness the lifetime value of a new node > 0,
+ * router a working, valid Socket, has_nodelist is false
+ * ENSURES: parses a NODELIST message into a node_list and creates/adds the nodes received to the cluster
  */
 fn parse_nodelist_message(
     buf: &[u8],
@@ -759,27 +861,76 @@ fn parse_nodelist_message(
     router: &mut Socket,
     has_nodelist: &mut bool,
 ) {
-    let list = match message::read_message(buf) {
-        Some(t) => t,
-        None => vec![],
-    };
-    for l in list {
-        make_and_add_node(node_names, &l, nodes, liveness, false, router)
+    if !*has_nodelist {
+        let list = match message::read_message(buf) {
+            Some(t) => t,
+            None => vec![],
+        };
+        for l in list {
+            make_and_add_node(node_names, &l, nodes, liveness, false, router)
+        }
+        *has_nodelist = true;
     }
-    *has_nodelist = true;
 }
 
+/**
+ * NOTE: We can't test if the socket actually binds to a new connection if a new heartbeat node
+ * is heart from, but we can test if it properly changes the Node liveness, and adds to the
+ * map and name list.  
+ */
 #[test]
-fn test_heartbeat_heard()
-{
-    let nodes : HashMap<String, Node> = HashMap::new();
-    nodes.insert("172.77.123.11:5555", Node::node_new("172.77.123.11:555", 5, 3, false));
-    nodes.insert("123.45.67.89:9999", Node::node_new("123.45.67.89:9999", 5, 2, false));
-    nodes.insert();
+fn test_heartbeat_heard() {
+    let mut nodes: HashMap<String, Node> = HashMap::new();
+    nodes.insert(
+        "172.77.123.11:5555".to_string(),
+        Node::node_new("172.77.123.11:555", 5, 3, false),
+    );
+    nodes.insert(
+        "123.45.67.89:9999".to_string(),
+        Node::node_new("123.45.67.89:9999", 5, 2, false),
+    );
+    nodes.insert(
+        "192.168.1.1:5250".to_string(),
+        Node::node_new("192.168.1.1:5250", 5, 1, false),
+    );
+
+    let msg = vec!["192.168.1.1:5250".to_string()];
+    let mut router = Socket::new(Protocol::Bus).unwrap();
+
+    assert_eq!(3, nodes["172.77.123.11:5555"].liveness);
+    assert_eq!(2, nodes["123.45.67.89:9999"].liveness);
+    assert_eq!(1, nodes["192.168.1.1:5250"].liveness);
+
+    let mut names = vec![
+        "172.77.123.11:5555".parse::<SocketAddr>().unwrap(),
+        "123.45.67.89:9999".parse::<SocketAddr>().unwrap(),
+        "192.168.1.1:5250".parse::<SocketAddr>().unwrap(),
+    ];
+    let mut testnames = vec![
+        "172.77.123.11:5555".parse::<SocketAddr>().unwrap(),
+        "123.45.67.89:9999".parse::<SocketAddr>().unwrap(),
+        "192.168.1.1:5250".parse::<SocketAddr>().unwrap(),
+    ];
+    heartbeat_heard(&msg, &mut names, &mut nodes, 5, &mut router);
+
+    assert_eq!(3, nodes["172.77.123.11:5555"].liveness);
+    assert_eq!(2, nodes["123.45.67.89:9999"].liveness);
+    assert_eq!(5, nodes["192.168.1.1:5250"].liveness);
+    assert_eq!(testnames, names);
+
+    let msg = vec!["123.23.45.45:5656".to_string()];
+    testnames.push("123.23.45.45:5656".parse::<SocketAddr>().unwrap());
+    heartbeat_heard(&msg, &mut names, &mut nodes, 5, &mut router);
+    assert_eq!(3, nodes["172.77.123.11:5555"].liveness);
+    assert_eq!(2, nodes["123.45.67.89:9999"].liveness);
+    assert_eq!(5, nodes["192.168.1.1:5250"].liveness);
+    assert_eq!(5, nodes["123.23.45.45:5656"].liveness);
+    assert_eq!(testnames, names);
 }
+
 /**
  * heartbeat_heard: &[String] * &mut Vec<SocketAddr> * &mut HashMap<String, Node> * i64 * &mut Socket &str -> null
- * REQUIRES: msg_body not empty, node_names not empty, nodes not empty, liveness the lifetime of a node, router a 
+ * REQUIRES: msg_body not empty, node_names not empty, nodes not empty, liveness the lifetime of a node, router a
  * valid Socket, full_address a properly formatted ip:port string
  * ENSURES: updates the hashmap to either: add a new node if the heartbeart came from a new node,
  * or updates the liveness of the node the heartbeat came from
@@ -790,17 +941,22 @@ fn heartbeat_heard(
     nodes: &mut HashMap<String, Node>,
     liveness: i64,
     router: &mut Socket,
-    full_address: &str,
 ) {
     if !msg_body.is_empty() {
         let sent_address = &msg_body[0];
         make_and_add_node(node_names, &sent_address, nodes, liveness, true, router);
         nodes
-            .entry(full_address.to_string())
+            .entry(sent_address.to_string())
             .and_modify(|n| n.heartbeat());
     }
 }
 
+/**
+ * read_and_heartbeat: &PollRequest * &mut Socket * &mut Vec<SocketAddr> * &mut HashMap<String, Node> * i64 * &mut bool * &mut u64 * &str * u64 -> null
+ * REQUIRES: request not empty, router is connected, node_names not empty, nodes not empty, liveness > 0, heartbeat_at > 0, full_address
+ * is properly formatted as ip:port, interval > 0,
+ * ENSURES: reads incoming messages and sends out heartbeats every interval milliseconds.  
+ */
 fn read_and_heartbeat(
     request: &PollRequest,
     router: &mut Socket,
@@ -826,14 +982,7 @@ fn read_and_heartbeat(
             }
             MessageType::GETLIST => send_nodelist(node_names, &msg_body, nodes, liveness, router),
             MessageType::HEARTBEAT => {
-                heartbeat_heard(
-                    &msg_body,
-                    node_names,
-                    nodes,
-                    liveness,
-                    router,
-                    &full_address,
-                );
+                heartbeat_heard(&msg_body, node_names, nodes, liveness, router);
                 if !*has_nodelist {
                     match send_getlist(request, heartbeat_at, full_address, router, interval) {
                         Ok(t) => t,

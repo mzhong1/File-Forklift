@@ -55,3 +55,11 @@ pub fn get_ip() -> ForkliftResult<Option<SocketAddr>> {
     };
     Err(ForkliftError::IpLocalError)
 }
+
+#[test]
+fn test_get_ip()
+{
+    let socketa = get_ip().unwrap().unwrap();
+    let ip = socketa.ip();
+    assert_eq!(ip.to_string(), "10.26.24.92".to_string());
+}

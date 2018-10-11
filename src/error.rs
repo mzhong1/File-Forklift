@@ -15,14 +15,12 @@ pub enum ForkliftError {
     AddrParseError(AddrParseError),
     IpLocalError,
     InvalidConfigError,
-    IpConfigError,
 }
 
 impl fmt::Display for ForkliftError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self {
             ForkliftError::InvalidConfigError => f.write_str("InvalidConfigError"),
-            ForkliftError::IpConfigError => f.write_str("IpConfigError"),
             ForkliftError::IpLocalError => f.write_str("IpLocalError"),
             _ => f.write_str(self.description()),
         }
@@ -38,7 +36,6 @@ impl err for ForkliftError {
             ForkliftError::AddrParseError(ref e) => e.description(),
             ForkliftError::IpLocalError => "Could not determine local ip address",
             ForkliftError::InvalidConfigError => "Invalid config formatting",
-            ForkliftError::IpConfigError => "Unable to get ip address from ifconfig",
         }
     }
 
@@ -50,7 +47,6 @@ impl err for ForkliftError {
             ForkliftError::AddrParseError(ref e) => e.cause(),
             ForkliftError::IpLocalError => None,
             ForkliftError::InvalidConfigError => None,
-            ForkliftError::IpConfigError => None,
         }
     }
 }

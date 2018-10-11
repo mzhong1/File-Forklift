@@ -24,18 +24,25 @@ impl Node {
             has_heartbeat: h,
         }
     }
-    pub fn heartbeat(&mut self){
+
+    pub fn heartbeat(&mut self) {
         self.liveness = self.lifetime;
         self.has_heartbeat = true;
     }
-    pub fn tickdown(&mut self){
+    pub fn tickdown(&mut self) {
         self.liveness -= 1;
         self.has_heartbeat = false;
     }
 }
-
-impl PartialEq for Node{
-    fn eq(&self, other: &Node) -> bool{
+#[test]
+fn test_heartbeat() {
+    let mut n = Node::node_new("123.45.67.89:1111", 5, 3, false);
+    n.heartbeat();
+    assert_eq!(n.liveness, 5);
+    assert_eq!(n.has_heartbeat, true);
+}
+impl PartialEq for Node {
+    fn eq(&self, other: &Node) -> bool {
         self.name == other.name && self.lifetime == other.lifetime
     }
 }

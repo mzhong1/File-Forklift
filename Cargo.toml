@@ -9,7 +9,6 @@ authors = ["mzhong215"]
 api = { path = "api" }
 flatbuffers = "~0.5"
 rendezvous_hash = "0.2.1"
-zmq = "0.8.2"
 log = "0.4.5"
 simplelog = "0.5.2"
 clap = "2.32.0"
