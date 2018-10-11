@@ -16,13 +16,15 @@ use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::net::SocketAddr;
 use std::path::Path;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{SystemTime, Duration};
 
 mod error;
 mod local_ip;
 mod message;
 mod node;
+mod pulse;
 
+use pulse::Pulse;
 use error::{ForkliftError, ForkliftResult};
 use node::Node;
 use simplelog::{CombinedLogger, Config, SharedLogger, TermLogger, WriteLogger};
@@ -37,25 +39,7 @@ use simplelog::{CombinedLogger, Config, SharedLogger, TermLogger, WriteLogger};
     if liveness reaches zero, consider the node dead.
 */
 
-#[test]
-fn test_current_time_in_millis() {
-    let start = current_time_in_millis(SystemTime::now()).unwrap();
-    std::thread::sleep(std::time::Duration::from_millis(1000));
-    let end = current_time_in_millis(SystemTime::now()).unwrap();
-    println!("Time difference {}", end - start);
-    assert!(end - start < 1002 && end - start >= 1000);
-}
 
-/*
-    current_time_in_millis: SystemTime -> u64
-    REQUIRES: start is the current System Time
-    ENSURES: returns the time since the UNIX_EPOCH in milliseconds
-*/
-fn current_time_in_millis(start: SystemTime) -> ForkliftResult<u64> {
-    let since_epoch = start.duration_since(UNIX_EPOCH)?;
-    debug!("Time since epoch {:?}", since_epoch);
-    Ok(since_epoch.as_secs() * 1000 + u64::from(since_epoch.subsec_nanos()) / 1_000_000)
-}
 
 #[test]
 fn test_init_node_names() {
@@ -591,35 +575,37 @@ fn connect_node(full_address: &str, router: &mut Socket) -> ForkliftResult<()> {
 
 /**
  * send_getlist: &PollRequest * &mut u64 * &str * router &mut Socket * u64 -> ForkliftResult<()>
- * REQUIRES: &PollRequest a value file descriptor, heart_beat_at > 0, name a properly formatter
- * full_addr in the form of ip:port, router a valid socket, interval >= 10
+ * REQUIRES: &PollRequest a value file descriptor, pulse a valid Pulse, name a properly formatter
+ * full_addr in the form of ip:port, router a valid socket
  * ENSURES: returns a ForkliftResult -> () if sending was successful,
  * None if at any point the program breaks.
  */
 fn send_getlist(
     request: &PollRequest,
-    heartbeat_at: &mut u64,
+    pulse: &mut Pulse,
     name: &str,
     router: &mut Socket,
-    interval: u64,
 ) -> ForkliftResult<()> {
-    let c_time = current_time_in_millis(SystemTime::now())?;
-    if request.get_fds()[0].can_write() && c_time > *heartbeat_at {
+    let beat = match pulse.beat()
+    {
+        Ok(t) => t,
+        Err(e) => {debug!("Time went backwards! Abort! {}", e); error!("Time went backwards! Abort! {}", e);false},
+    };
+    if request.get_fds()[0].can_write() && beat {
         let message = message::create_message(MessageType::GETLIST, &[name.to_string()]);
         match router.nb_write(message.as_slice()) {
             Ok(..) => debug!("Getlist sent"),
             Err(Error::TryAgain) => debug!("Receiver not ready, message can't be sent"),
             Err(..) => debug!("Failed to write to socket!"),
         };
-        *heartbeat_at = c_time + interval;
     }
     Ok(())
 }
 
 /**
  * send_nodelist: &PollRequest * &mut u64 * &str * router &mut Socket * u64 -> ForkliftResult<()>
- * REQUIRES: &PollRequest a value file descriptor, heart_beat_at > 0, name a properly formatter
- * full_addr in the form of ip:port, router a valid socket, interval >= 10
+ * REQUIRES: &PollRequest a value file descriptor, pulse a valid Pulse, name a properly formatter
+ * full_addr in the form of ip:port, router a valid socket
  * ENSURES: returns a ForkliftResult -> () if sending was successful,
  * None if at any point the program breaks.
  */
@@ -699,31 +685,30 @@ fn tickdown_nodes(nodes: &mut HashMap<String, Node>, node_names: &[String]) {
 
 /**
  * send_and_tickdown: &PollRequest * &mut u64 * &str * &mut Socket * u64 * &mut HashMap<String, Node> * &mut Vec<SocketAddr> -> ForkliftRequest<()>
- * REQUIRES: request is a valid vector of PollRequests, heartbeat_at is the most recent time in milliseconds to send a heartbeat,
- * name is your full address in the form ip:port, router a valid Socket, interval the time between heartbeats in milliseconds > 0,
+ * REQUIRES: request is a valid vector of PollRequests, pulse a valid Pulse object
+ * name is your full address in the form ip:port, router a valid Socket, 
  * nodes not empty, node_names not empty
  * ENSURES: returns Ok(()) if successfully sending a heartbeat to connected nodes and ticking down,
  * otherwise return Err
  */
 fn send_and_tickdown(
     request: &PollRequest,
-    heartbeat_at: &mut u64,
+    pulse: &mut Pulse,
     name: &str,
     router: &mut Socket,
-    interval: u64,
     nodes: &mut HashMap<String, Node>,
     node_names: &mut Vec<SocketAddr>,
 ) -> ForkliftResult<()> {
     if request.get_fds()[0].can_write() {
-        let c_time = current_time_in_millis(SystemTime::now())?;
-        debug!("current time in millis {}", c_time);
-        debug!("heartbeat_at {}", heartbeat_at);
+       let beat = match pulse.beat(){
+        Ok(t) => t,
+        Err(e) => {debug!("Time went backwards! Abort! {}", e); error!("Time went backwards! Abort! {}", e);false},
+        };
 
-        if c_time > *heartbeat_at {
+        if beat {
             send_heartbeat(name, router);
             let address_names = to_string_vector(node_names);
             tickdown_nodes(nodes, &address_names);
-            *heartbeat_at = c_time + interval
         }
     }
     Ok(())
@@ -953,8 +938,8 @@ fn heartbeat_heard(
 
 /**
  * read_and_heartbeat: &PollRequest * &mut Socket * &mut Vec<SocketAddr> * &mut HashMap<String, Node> * i64 * &mut bool * &mut u64 * &str * u64 -> null
- * REQUIRES: request not empty, router is connected, node_names not empty, nodes not empty, liveness > 0, heartbeat_at > 0, full_address
- * is properly formatted as ip:port, interval > 0,
+ * REQUIRES: request not empty, router is connected, node_names not empty, nodes not empty, liveness > 0, pulse a valid Pulse object,
+ * full_address is properly formatted as ip:port, 
  * ENSURES: reads incoming messages and sends out heartbeats every interval milliseconds.  
  */
 fn read_and_heartbeat(
@@ -964,9 +949,8 @@ fn read_and_heartbeat(
     nodes: &mut HashMap<String, Node>,
     liveness: i64,
     has_nodelist: &mut bool,
-    heartbeat_at: &mut u64,
+    pulse: &mut Pulse,
     full_address: &str,
-    interval: u64,
 ) {
     if request.get_fds()[0].can_read() {
         //check message type
@@ -984,7 +968,7 @@ fn read_and_heartbeat(
             MessageType::HEARTBEAT => {
                 heartbeat_heard(&msg_body, node_names, nodes, liveness, router);
                 if !*has_nodelist {
-                    match send_getlist(request, heartbeat_at, full_address, router, interval) {
+                    match send_getlist(request, pulse, full_address, router) {
                         Ok(t) => t,
                         Err(e) => error!("Time ran backwards!  Abort! {}", e),
                     };
@@ -998,7 +982,7 @@ fn read_and_heartbeat(
     This is done by sending a GETLIST signal to the node that we are connected to
     every second until we get a NODELIST back. 
     Poll THIS machine's node
-        Pollin using timeout of heartBeat interval
+        Pollin using timeout of pulse interval
         if !has_nodelist:
             send GETLIST to connected nodes
         if can_read(): 
@@ -1031,9 +1015,8 @@ fn read_and_heartbeat(
 */
 fn heartbeat_loop(
     router: &mut Socket,
-    interval: u64,
     has_nodelist: &mut bool,
-    heartbeat_at: &mut u64,
+    pulse : &mut Pulse,
     full_address: &str,
     node_names: &mut Vec<SocketAddr>,
     nodes: &mut HashMap<String, Node>,
@@ -1043,13 +1026,13 @@ fn heartbeat_loop(
         std::thread::sleep(std::time::Duration::from_millis(10));
         let mut items: Vec<PollFd> = vec![router.new_pollfd(PollInOut::InOut)];
         let mut request = PollRequest::new(&mut items);
-        Socket::poll(&mut request, interval as isize)?;
+        Socket::poll(&mut request, pulse.interval as isize)?;
 
         debug!("Poll can read: {:?}", request.get_fds()[0].can_read());
         println!("Poll can read: {:?}", request.get_fds()[0].can_read());
 
         if !*has_nodelist {
-            match send_getlist(&request, heartbeat_at, full_address, router, interval) {
+            match send_getlist(&request, pulse, full_address, router) {
                 Ok(t) => t,
                 Err(e) => error!("Time ran backwards!  Abort! {}", e),
             };
@@ -1062,17 +1045,15 @@ fn heartbeat_loop(
             nodes,
             liveness,
             has_nodelist,
-            heartbeat_at,
+            pulse,
             full_address,
-            interval,
         );
 
         match send_and_tickdown(
             &request,
-            heartbeat_at,
+            pulse,
             full_address,
             router,
-            interval,
             nodes,
             node_names,
         ) {
@@ -1098,8 +1079,11 @@ fn heartbeat(matches: &clap::ArgMatches) -> ForkliftResult<()> {
     //Variables that don't depend on command line args
     let liveness = 5; //The amount of times we can tick down before assuming death
     let interval = 1000; //set heartbeat interval in msecs
-    let start = SystemTime::now();
-    let mut heartbeat_at = current_time_in_millis(start)? + interval;
+    let mut pulse = match Pulse::new(interval)
+    {
+        Ok(p) => p,
+        Err(e) => {debug!("System Time went backwards! Abort! {}", e); error!("System Time went backwards! Abort! {}", e); panic!("System Time went backwards! Abort! {}", e)}
+    };
     let mut has_nodelist = false;
     let joined = match matches.values_of("join") {
         None => vec![],
@@ -1201,9 +1185,8 @@ fn heartbeat(matches: &clap::ArgMatches) -> ForkliftResult<()> {
     debug!("Connection to nodes initiated");
     heartbeat_loop(
         &mut router,
-        interval,
         &mut has_nodelist,
-        &mut heartbeat_at,
+        &mut pulse,
         &full_address,
         &mut node_names,
         &mut nodes,

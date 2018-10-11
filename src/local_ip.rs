@@ -1,7 +1,7 @@
 extern crate log;
 extern crate nix;
 
-use self::nix::ifaddrs::{getifaddrs};
+use self::nix::ifaddrs::getifaddrs;
 use error::{ForkliftError, ForkliftResult};
 
 use std::fs::File;
@@ -17,12 +17,9 @@ fn get_default_v4_iface() -> Result<Option<String>> {
     for line in reader.lines() {
         let l = line?;
         let parts: Vec<&str> = l.split_whitespace().collect();
-        if parts.len() > 2 {
-            // ipv4
-            if parts[1] == "00000000" {
-                //Default gateway found
-                return Ok(Some(parts[0].to_string()));
-            }
+        if parts.len() > 2 && parts[1] == "00000000" {
+            //Default gateway found
+            return Ok(Some(parts[0].to_string()));
         }
     }
 
@@ -42,11 +39,11 @@ pub fn get_ip() -> ForkliftResult<Option<SocketAddr>> {
             match ifaddr.address {
                 Some(address) => {
                     println!("interface {} address {}", ifaddr.interface_name, address);
-                    match address.to_str().parse::<SocketAddrV4>(){
-                        Ok(ip) => {println!("IP: {}", ip); return Ok(Some(SocketAddr::from(ip)))},
-                        Err(_) => (),
-                    };
-                },
+                    if let Ok(ip) = address.to_str().parse::<SocketAddrV4>() {
+                        println!("IP: {}", ip);
+                        return Ok(Some(SocketAddr::from(ip)));
+                    }
+                }
                 None => {
                     println!(
                         "interface {} with unsupported address family",
@@ -54,11 +51,10 @@ pub fn get_ip() -> ForkliftResult<Option<SocketAddr>> {
                     );
                 }
             }
-         }
-                
+        }
     }
     Err(ForkliftError::IpLocalError)
-}     
+}
 
 pub fn get_ipv6() -> ForkliftResult<Option<SocketAddr>> {
     let default_iface = get_default_v4_iface()?;
@@ -71,11 +67,11 @@ pub fn get_ipv6() -> ForkliftResult<Option<SocketAddr>> {
             match ifaddr.address {
                 Some(address) => {
                     println!("interface {} address {}", ifaddr.interface_name, address);
-                    match address.to_str().parse::<SocketAddrV6>(){
-                        Ok(ip) => {println!("IP: {}", ip); return Ok(Some(SocketAddr::from(ip)))},
-                        Err(_) => (),
-                    };
-                },
+                    if let Ok(ip) = address.to_str().parse::<SocketAddrV6>() {
+                        println!("IP: {}", ip);
+                        return Ok(Some(SocketAddr::from(ip)));
+                    }
+                }
                 None => {
                     println!(
                         "interface {} with unsupported address family",
@@ -83,11 +79,10 @@ pub fn get_ipv6() -> ForkliftResult<Option<SocketAddr>> {
                     );
                 }
             }
-         }
-                
+        }
     }
     Err(ForkliftError::IpLocalError)
-} 
+}
 
 #[test]
 fn test_get_ip() {
