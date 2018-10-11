@@ -1,18 +1,16 @@
-extern crate hex;
 extern crate log;
+extern crate nix;
+
+use self::nix::ifaddrs::{getifaddrs};
+use error::{ForkliftError, ForkliftResult};
 
 use std::fs::File;
-use std::io::{BufRead, BufReader, Error, ErrorKind, Result};
-use std::net::{Ipv4Addr, SocketAddrV4, TcpStream, SocketAddr};
+use std::io::{BufRead, BufReader, Result};
+use std::net::{SocketAddr, SocketAddrV4, SocketAddrV6};
 use std::path::Path;
-use error::{ForkliftError, ForkliftResult};
-#[test]
-fn test() {
-    println!("{:?}", get_ip());
-}
 
 // get the default gateway ip address
-fn get_default_v4_route() -> Result<Option<Ipv4Addr>> {
+fn get_default_v4_iface() -> Result<Option<String>> {
     let p = Path::new("/proc/net/route");
     let proc_route = File::open(p)?;
     let reader = BufReader::new(proc_route);
@@ -22,16 +20,8 @@ fn get_default_v4_route() -> Result<Option<Ipv4Addr>> {
         if parts.len() > 2 {
             // ipv4
             if parts[1] == "00000000" {
-                let h = hex::decode(&parts[2].as_bytes())
-                    .map_err(|e| Error::new(ErrorKind::Other, e))?;
-                if h.len() != 4 {
-                    return Err(Error::new(
-                        ErrorKind::Other,
-                        format!("Error converting {} from hex", parts[2]),
-                    ));
-                }
                 //Default gateway found
-                return Ok(Some(Ipv4Addr::new(h[3], h[2], h[1], h[0])));
+                return Ok(Some(parts[0].to_string()));
             }
         }
     }
@@ -42,24 +32,75 @@ fn get_default_v4_route() -> Result<Option<Ipv4Addr>> {
 /// Get the local ip address of the default route
 /// on this machine
 pub fn get_ip() -> ForkliftResult<Option<SocketAddr>> {
-    let default_addr = get_default_v4_route()?;
-    match default_addr {
-        Some(addr) => {
-            let s_addr = SocketAddrV4::new(addr, 53);
-            let s = TcpStream::connect(s_addr)?;
-            let p = s.local_addr()?;
-            println!("p {:?}", p);
-            return Ok(Some(p));
-        },
-        None => {}
-    };
+    let default_iface = get_default_v4_iface()?;
+    let default_iface = default_iface.unwrap();
+    println!("Default interface: {:?}", default_iface);
+    let addrs = getifaddrs().unwrap();
+    for ifaddr in addrs {
+        if ifaddr.interface_name == default_iface {
+            // We found it
+            match ifaddr.address {
+                Some(address) => {
+                    println!("interface {} address {}", ifaddr.interface_name, address);
+                    match address.to_str().parse::<SocketAddrV4>(){
+                        Ok(ip) => {println!("IP: {}", ip); return Ok(Some(SocketAddr::from(ip)))},
+                        Err(_) => (),
+                    };
+                },
+                None => {
+                    println!(
+                        "interface {} with unsupported address family",
+                        ifaddr.interface_name
+                    );
+                }
+            }
+         }
+                
+    }
     Err(ForkliftError::IpLocalError)
+}     
+
+pub fn get_ipv6() -> ForkliftResult<Option<SocketAddr>> {
+    let default_iface = get_default_v4_iface()?;
+    let default_iface = default_iface.unwrap();
+    println!("Default interface: {:?}", default_iface);
+    let addrs = getifaddrs().unwrap();
+    for ifaddr in addrs {
+        if ifaddr.interface_name == default_iface {
+            // We found it
+            match ifaddr.address {
+                Some(address) => {
+                    println!("interface {} address {}", ifaddr.interface_name, address);
+                    match address.to_str().parse::<SocketAddrV6>(){
+                        Ok(ip) => {println!("IP: {}", ip); return Ok(Some(SocketAddr::from(ip)))},
+                        Err(_) => (),
+                    };
+                },
+                None => {
+                    println!(
+                        "interface {} with unsupported address family",
+                        ifaddr.interface_name
+                    );
+                }
+            }
+         }
+                
+    }
+    Err(ForkliftError::IpLocalError)
+} 
+
+#[test]
+fn test_get_ip() {
+    let socketa = get_ip().unwrap().unwrap();
+    println!("socket: {:?}", socketa);
+
+    //assert_eq!(ip.to_string(), "10.26.24.92".to_string());
 }
 
 #[test]
-fn test_get_ip()
-{
-    let socketa = get_ip().unwrap().unwrap();
-    let ip = socketa.ip();
-    assert_eq!(ip.to_string(), "10.26.24.92".to_string());
+fn test_get_ipv6() {
+    let socketa = get_ipv6().unwrap().unwrap();
+    println!("socket: {:?}", socketa);
+
+    //assert_eq!(ip.to_string(), "10.26.24.92".to_string());
 }
