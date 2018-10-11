@@ -3,11 +3,17 @@ name = "filesystem_forklift"
 version = "0.1.0"
 authors = ["mzhong215"]
 
+[workspace]
+
 [dependencies]
+api = { path = "api" }
+flatbuffers = "~0.5"
 rendezvous_hash = "0.2.1"
-zmq = "0.8.2"
-local-ip = "0.1"
 log = "0.4.5"
 simplelog = "0.5.2"
 clap = "2.32.0"
 dirs = "1.0.4"
+nanomsg = "0.7.2"
+hex = "0.3.2"
+nix = "0.11.0"
+

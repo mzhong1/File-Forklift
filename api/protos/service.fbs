@@ -1,0 +1,17 @@
+enum ResultType: bool {
+    Ok = 0,
+    Err
+}
+
+enum MessageType: uint8 {
+    GETLIST = 0,
+    NODELIST,
+    HEARTBEAT,
+}
+
+table Message{
+    mtype: MessageType;
+    members: [string];
+}
+
+root_type Message;
