@@ -28,10 +28,12 @@ impl Node {
     pub fn heartbeat(&mut self) {
         self.liveness = self.lifetime;
         self.has_heartbeat = true;
+        debug!("Heartbeat Node {}, liveness {}", self.name, self.liveness);
     }
     pub fn tickdown(&mut self) {
         self.liveness -= 1;
         self.has_heartbeat = false;
+        debug!("Tickdown Node {}, liveness {}", self.name, self.liveness);
     }
 }
 #[test]

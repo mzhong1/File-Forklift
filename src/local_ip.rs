@@ -39,13 +39,19 @@ pub fn get_ip() -> ForkliftResult<Option<SocketAddr>> {
             match ifaddr.address {
                 Some(address) => {
                     println!("interface {} address {}", ifaddr.interface_name, address);
+                    debug!("interface {} address {}", ifaddr.interface_name, address);
                     if let Ok(ip) = address.to_str().parse::<SocketAddrV4>() {
                         println!("IP: {}", ip);
+                        debug!("IP: {}", ip);
                         return Ok(Some(SocketAddr::from(ip)));
                     }
                 }
                 None => {
                     println!(
+                        "interface {} with unsupported address family",
+                        ifaddr.interface_name
+                    );
+                    debug!(
                         "interface {} with unsupported address family",
                         ifaddr.interface_name
                     );

@@ -513,6 +513,8 @@ fn make_and_add_node(
     router: &mut Socket,
 ) {
     if !nodenames_contain_full_address(&sent_address.to_string(), node_names) {
+        debug!("Node names before adding {:?}", node_names);
+        debug!("Node Map before adding {:?}", nodes);
         match add_node_to_list(&sent_address, node_names) {
             Ok(t) => t,
             Err(e) => {
@@ -534,6 +536,8 @@ fn make_and_add_node(
                 error!("Unable to connect to the node at ip address: {}", e)
             }
         };
+        debug!("Node names after adding {:?}", node_names);
+        debug!("Node Map after adding {:?}", nodes);
     }
 }
 
@@ -573,6 +577,7 @@ fn init_router(full_address: &str) -> ForkliftResult<Socket> {
  * error otherwise
  */
 fn connect_node(full_address: &str, router: &mut Socket) -> ForkliftResult<()> {
+    debug!("Try to connect router to {}", full_address);
     let tcp: String = format!("tcp://{}", full_address);
     router.connect(&tcp)?;
     Ok(())
@@ -602,7 +607,7 @@ fn send_getlist(
     if request.get_fds()[0].can_write() && beat {
         let message = message::create_message(MessageType::GETLIST, &[name.to_string()]);
         match router.nb_write(message.as_slice()) {
-            Ok(..) => debug!("Getlist sent"),
+            Ok(..) => debug!("Getlist sent to {}", name),
             Err(Error::TryAgain) => debug!("Receiver not ready, message can't be sent"),
             Err(..) => debug!("Failed to write to socket!"),
         };
@@ -649,7 +654,7 @@ fn send_heartbeat(name: &str, router: &mut Socket) {
     let msg = message::create_message(MessageType::HEARTBEAT, &buffer);
     match router.nb_write(msg.as_slice()) {
         Ok(_) => {
-            debug!("Heartbeat sent!");
+            debug!("Heartbeat sent! ");
             println!("Heartbeat sent !");
         }
         Err(Error::TryAgain) => {
@@ -691,6 +696,7 @@ fn tickdown_nodes(nodes: &mut HashMap<String, Node>, node_names: &[String]) {
                 n.tickdown();
             } else {
                 n.has_heartbeat = false;
+                debug!("Heartbeat was heard this pulse time {:?}", n);
             }
         });
     }
@@ -864,6 +870,7 @@ fn parse_nodelist_message(
     has_nodelist: &mut bool,
 ) {
     if !*has_nodelist {
+        debug!("Parse the nodelist!");
         let list = match message::read_message(buf) {
             Some(t) => t,
             None => {
@@ -987,10 +994,15 @@ fn read_and_heartbeat(
         };
         match msgtype {
             MessageType::NODELIST => {
+                debug!("Can read message of type NODELIST");
                 parse_nodelist_message(&msg, node_names, nodes, liveness, router, has_nodelist)
             }
-            MessageType::GETLIST => send_nodelist(node_names, &msg_body, nodes, liveness, router),
+            MessageType::GETLIST => {
+                debug!("Can read message of type GETLIST");
+                send_nodelist(node_names, &msg_body, nodes, liveness, router)
+            }
             MessageType::HEARTBEAT => {
+                debug!("Can read message of type HEARTBEAT");
                 heartbeat_heard(&msg_body, node_names, nodes, liveness, router);
                 if !*has_nodelist {
                     match send_getlist(request, pulse, full_address, router) {
@@ -1056,9 +1068,6 @@ fn heartbeat_loop(
         let mut items: Vec<PollFd> = vec![router.new_pollfd(PollInOut::InOut)];
         let mut request = PollRequest::new(&mut items);
         Socket::poll(&mut request, pulse.interval as isize)?;
-
-        debug!("Poll can read: {:?}", request.get_fds()[0].can_read());
-        println!("Poll can read: {:?}", request.get_fds()[0].can_read());
 
         if !*has_nodelist {
             match send_getlist(&request, pulse, full_address, router) {
@@ -1141,7 +1150,7 @@ fn heartbeat(matches: &clap::ArgMatches) -> ForkliftResult<()> {
     };
 
     let ip_address = match local_ip::get_ip() {
-        Ok(Some(ip)) => ip,
+        Ok(Some(ip)) => ip.ip(),
         Ok(None) => {
             debug!("No local ip! ABORT!");
             panic!("No local ip! ABORT!")
@@ -1209,13 +1218,13 @@ fn heartbeat(matches: &clap::ArgMatches) -> ForkliftResult<()> {
     let full_address = match get_full_address_from_ip(&ip_address.to_string(), &mut node_names) {
         Some(a) => a,
         None => {
-            debug!("ip address not in the node_list");
+            debug!("ip address {} not in the node_list ", ip_address);
             "".to_string()
         } //Handle this later
     };
 
     let mut nodes = make_nodemap(&node_names, &full_address, liveness); //create mutable hashmap of nodes
-    debug!("current ip address, port: {}", &full_address);
+    debug!("current ip address, port: {:?}", full_address);
 
     let mut router = init_router(&full_address)?; //Make the node
 
@@ -1314,7 +1323,7 @@ fn main() -> ForkliftResult<()> {
     };
     let logfile = Path::new(matches.value_of("logfile").unwrap());
     init_logs(&logfile, level)?;
-
+    println!("Logs made");
     heartbeat(&matches)?;
     Ok(())
 }
