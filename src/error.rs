@@ -1,9 +1,9 @@
+use nanomsg::Error as NanomsgError;
 use std::error::Error as err;
 use std::fmt;
 use std::io::Error as IoError;
 use std::net::AddrParseError;
 use std::time::SystemTimeError;
-use nanomsg::Error as NanomsgError;
 
 pub type ForkliftResult<T> = Result<T, ForkliftError>;
 
@@ -69,8 +69,8 @@ impl From<NanomsgError> for ForkliftError {
     }
 }
 
-impl From<AddrParseError> for ForkliftError{
-    fn from(err: AddrParseError) -> ForkliftError{
+impl From<AddrParseError> for ForkliftError {
+    fn from(err: AddrParseError) -> ForkliftError {
         ForkliftError::AddrParseError(err)
     }
 }

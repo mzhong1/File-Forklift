@@ -1,29 +1,33 @@
-use std::time::{SystemTime, UNIX_EPOCH, Duration};
+use error::ForkliftResult;
 use std::thread;
-use error::{ForkliftResult};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 #[derive(Debug)]
-pub struct Pulse{
+pub struct Pulse {
     heartbeat_at: u64,
     pub interval: u64,
 }
 
 impl Pulse {
-    pub fn new(i: u64) -> ForkliftResult<Self>{
+    pub fn new(i: u64) -> ForkliftResult<Self> {
         let c_time = current_time_in_millis(SystemTime::now())?;
-        Ok(Pulse{
+        Ok(Pulse {
             heartbeat_at: c_time + i,
-            interval : i,
+            interval: i,
         })
     }
 
-    pub fn beat(&mut self) -> ForkliftResult<bool>{
+    pub fn beat(&mut self) -> ForkliftResult<bool> {
         let c_time = current_time_in_millis(SystemTime::now())?;
-        debug!("current time in millis {}", c_time);
-        debug!("heartbeat_at {}", self.heartbeat_at);
-        if c_time > self.heartbeat_at
-        {
+        trace!("current time in millis {}", c_time);
+        trace!("heartbeat_at {}", self.heartbeat_at);
+        if c_time > self.heartbeat_at {
+            debug!("Time to heartbeat! heartbeat_at is {}", self.heartbeat_at);
             self.heartbeat_at = c_time + self.interval;
+            debug!(
+                "current time in millis {}, heartbeat_at is now {}",
+                c_time, self.heartbeat_at
+            );
             return Ok(true);
         }
         Ok(false)
@@ -46,6 +50,6 @@ fn test_current_time_in_millis() {
 */
 fn current_time_in_millis(start: SystemTime) -> ForkliftResult<u64> {
     let since_epoch = start.duration_since(UNIX_EPOCH)?;
-    debug!("Time since epoch {:?}", since_epoch);
+    trace!("Time since epoch {:?}", since_epoch);
     Ok(since_epoch.as_secs() * 1000 + u64::from(since_epoch.subsec_nanos()) / 1_000_000)
 }

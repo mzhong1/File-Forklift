@@ -12,11 +12,14 @@ use std::path::Path;
 // get the default gateway ip address
 fn get_default_v4_iface() -> Result<Option<String>> {
     let p = Path::new("/proc/net/route");
+    trace!("Try to open path /proc/net/route");
     let proc_route = File::open(p)?;
     let reader = BufReader::new(proc_route);
+    trace!("Read in lines from /proc/net/route");
     for line in reader.lines() {
         let l = line?;
         let parts: Vec<&str> = l.split_whitespace().collect();
+        trace!("parts {:?}", parts);
         if parts.len() > 2 && parts[1] == "00000000" {
             //Default gateway found
             return Ok(Some(parts[0].to_string()));
@@ -31,27 +34,22 @@ fn get_default_v4_iface() -> Result<Option<String>> {
 pub fn get_ip() -> ForkliftResult<Option<SocketAddr>> {
     let default_iface = get_default_v4_iface()?;
     let default_iface = default_iface.unwrap();
-    println!("Default interface: {:?}", default_iface);
+    trace!("Default interface: {:?}", default_iface);
     let addrs = getifaddrs().unwrap();
+    trace!("Loop through addresses in the default interface");
     for ifaddr in addrs {
         if ifaddr.interface_name == default_iface {
             // We found it
             match ifaddr.address {
                 Some(address) => {
-                    println!("interface {} address {}", ifaddr.interface_name, address);
-                    debug!("interface {} address {}", ifaddr.interface_name, address);
+                    trace!("interface {} address {}", ifaddr.interface_name, address);
                     if let Ok(ip) = address.to_str().parse::<SocketAddrV4>() {
-                        println!("IP: {}", ip);
                         debug!("IP: {}", ip);
                         return Ok(Some(SocketAddr::from(ip)));
                     }
                 }
                 None => {
-                    println!(
-                        "interface {} with unsupported address family",
-                        ifaddr.interface_name
-                    );
-                    debug!(
+                    error!(
                         "interface {} with unsupported address family",
                         ifaddr.interface_name
                     );
@@ -62,25 +60,26 @@ pub fn get_ip() -> ForkliftResult<Option<SocketAddr>> {
     Err(ForkliftError::IpLocalError)
 }
 
-//get the ip in ipv6.  
+//get the ip in ipv6.
 pub fn get_ipv6() -> ForkliftResult<Option<SocketAddr>> {
     let default_iface = get_default_v4_iface()?;
     let default_iface = default_iface.unwrap();
-    println!("Default interface: {:?}", default_iface);
+    debug!("Default interface: {:?}", default_iface);
     let addrs = getifaddrs().unwrap();
+    trace!("Loop through addresses in the default interface");
     for ifaddr in addrs {
         if ifaddr.interface_name == default_iface {
             // We found it
             match ifaddr.address {
                 Some(address) => {
-                    println!("interface {} address {}", ifaddr.interface_name, address);
+                    trace!("interface {} address {}", ifaddr.interface_name, address);
                     if let Ok(ip) = address.to_str().parse::<SocketAddrV6>() {
-                        println!("IP: {}", ip);
+                        debug!("IP: {}", ip);
                         return Ok(Some(SocketAddr::from(ip)));
                     }
                 }
                 None => {
-                    println!(
+                    error!(
                         "interface {} with unsupported address family",
                         ifaddr.interface_name
                     );
@@ -95,14 +94,10 @@ pub fn get_ipv6() -> ForkliftResult<Option<SocketAddr>> {
 fn test_get_ip() {
     let socketa = get_ip().unwrap().unwrap();
     println!("socket: {:?}", socketa);
-
-    //assert_eq!(ip.to_string(), "10.26.24.92".to_string());
 }
 
 #[test]
 fn test_get_ipv6() {
     let socketa = get_ipv6().unwrap().unwrap();
     println!("socket: {:?}", socketa);
-
-    //assert_eq!(ip.to_string(), "10.26.24.92".to_string());
 }
