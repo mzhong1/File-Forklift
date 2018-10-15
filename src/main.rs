@@ -38,6 +38,48 @@ use simplelog::{CombinedLogger, Config, SharedLogger, TermLogger, WriteLogger};
 */
 
 #[test]
+fn test_read_file_lines() {
+    let testvec = match read_file_lines("notnodes.txt") {
+        Ok(n) => n,
+        Err(e) => {
+            error!("This branch should not have been accessed {}", e);
+            Vec::new()
+        }
+    };
+
+    let vec = vec![
+        "172.17.0.2:5671",
+        "172.17.0.3:1234",
+        "172.17.0.4",
+        "172.17.0.1:7654",
+    ];
+    assert_eq!(testvec, vec);
+}
+
+/**
+ * read_file_lines: &str -> ForkliftResult<Vec<String>>
+ * REQUIRES: filename is a valid, non-empty file name
+ * ENSURES: returns OK(Vec<String>) where the Vec contains the lines of the input file,
+ * otherwise returns a ForkliftError if an I/O error occurs, or if the input file is not
+ * valid UTF-8 character format. It fails outright if a line cannot be parsed into a String.
+ */
+fn read_file_lines(filename: &str) -> ForkliftResult<Vec<String>> {
+    debug!("Attempting to open input file {}", filename);
+    let reader = BufReader::new(File::open(filename)?);
+    let node_list: Vec<String> = reader
+        .lines()
+        .map(|l| {
+            trace!("Parsing line '{:?}' from file to string", l);
+            l.expect("Could not parse line from file to stirng")
+        }).collect::<Vec<String>>();
+    debug!(
+        "Parsing file to address string list ok! String list: {:?}",
+        node_list
+    );
+    Ok(node_list)
+}
+
+#[test]
 fn test_init_node_names() {
     let wrong_filename = "nodes";
     match init_node_names(wrong_filename) //this should "break"
@@ -90,24 +132,23 @@ fn test_init_node_names() {
     init_node_names: &str -> ForkliftResult<Vec<String>>
     REQUIRES: filename is a properly formatted File (each line has the ip:port of a node)
     ENSURES: returns the SocketAddr vector of ip:port addresses wrapped in ForkliftResult,
-    or returns an Error (IO error)
+    or returns a ForkliftError (AddrParseError, since IO errors and file parsing errors
+    will fail the program).
 */
 fn init_node_names(filename: &str) -> ForkliftResult<Vec<SocketAddr>> {
-    debug!(
-        "Attempting to open input file {} to intialize list of sockets",
-        filename
-    );
-    let reader = BufReader::new(File::open(filename)?);
-    let node_list: Vec<String> = reader
-        .lines()
-        .map(|l| {
-            trace!("Parsing line '{:?}' to Socket Address", l);
-            l.expect("Could not parse line to Socket Address")
-        }).collect::<Vec<String>>();
-    debug!(
-        "Parsing file to address string list ok! String list: {:?}",
-        node_list
-    );
+    let node_list = match read_file_lines(filename) {
+        Ok(n) => n,
+        Err(e) => {
+            error!(
+                "Cannot read the node file. Error {}. Aborting program...",
+                e
+            );
+            panic!(
+                "Cannot read the input node file, error {}. Aborting program...",
+                e
+            )
+        }
+    };
     trace!("Attempting to collect parsed Socket Addresses to vector");
     let mut node_names: Vec<SocketAddr> = Vec::new();
     for n in node_list {
@@ -149,7 +190,7 @@ fn test_get_full_address_from_ip() {
     assert_eq!(None, get_full_address_from_ip("172.17.5.4", &mut names))
 }
 /*
-    get_full_address: &str * &mut Vec<SocketAddr> -> String
+    get_full_address_from_ip: &str * &mut Vec<SocketAddr> -> String
     REQUIRES: ip a valid ip address, node_names is not empty
     ENSURES: returns SOME(ip:port) associated with the input ip address
     that is stored in node_names, otherwise return NONE
@@ -531,30 +572,30 @@ fn add_node_to_map(
     }
 }
 /**
- * make_and_add_node: &mut Vec<SocketAddr> * &str * &mut HashMap<String,Node> * i64 * vool * &mut Socket -> null
+ * add_node_to_cluster: &mut Vec<SocketAddr> * &str * &mut HashMap<String,Node> * i64 * vool * &mut Socket -> null
  * REQUIRES: makes a new node given that the node names does not previously exist, and adds itself to both the
  * node_Names and the nodes, and connects the node to given.  Otherwise it does nothing.
  */
-fn make_and_add_node(
+fn add_node_to_cluster(
     node_names: &mut Vec<SocketAddr>,
-    sent_address: &str,
+    full_address: &str,
     nodes: &mut HashMap<String, Node>,
-    liveness: i64,
+    lifetime: i64,
     heartbeat: bool,
     router: &mut Socket,
 ) {
-    if !nodenames_contain_full_address(&sent_address.to_string(), node_names) {
+    if !nodenames_contain_full_address(&full_address.to_string(), node_names) {
         debug!("Node names before adding {:?}", node_names);
         debug!("Node Map before adding {:?}", nodes);
-        match add_node_to_list(&sent_address, node_names) {
+        match add_node_to_list(&full_address, node_names) {
             Ok(t) => t,
             Err(e) => error!(
                 "Unable to parse socket address, should be in the form ip:port:{:?}",
                 e
             ),
         };
-        add_node_to_map(nodes, &sent_address, liveness, heartbeat);
-        match connect_node(&sent_address, router) {
+        add_node_to_map(nodes, &full_address, lifetime, heartbeat);
+        match connect_node(&full_address, router) {
             Ok(t) => t,
             Err(e) => error!("Unable to connect to the node at ip address: {}", e),
         };
@@ -609,8 +650,7 @@ fn connect_node(full_address: &str, router: &mut Socket) -> ForkliftResult<()> {
  * send_getlist: &PollRequest * &mut u64 * &str * router &mut Socket * u64 -> ForkliftResult<()>
  * REQUIRES: &PollRequest a value file descriptor, pulse a valid Pulse, name a properly formatter
  * full_addr in the form of ip:port, router a valid socket
- * ENSURES: returns a ForkliftResult -> () if sending was successful,
- * None if at any point the program breaks.
+ * ENSURES: sends a GETLIST to the address of name 
  */
 fn send_getlist(
     request: &PollRequest,
@@ -638,17 +678,18 @@ fn send_getlist(
 }
 
 /**
- * send_nodelist: &PollRequest * &mut u64 * &str * router &mut Socket * u64 -> ForkliftResult<()>
- * REQUIRES: &PollRequest a value file descriptor, pulse a valid Pulse, name a properly formatter
- * full_addr in the form of ip:port, router a valid socket
- * ENSURES: returns a ForkliftResult -> () if sending was successful,
- * None if at any point the program breaks.
+ * send_nodelist: &mut Vec<SocketAddr> * &[String] * &mut Hashmap<String, Node> * i64 * &mut Socket -> null
+ * REQUIRES: node_names non-empty, msg_body ) should be non-empty, with the first and only item in the message body 
+ * from the GETLIST recieved message body (containing the address of the node asking for the NODELIST).  nodes non-empty,
+ * lifetime > 0, router a valid connected socket
+ * ENSURES: The router sends a NODELIST to the sender of a GETLIST request, otherwise it does nothing if the message body
+ * of the GETLIST request is empty.  
  */
 fn send_nodelist(
     node_names: &mut Vec<SocketAddr>,
     msg_body: &[String],
     nodes: &mut HashMap<String, Node>,
-    liveness: i64,
+    lifetime: i64,
     router: &mut Socket,
 ) {
     let address_names = to_string_vector(node_names);
@@ -656,7 +697,7 @@ fn send_nodelist(
 
     if !msg_body.is_empty() {
         let sent_address = &msg_body[0];
-        make_and_add_node(node_names, &sent_address, nodes, liveness, true, router);
+        add_node_to_cluster(node_names, &sent_address, nodes, lifetime, true, router);
         debug!("Send a NODELIST to {}", sent_address);
         match router.nb_write(buffer.as_slice()) {
             Ok(_) => debug!("NODELIST sent to {}!", sent_address),
@@ -738,7 +779,7 @@ fn send_and_tickdown(
 ) -> ForkliftResult<()> {
     if request.get_fds()[0].can_write() {
         let beat = match pulse.beat() {
-            Ok(t) => t,
+            Ok(can_beat) => can_beat,
             Err(e) => {
                 error!("Time went backwards! Abort! {}", e);
                 panic!("Time went backwards! Abort! {}", e)
@@ -896,7 +937,7 @@ fn parse_nodelist_message(
             }
         };
         for l in &list {
-            make_and_add_node(node_names, &l, nodes, liveness, false, router)
+            add_node_to_cluster(node_names, &l, nodes, liveness, false, router)
         }
         if !list.is_empty() {
             *has_nodelist = true;
@@ -975,7 +1016,7 @@ fn heartbeat_heard(
 ) {
     if !msg_body.is_empty() {
         let sent_address = &msg_body[0];
-        make_and_add_node(node_names, &sent_address, nodes, liveness, true, router);
+        add_node_to_cluster(node_names, &sent_address, nodes, liveness, true, router);
         nodes
             .entry(sent_address.to_string())
             .and_modify(|n| n.heartbeat());
@@ -1211,13 +1252,18 @@ fn heartbeat(matches: &clap::ArgMatches) -> ForkliftResult<()> {
     } else
     //We did not flag -j (since -j requires exactly two arguments)
     {
-        node_names = init_node_names(filename).map_err(|e| {
+        node_names = match init_node_names(filename).map_err(|e| {
             error!(
                 "Node List Initialization Error: Unable to parse socket address when adding name; should be in the form ip:port:{:?}",
                 e
             );
             ForkliftError::InvalidConfigError
-        })?;
+        }){
+            Ok(n) => n,
+            Err(e) => {error!("Unable to parse the input file into a vector of SocketAddr's.  Line format should be ip:port.  Error was {}", e);
+            panic!("Unable to parse the input file into a vector of SocketAddr's.  Line format should be ip:port.  Error was {}", e)
+            },
+        };
     }
     let full_address = match get_full_address_from_ip(&ip_address.to_string(), &mut node_names) {
         Some(a) => a,
