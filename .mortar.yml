@@ -1,0 +1,16 @@
+language: "shell"
+sudo: "true"
+os: centos7x
+branches:
+  only:
+    - master
+jenkins:
+  collect:
+    artifacts:
+      - "rustup.sh"
+script:
+  - curl https://sh.rustup.rs -o rustup.sh
+  - chmod +x rustup.sh
+  - ./rustup.sh -y
+  - sudo yum install -y gcc openssl-devel.x86_64
+  - ~/.cargo/bin/cargo test
