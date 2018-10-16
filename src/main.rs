@@ -39,7 +39,7 @@ use simplelog::{CombinedLogger, Config, SharedLogger, TermLogger, WriteLogger};
 
 #[test]
 fn test_read_file_lines() {
-    let testvec = match read_file_lines("notnodes.txt") {
+    let testvec = match read_file_lines(Path::new("notnodes.txt")) {
         Ok(n) => n,
         Err(e) => {
             error!("This branch should not have been accessed {}", e);
@@ -63,14 +63,14 @@ fn test_read_file_lines() {
  * otherwise returns a ForkliftError if an I/O error occurs, or if the input file is not
  * valid UTF-8 character format. It fails outright if a line cannot be parsed into a String.
  */
-fn read_file_lines(filename: &str) -> ForkliftResult<Vec<String>> {
-    debug!("Attempting to open input file {}", filename);
+fn read_file_lines(filename: &Path) -> ForkliftResult<Vec<String>> {
+    debug!("Attempting to open input file {:?}", filename);
     let reader = BufReader::new(File::open(filename)?);
     let node_list: Vec<String> = reader
         .lines()
         .map(|l| {
             trace!("Parsing line '{:?}' from file to string", l);
-            l.expect("Could not parse line from file to stirng")
+            l.expect("Could not parse line from file to string")
         }).collect::<Vec<String>>();
     debug!(
         "Parsing file to address string list ok! String list: {:?}",
@@ -81,7 +81,7 @@ fn read_file_lines(filename: &str) -> ForkliftResult<Vec<String>> {
 
 #[test]
 fn test_init_node_names() {
-    let wrong_filename = "nodes";
+    let wrong_filename = Path::new("nodes");
     match init_node_names(wrong_filename) //this should "break"
     {
         Ok(t) => {println!("{:?}", t); panic!("Should not go to this branch")},
@@ -107,7 +107,7 @@ fn test_init_node_names() {
         ),
     ];
 
-    match init_node_names("nodes.txt") {
+    match init_node_names(Path::new("nodes.txt")) {
         Ok(t) => {
             println!("Expected: {:?}", expected_result);
             println!("Vec: {:?}", t);
@@ -120,7 +120,7 @@ fn test_init_node_names() {
     }
 
     //this should "break"
-    match init_node_names("notnodes.txt") {
+    match init_node_names(Path::new("notnodes.txt")) {
         Ok(t) => {
             println!("{:?}", t);
             panic!("Should not go to this branch")
@@ -135,7 +135,7 @@ fn test_init_node_names() {
     or returns a ForkliftError (AddrParseError, since IO errors and file parsing errors
     will fail the program).
 */
-fn init_node_names(filename: &str) -> ForkliftResult<Vec<SocketAddr>> {
+fn init_node_names(filename: &Path) -> ForkliftResult<Vec<SocketAddr>> {
     let node_list = match read_file_lines(filename) {
         Ok(n) => n,
         Err(e) => {
@@ -1196,10 +1196,10 @@ fn heartbeat(matches: &clap::ArgMatches) -> ForkliftResult<()> {
     };
 
     let filename = match matches.value_of("namelist") {
-        None => "",
+        None => Path::new(""),
         Some(t) => {
             has_nodelist = true;
-            t
+            Path::new(t)
         }
     };
     trace!("Attempting to get local ip address");
@@ -1267,7 +1267,7 @@ fn heartbeat(matches: &clap::ArgMatches) -> ForkliftResult<()> {
             },
         };
     }
-    let full_address = match get_full_address_from_ip(&ip_address.to_string(), &mut node_names) {
+    let full_address = match get_full_address_from_ip(&ip_address.to_string(), &node_names) {
         Some(a) => a,
         None => {
             error!("ip address {} not in the node_list ", ip_address);
