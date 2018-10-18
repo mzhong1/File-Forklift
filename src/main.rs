@@ -136,19 +136,7 @@ fn test_init_node_names() {
     will fail the program).
 */
 fn init_node_names(filename: &Path) -> ForkliftResult<Vec<SocketAddr>> {
-    let node_list = match read_file_lines(filename) {
-        Ok(n) => n,
-        Err(e) => {
-            error!(
-                "Cannot read the node file. Error {}. Aborting program...",
-                e
-            );
-            panic!(
-                "Cannot read the input node file, error {}. Aborting program...",
-                e
-            )
-        }
-    };
+    let node_list = read_file_lines(filename)?;
     trace!("Attempting to collect parsed Socket Addresses to vector");
     let mut node_names: Vec<SocketAddr> = Vec::new();
     for n in node_list {
@@ -668,10 +656,10 @@ fn send_getlist(
         }
     };
     if request.get_fds()[0].can_write() && beat {
-        debug!("Send a GETLIST to {}", full_address);
+        debug!("Send a GETLIST from {}", full_address);
         let message = message::create_message(MessageType::GETLIST, &[full_address.to_string()]);
         match router.nb_write(message.as_slice()) {
-            Ok(..) => debug!("GETLIST sent to {}", full_address),
+            Ok(..) => debug!("GETLIST sent from {}", full_address),
             Err(Error::TryAgain) => error!("Receiver not ready, message can't be sent"),
             Err(..) => error!("Failed to write to socket!"),
         };
