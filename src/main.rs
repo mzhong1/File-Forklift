@@ -672,7 +672,7 @@ fn send_getlist(
  * REQUIRES: node_names non-empty, msg_body ) should be non-empty, with the first and only item in the message body
  * from the GETLIST recieved message body (containing the address of the node asking for the NODELIST).  nodes non-empty,
  * lifetime > 0, router a valid connected socket
- * ENSURES: The router sends a NODELIST to the sender of a GETLIST request (although it goes to all connected nodes), 
+ * ENSURES: The router sends a NODELIST to the sender of a GETLIST request (although it goes to all connected nodes),
  * otherwise it does nothing if the message body of the GETLIST request is empty.  
  */
 fn send_nodelist(
@@ -1212,16 +1212,19 @@ fn heartbeat(matches: &clap::ArgMatches) -> ForkliftResult<()> {
                 Some(addr) => addr,
                 None => {
                     error!("Join flag did not work, second argument does not exist");
-                    ""
+                    panic!("Unable to parse the cluster socket into a SocketAddr.  format should be ip:port.  Error was {}", ForkliftError::InvalidConfigError)
                 }
             },
             &mut node_names,
         ) {
             Ok(t) => t,
-            Err(e) => error!(
+            Err(e) => {
+                error!(
                 "Node Join Error: Unable to parse socket address when adding name to list; should be in the form ip:port:{:?}",
                 e
-            ),
+            );
+                panic!("Unable to parse the socket address when adding name to list; should be in the form ip:port.  Error was {}", e)
+            }
         };
         match add_node_to_list(
             match joined.get(0) {
@@ -1234,10 +1237,13 @@ fn heartbeat(matches: &clap::ArgMatches) -> ForkliftResult<()> {
             &mut node_names,
         ) {
             Ok(t) => t,
-            Err(e) => error!(
+            Err(e) => {
+                error!(
                 "Node Join Error: Unable to parse socket address when adding name; should be in the form ip:port:{:?}",
                 e
-            ),
+            );
+                panic!("Unable to parse the input sockets into a vector of SocketAddr's.  input format should be ip:port.  Error was {}", e)
+            }
         };
     } else
     //We did not flag -j (since -j requires exactly two arguments)
@@ -1291,9 +1297,8 @@ fn init_logs(f: &Path, level: simplelog::LevelFilter) -> ForkliftResult<()> {
     if let Some(term_logger) = TermLogger::new(level, Config::default()) {
         loggers.push(term_logger);
     }
-    loggers.push(WriteLogger::new(level, Config::default(), File::open(f)?));
+    loggers.push(WriteLogger::new(level, Config::default(), File::create(f)?));
     let _ = CombinedLogger::init(loggers);
-    info!("Starting up");
 
     Ok(())
 }
@@ -1307,14 +1312,6 @@ fn init_logs(f: &Path, level: simplelog::LevelFilter) -> ForkliftResult<()> {
     addresses of all nodes in the graph
 */
 fn main() -> ForkliftResult<()> {
-    let path = match dirs::home_dir() {
-        Some(path) => path.join("debuglog"),
-        None => {
-            error!("Home directory not found");
-            panic!("Home Directory not found!")
-        }
-    };
-    let path_str = path.to_string_lossy();
     let matches = App::new("Heartbeat Logs")
         .author(crate_authors!())
         .about("NFS and Samba filesystem migration program")
@@ -1327,11 +1324,12 @@ fn main() -> ForkliftResult<()> {
                 .short("n")
                 .takes_value(true)
                 .value_name("NODESOCKETFILE")
+                .number_of_values(1)
                 .required(true)
                 .conflicts_with("join"),
         ).arg(
             Arg::with_name("logfile")
-                .default_value(&path_str)
+                .default_value("debuglog")
                 .help("Logs debug statements to file debuglog")
                 .long("logfile")
                 .short("l")
@@ -1358,8 +1356,17 @@ fn main() -> ForkliftResult<()> {
         1 => simplelog::LevelFilter::Debug,
         _ => simplelog::LevelFilter::Trace,
     };
-    let logfile = Path::new(matches.value_of("logfile").unwrap());
-    init_logs(&logfile, level)?;
+    let logfile = matches.value_of("logfile").unwrap();
+    let path = match dirs::home_dir() {
+        Some(path) => path.join(logfile),
+        None => {
+            error!("Home directory not found");
+            panic!("Home Directory not found!")
+        }
+    };
+    //let path_str = path.to_string_lossy();
+    init_logs(&path, level)?;
+    debug!("Log path: {:?}", logfile);
     debug!("Logs made");
     heartbeat(&matches)?;
     Ok(())
