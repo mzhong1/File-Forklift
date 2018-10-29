@@ -16,4 +16,4 @@ dirs = "1.0.4"
 nanomsg = "0.7.2"
 hex = "0.3.2"
 nix = "0.11.0"
-
+libnfs = { git = 'https://github.com/cholcombe973/libnfs', branch = 'file_types' }
