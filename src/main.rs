@@ -1110,8 +1110,16 @@ fn heartbeat_loop(
     nodes: &mut HashMap<String, Node>,
     router: &mut Socket,
 ) -> ForkliftResult<()> {
+    let mut countdown = 0;
     loop {
+        if countdown > 5000 && !*has_nodelist {
+            panic!(
+                "{} has not responded for a lifetime, please join to a different ip:port",
+                full_address
+            );
+        }
         std::thread::sleep(std::time::Duration::from_millis(10));
+        countdown += 10;
         let mut items: Vec<PollFd> = vec![router.new_pollfd(PollInOut::InOut)];
         let mut request = PollRequest::new(&mut items);
         trace!("Attempting to poll the socket");
@@ -1367,7 +1375,7 @@ fn main() -> ForkliftResult<()> {
     //let path_str = path.to_string_lossy();
     init_logs(&path, level)?;
     debug!("Log path: {:?}", logfile);
-    debug!("Logs made");
+    info!("Logs made");
     heartbeat(&matches)?;
     Ok(())
 }
