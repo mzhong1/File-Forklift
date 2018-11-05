@@ -1,6 +1,5 @@
 use error::ForkliftResult;
-use std::thread;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Debug)]
 pub struct Pulse {
@@ -37,7 +36,7 @@ impl Pulse {
 #[test]
 fn test_current_time_in_millis() {
     let start = current_time_in_millis(SystemTime::now()).unwrap();
-    thread::sleep(Duration::from_millis(1000));
+    ::std::thread::sleep(::std::time::Duration::from_millis(1000));
     let end = current_time_in_millis(SystemTime::now()).unwrap();
     println!("Time difference {}", end - start);
     assert!(end - start < 1002 && end - start >= 1000);

@@ -21,6 +21,7 @@ mod local_ip;
 mod message;
 mod node;
 mod pulse;
+mod utils;
 
 use error::{ForkliftError, ForkliftResult};
 use node::Node;
@@ -1177,27 +1178,6 @@ fn heartbeat(matches: &clap::ArgMatches) -> ForkliftResult<()> {
     //Variables that don't depend on command line args
     let lifetime = 5; //The amount of times we can tick down before assuming death
     let interval = 1000; //set heartbeat interval in msecs
-    trace!("Initializing pulse");
-    let mut pulse = match Pulse::new(interval) {
-        Ok(p) => p,
-        Err(e) => {
-            error!("System Time went backwards! Abort! {}", e);
-            panic!("System Time went backwards! Abort! {}", e)
-        }
-    };
-    let mut has_nodelist = false;
-    let joined = match matches.values_of("join") {
-        None => vec![],
-        Some(t) => t.collect(),
-    };
-
-    let filename = match matches.value_of("namelist") {
-        None => Path::new(""),
-        Some(t) => {
-            has_nodelist = true;
-            Path::new(t)
-        }
-    };
     trace!("Attempting to get local ip address");
     let ip_address = match local_ip::get_ip() {
         Ok(Some(ip)) => ip.ip(),
@@ -1210,49 +1190,49 @@ fn heartbeat(matches: &clap::ArgMatches) -> ForkliftResult<()> {
             panic!("Error: {}", e)
         }
     };
+
+    trace!("Initializing pulse");
+    let mut pulse = match Pulse::new(interval) {
+        Ok(p) => p,
+        Err(e) => {
+            error!("System Time went backwards! Abort! {}", e);
+            panic!("System Time went backwards! Abort! {}", e)
+        }
+    };
+    let mut has_nodelist = false;
+
+    let joined = match matches.values_of("join") {
+        None => vec![],
+        Some(t) => t.collect(),
+    };
+
+    let filename = match matches.value_of("namelist") {
+        None => Path::new(""),
+        Some(t) => {
+            has_nodelist = true;
+            Path::new(t)
+        }
+    };
+
     let mut node_names: Vec<SocketAddr> = vec![];
     if joined.len() == 2 {
-        //NOTE: when join is called, only TWO arguments are passed in,
-        //so Joined.get(1) and joined.get(0) should both work.  If it doesn't,
-        //Well, there's a HUGE problem 'cause then matches didn't work or something.
-        match add_node_to_list(
-            match joined.get(1) {
-                Some(addr) => addr,
-                None => {
-                    error!("Join flag did not work, second argument does not exist");
-                    panic!("Unable to parse the cluster socket into a SocketAddr.  format should be ip:port.  Error was {}", ForkliftError::InvalidConfigError)
+        /*
+            NOTE: when join is called, only TWO arguments are passed in,
+            so Joined.get(1) and joined.get(0) should both work.  If it doesn't,
+            Well, there's a HUGE problem 'cause then matches didn't work or something.
+        */
+        for name in joined {
+            match add_node_to_list(name.clone(), &mut node_names) {
+                Ok(t) => t,
+                Err(e) => {
+                    error!(
+                    "Node Join Error: Unable to parse socket address when adding name to list; should be in the form ip:port:{:?}",
+                    e
+                    );
+                    panic!("Unable to parse the socket address when adding name to list; should be in the form ip:port.  Error was {}", e)
                 }
-            },
-            &mut node_names,
-        ) {
-            Ok(t) => t,
-            Err(e) => {
-                error!(
-                "Node Join Error: Unable to parse socket address when adding name to list; should be in the form ip:port:{:?}",
-                e
-            );
-                panic!("Unable to parse the socket address when adding name to list; should be in the form ip:port.  Error was {}", e)
             }
-        };
-        match add_node_to_list(
-            match joined.get(0) {
-                Some(addr) => addr,
-                None => {
-                    error!("Join flag did not work, second argument does not exist");
-                    ""
-                }
-            },
-            &mut node_names,
-        ) {
-            Ok(t) => t,
-            Err(e) => {
-                error!(
-                "Node Join Error: Unable to parse socket address when adding name; should be in the form ip:port:{:?}",
-                e
-            );
-                panic!("Unable to parse the input sockets into a vector of SocketAddr's.  input format should be ip:port.  Error was {}", e)
-            }
-        };
+        }
     } else
     //We did not flag -j (since -j requires exactly two arguments)
     {
