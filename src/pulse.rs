@@ -16,6 +16,12 @@ impl Pulse {
         }
     }
 
+    /**
+     * beat: &self -> bool
+     * REQUIRES: Self not null
+     * ENSURES: returns true if it is time to heartbeat (if the time elapsed it more than the timeout duration)
+     * otherwise, it returns false
+     */
     pub fn beat(&mut self) -> bool {
         let elapsed = self.c_time.elapsed();
         trace!(

@@ -31,25 +31,35 @@ impl Node {
         }
     }
 
-    pub fn heartbeat(&mut self) {
+    /**
+     * ENSURES: returns true if the node was "dead" before the heartbeat was called
+     */
+    pub fn heartbeat(&mut self) -> bool {
         trace!(
             "Before Heartbeat: Node {}, liveness {}",
             self.name,
             self.liveness
         );
+        let prevl = self.liveness;
         self.liveness = self.lifetime;
         self.has_heartbeat = true;
         debug!("Heartbeat Node {}, liveness {}", self.name, self.liveness);
+        prevl <= 0
     }
-    pub fn tickdown(&mut self) {
+    /**
+     * ENSURES: return true if the node "died" in this call to tickdown
+     */
+    pub fn tickdown(&mut self) -> bool {
         trace!(
             "Before Tickdown: Node {}, liveness {}",
             self.name,
             self.liveness
         );
+        let prevl = self.liveness;
         self.liveness -= 1;
         self.has_heartbeat = false;
         debug!("Tickdown Node {}, liveness {}", self.name, self.liveness);
+        prevl == 1
     }
 }
 
@@ -70,15 +80,21 @@ impl NodeList {
     }
 
     /*
-        init_node_names: &str -> ForkliftResult<Vec<String>>
-        REQUIRES: filename is the name of a properly formatted File (each line has the ip:port of a node)
-        ENSURES: returns the SocketAddr vector of ip:port addresses wrapped in ForkliftResult,
+        init_node_names: &Path -> ForkliftResult<NodeList>
+        REQUIRES: filename is the path to a properly formatted File (each line has the ip:port of a node)
+        ENSURES: returns a NodeList of ip:port addresses wrapped in ForkliftResult,
         or returns a ForkliftError (AddrParseError, since IO errors and file parsing errors
         will fail the program).
     */
     pub fn init_node_names(filename: &Path) -> ForkliftResult<Self> {
         let mut names = NodeList::new();
-        let node_list = utils::read_file_lines(filename)?;
+        let node_list = match utils::read_file_lines(filename) {
+            Ok(f) => f,
+            Err(e) => {
+                error!("Filename does not Exist, ERROR: {:?}", e);
+                panic!("Filename does not Exist, ERROR: {:?}", e)
+            }
+        };
         trace!("Attempting to collect parsed Socket Addresses to vector");
         let mut node_names: Vec<SocketAddr> = Vec::new();
         for n in node_list {
@@ -93,6 +109,11 @@ impl NodeList {
         Ok(names)
     }
 
+    /**
+     * init_names: Vec<String> * PathBuf -> NodeList
+     * REQUIRES: either joined has two socketaddr strings, or filename is a path to a properly formatted input file
+     * ENSURES: returns a NodeList with a populated Vector of SocketAddrs.
+     */
     pub fn init_names(joined: Vec<String>, filename: PathBuf) -> Self {
         let mut names = NodeList::new();
         if joined.len() == 2 {
@@ -122,7 +143,7 @@ impl NodeList {
         names
     }
     /*
-        get_full_address_from_ip: &str * &mut Vec<SocketAddr> -> String
+        get_full_address: &self * &str -> String
         REQUIRES: ip a valid ip address, node_names is not empty
         ENSURES: returns SOME(ip:port) associated with the input ip address
         that is stored in node_names, otherwise return NONE
@@ -144,7 +165,7 @@ impl NodeList {
     }
 
     /*
-        nodenames_contain_full_address &str * &mut Vec<SocketAddr> -> bool
+        contains_full_address &str -> bool
         REQUIRES: full_address is the full ip:port address, node_names not empty,
         ENSURES: returns true if the full address is in one of the SocketAddr elements of node_names,
         false otherwise
@@ -154,8 +175,8 @@ impl NodeList {
     }
 
     /**
-     * add_node_to_list: &str * &mut Vec<SocketAddr> -> null
-     * REQUIRES: full_address is the full ip:port address, node_names not empty,
+     * add_node_to_list: &self * &str -> null
+     * REQUIRES: full_address is the full ip:port address, node_names in self not empty,
      * ENSURES: adds a new node with the address of full_address to node_names, if not already
      * in the vector, else it does nothing
      */
@@ -213,7 +234,7 @@ impl NodeMap {
     }
 
     /*
-        make_nodemap: &Vec<SocketAddr> * &str * i64 -> Hashmap<String, Node>
+        init_nodemap: &Vec<SocketAddr> * &str * i64 -> Hashmap<String, Node>
         REQUIRES: node_names not empty, full_address a proper ip:port address, lifetime the
         number of ticks before a node is "dead"
         ENSURES: returns a HashMap of Nodes referenced by the ip:port address
@@ -233,6 +254,11 @@ impl NodeMap {
         nodes
     }
 
+    /**
+     * add_node_to_map: &slf * &str * i64 * bool
+     * REQUIRES: full_address properly formatted, lifetime > 0, self is properly initialized
+     * ENSURES: new full_address node is added to the NodeMap
+     */
     pub fn add_node_to_map(&mut self, full_address: &str, lifetime: i64, heartbeat: bool) {
         trace!("Adding node to map");
         if !self.node_map.contains_key(full_address) {
