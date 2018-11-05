@@ -10,6 +10,7 @@ extern crate simplelog;
 use clap::{App, Arg};
 use nanomsg::{Protocol, Socket};
 use std::fs::File;
+use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 
 mod cluster;
@@ -27,7 +28,10 @@ use simplelog::{CombinedLogger, Config, SharedLogger, TermLogger, WriteLogger};
 
 #[test]
 fn test_init_router() {
-    match init_router("10.26.24.92:5555") {
+    match init_router(&SocketAddr::new(
+        ::std::net::IpAddr::V4(::std::net::Ipv4Addr::new(10, 26, 24, 92)),
+        5555,
+    )) {
         Ok(s) => s,
         Err(e) => {
             error!("Error {}", e);
@@ -44,11 +48,11 @@ fn test_init_router() {
  * a new socket with the Bus Protocol bound to the input port.  Otherwise,
  * return the associated ForkliftError
  */
-fn init_router(full_address: &str) -> ForkliftResult<Socket> {
+fn init_router(full_address: &SocketAddr) -> ForkliftResult<Socket> {
     debug!("Initializing router");
     let mut router = Socket::new(Protocol::Bus)?;
     debug!("New router bus created");
-    let current_port = utils::get_port_from_fulladdr(full_address)?;
+    let current_port = full_address.port();
     router.bind(&format!("tcp://*:{}", current_port))?;
     debug!("router bound to port {}", current_port);
     Ok(router)
@@ -100,9 +104,9 @@ fn heartbeat(matches: &clap::ArgMatches) -> ForkliftResult<()> {
     };
     debug!("current full address: {:?}", full_address);
 
-    let router = init_router(&full_address.to_string())?; //Make the node
+    let router = init_router(&full_address)?; //Make the node
     std::thread::sleep(std::time::Duration::from_millis(10));
-    let mut cluster = Cluster::new(router);
+    let mut cluster = Cluster::new(router, &full_address);
     cluster.nodes = NodeMap::init_nodemap(&full_address, cluster.lifetime, &node_names.node_list); //create mutable hashmap of nodes
                                                                                                    //sleep for a bit to let other nodes start up
     cluster.names = node_names;

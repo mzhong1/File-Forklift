@@ -1,4 +1,4 @@
-use error::ForkliftResult;
+use error::{ForkliftError, ForkliftResult};
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
@@ -81,7 +81,7 @@ impl NodeList {
 
     /*
         init_node_names: &Path -> ForkliftResult<NodeList>
-        REQUIRES: filename is the path to a properly formatted File (each line has the ip:port of a node)
+        REQUIRES: filename is the path to a properly formatted nonempty File (each line has the ip:port of a node)
         ENSURES: returns a NodeList of ip:port addresses wrapped in ForkliftResult,
         or returns a ForkliftError (AddrParseError, since IO errors and file parsing errors
         will fail the program).
@@ -95,6 +95,10 @@ impl NodeList {
                 panic!("Filename does not Exist, ERROR: {:?}", e)
             }
         };
+        if node_list.is_empty() {
+            error!("File is empty! {:?}", ForkliftError::InvalidConfigError);
+            panic!("File is empty!");
+        }
         trace!("Attempting to collect parsed Socket Addresses to vector");
         let mut node_names: Vec<SocketAddr> = Vec::new();
         for n in node_list {
@@ -145,7 +149,7 @@ impl NodeList {
     }
     /*
         get_full_address: &self * &str -> String
-        REQUIRES: ip a valid ip address, node_names is not empty
+        REQUIRES: ip a valid ip address
         ENSURES: returns SOME(ip:port) associated with the input ip address
         that is stored in node_names, otherwise return NONE
     */
@@ -167,7 +171,7 @@ impl NodeList {
 
     /*
         contains_full_address &str -> bool
-        REQUIRES: full_address is the full ip:port address, node_names not empty,
+        REQUIRES: NONE,
         ENSURES: returns true if the full address is in one of the SocketAddr elements of node_names,
         false otherwise
     */
@@ -177,7 +181,7 @@ impl NodeList {
 
     /**
      * add_node_to_list: &self * &str -> null
-     * REQUIRES: full_address is the full ip:port address, node_names in self not empty,
+     * REQUIRES: NONE
      * ENSURES: adds a new node with the address of full_address to node_names, if not already
      * in the vector, else it does nothing
      */
@@ -197,7 +201,7 @@ impl NodeList {
 
     /*
         to_string_vector: &mut Vec<SocketAddr> -> Vec<String>
-        REQUIRES: node_names not empty
+        REQUIRES: NONE
         ENSURES: returns a vector of the fulladdresses stored in node_names,
         otherwise return an empty vector
     */
@@ -229,8 +233,7 @@ impl NodeMap {
 
     /*
         init_nodemap: &Vec<SocketAddr> * &str * i64 -> Hashmap<String, Node>
-        REQUIRES: node_names not empty, full_address a proper ip:port address, lifetime the
-        number of ticks before a node is "dead"
+        REQUIRES: lifetime > 0
         ENSURES: returns a HashMap of Nodes referenced by the ip:port address
     */
     pub fn init_nodemap(
@@ -238,6 +241,10 @@ impl NodeMap {
         lifetime: u64,
         node_names: &[SocketAddr],
     ) -> Self {
+        if lifetime == 0 {
+            error!("Lifetime is trivial (less than or equal to zero)!");
+            panic!("Lifetime is trivial (less than or equal to zero)!");
+        }
         debug!{"Initialize hashmap of nodes with lifetime {} from socket list {:?} not including {}", lifetime, node_names, full_address};
         let mut nodes = NodeMap::new();
         nodes.node_map = HashMap::new();
@@ -254,10 +261,14 @@ impl NodeMap {
 
     /**
      * add_node_to_map: &slf * &str * i64 * bool
-     * REQUIRES: full_address properly formatted, lifetime > 0, self is properly initialized
+     * REQUIRES: lifetime > 0
      * ENSURES: new full_address node is added to the NodeMap
      */
     pub fn add_node_to_map(&mut self, full_address: &SocketAddr, lifetime: u64, heartbeat: bool) {
+        if lifetime == 0 {
+            error!("Lifetime is trivial (less than or equal to zero)!");
+            panic!("Lifetime is trivial (less than or equal to zero)!");
+        }
         trace!("Adding node to map");
         let temp_node = Node::node_new(
             &full_address.to_string(),

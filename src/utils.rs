@@ -1,7 +1,6 @@
 use error::ForkliftResult;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
-use std::net::SocketAddr;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -65,24 +64,4 @@ pub fn current_time_in_millis(start: SystemTime) -> ForkliftResult<u64> {
     let since_epoch = start.duration_since(UNIX_EPOCH)?;
     trace!("Time since epoch {:?}", since_epoch);
     Ok(since_epoch.as_secs() * 1000 + u64::from(since_epoch.subsec_nanos()) / 1_000_000)
-}
-
-/*
-    get_port_from_fulladdr: &str -> ForkliftResult<String>
-    REQUIRES: full_address the full ip:port address
-    ENSURES: returns Ok(port) associated with the input full address, otherwise
-    return Err (in otherwords, the full_address is improperly formatted)
-*/
-pub fn get_port_from_fulladdr(full_address: &str) -> ForkliftResult<String> {
-    trace!(
-        "Attempt to parse address {} into socket to get port number",
-        full_address
-    );
-    let addr = full_address.parse::<SocketAddr>()?;
-    trace!(
-        "Successfully parsed address {} into socket {:?}",
-        full_address,
-        addr
-    );
-    Ok(addr.port().to_string())
 }

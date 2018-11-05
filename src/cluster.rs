@@ -18,19 +18,31 @@ pub struct Cluster {
 }
 
 impl Cluster {
-    pub fn new(r: Socket) -> Self {
+    pub fn new(r: Socket, init: &SocketAddr) -> Self {
+        let mut list = NodeList::new();
+        list.add_node_to_list(init);
         Cluster {
             lifetime: 5,
             pulse: Pulse::new(1000),
-            names: NodeList::new(),
+            names: list,
             nodes: NodeMap::new(),
             router: r,
         }
     }
 
+    fn is_valid_cluster(&self) -> (bool, String) {
+        if self.lifetime == 0 {
+            return (false, "Lifetime is 0!".to_string());
+        }
+        if self.names.node_list.is_empty() {
+            return (false, "Name list is Empty!".to_string());
+        }
+        (true, "Cluster is Valid".to_string())
+    }
+
     /**
      * connect_node: &self * &str -> ForkliftResult<()>
-     * REQUIRES: full_address is properly formatted as ip:port, router in self is a valid Socket
+     * REQUIRES: router in self is a valid Socket
      * ENSURES: connects router to the address of full_address, output
      * error otherwise
      */
@@ -43,8 +55,7 @@ impl Cluster {
 
     /**
      * add_node: &mut self * &str * bool-> null
-     * REQUIRES: full_address a properly formatted ip:port, heartbeat is whether or not the added node is "live" or not,
-     * router in self is properly connected
+     * REQUIRES: router in self is properly connected
      * ENSURES: makes a new node given that the node names does not previously exist, and adds itself to both the
      * node_Names and the nodes, and connects the node to given.  Otherwise it does nothing.
      */
@@ -66,7 +77,7 @@ impl Cluster {
 
     /**
      * send_getlist: &self * &str * &PollRequest -> ForkliftResult<()>
-     * REQUIRES: &PollRequest a value file descriptor, pulse in self a valid Pulse, full_address a properly formatted
+     * REQUIRES: &PollRequest a valid file descriptor
      * full_addr in the form of ip:port, router in self a valid socket
      * ENSURES: sends a GETLIST with the message of full_address to the cluster.
      */
@@ -91,16 +102,20 @@ impl Cluster {
 
     /**
      * send_nodelist: &mut self * &[String] -> null
-     * REQUIRES: names in self non-empty, msg_body should be non-empty, with the first and only item in the message body
-     * from the GETLIST recieved message body (containing the address of the node asking for the NODELIST).  nodes in self non-empty,
-     * lifetime in self > 0, router a valid connected socket
+     * REQUIRES: self is valid, msg_body should be non-empty, with the first and only item in the message body
+     * from the GETLIST recieved message body (containing the address of the node asking for the NODELIST),
+     * router a valid connected socket
      * ENSURES: The router sends a NODELIST to the sender of a GETLIST request (although it goes to all connected nodes),
      * otherwise it does nothing if the message body of the GETLIST request is empty.  
      */
     pub fn send_nodelist(&mut self, msg_body: &[String]) {
         let address_names = self.names.to_string_vector();
         let buffer = message::create_message(MessageType::NODELIST, &address_names);
-
+        let (valid, err) = self.is_valid_cluster();
+        if !valid {
+            error!("Cluster invalid! {}", err);
+            panic!("Cluster invalid! {}", err);
+        }
         if !msg_body.is_empty() {
             match &msg_body[0].parse::<SocketAddr>() {
                 Ok(s) => {
@@ -124,7 +139,7 @@ impl Cluster {
 
     /**
      * send_heartbeat: &mut self * &str -> null
-     * REQUIRES: name is your full_address in the format ip:port, router in self a valid Socket
+     * REQUIRES: router in self a valid Socket
      * ENSURES: sends a HEARTBEAT message to all connected nodes
      */
     pub fn send_heartbeat(&mut self, full_address: &SocketAddr) {
@@ -142,12 +157,17 @@ impl Cluster {
 
     /**
      * tickdown_nodes: &mut self -> null
-     * REQUIRES: nodes in self not empty, names in self not empty
+     * REQUIRES: is valid Cluster
      * ENSURES: for all nodes that have not sent a HEARTBEAT message to you within
      * a second, tickdown their liveness.  For all nodes that HAVE sent you a
      * HEARTBEAT message, reset their has_heartbeat value to false
      */
     pub fn tickdown_nodes(&mut self) {
+        let (valid, err) = self.is_valid_cluster();
+        if !valid {
+            error!("Cluster invalid! {}", err);
+            panic!("Cluster invalid! {}", err);
+        }
         trace!("Tickdown and reset nodes");
         for name in &self.names.to_string_vector() {
             self.nodes.node_map.entry(name.to_string()).and_modify(|n| {
@@ -163,13 +183,17 @@ impl Cluster {
 
     /**
      * send_and_tickdown: &PollRequest * &mut u64 * &str * &mut Socket * u64 * &mut HashMap<String, Node> * &mut Vec<SocketAddr> -> ForkliftRequest<()>
-     * REQUIRES: request is a valid vector of PollRequests, pulse a valid Pulse object
-     * name is your full address in the form ip:port, router a valid Socket,
-     * nodes not empty, node_names not empty
+     * REQUIRES: request is a valid vector of PollRequests, router a valid Socket,
+     * is valid Cluster
      * ENSURES: returns Ok(()) if successfully sending a heartbeat to connected nodes and ticking down,
      * otherwise return Err
      */
     pub fn send_and_tickdown(&mut self, full_address: &SocketAddr, request: &PollRequest) {
+        let (valid, err) = self.is_valid_cluster();
+        if !valid {
+            error!("Cluster invalid! {}", err);
+            panic!("Cluster invalid! {}", err);
+        }
         if request.get_fds()[0].can_write() {
             let beat = self.pulse.beat();
             if beat {
@@ -196,11 +220,16 @@ impl Cluster {
 
     /**
      * parse_nodelist_message: &self * &mut bool * &[u8] -> null
-     * REQUIRES: buf a message read from the socket, node_names in self not empty, nodes in self not empty, lifetime in self > 0,
+     * REQUIRES: buf a valid message read from the socket, is valid cluster
      * router in self a valid Socket, has_nodelist is false
      * ENSURES: parses a NODELIST message into a node_list and creates/adds the nodes received to the cluster
      */
     pub fn parse_nodelist_message(&mut self, has_nodelist: &mut bool, buf: &[u8]) {
+        let (valid, err) = self.is_valid_cluster();
+        if !valid {
+            error!("Cluster invalid! {}", err);
+            panic!("Cluster invalid! {}", err);
+        }
         let mut tossed = false;
         if !*has_nodelist {
             debug!("Parse the NODELIST!");
@@ -228,12 +257,16 @@ impl Cluster {
 
     /**
      * heartbeat_heard: &[String] * &mut Vec<SocketAddr> * &mut HashMap<String, Node> * i64 * &mut Socket &str -> null
-     * REQUIRES: msg_body not empty, node_names not empty, nodes not empty, lifetime the lifetime of a node, router a
-     * valid Socket, full_address a properly formatted ip:port string
+     * REQUIRES: msg_body not empty, is valid cluster, router a valid Socket
      * ENSURES: updates the hashmap to either: add a new node if the heartbeart came from a new node,
      * or updates the liveness of the node the heartbeat came from
      */
     pub fn heartbeat_heard(&mut self, msg_body: &[String]) {
+        let (valid, err) = self.is_valid_cluster();
+        if !valid {
+            error!("Cluster invalid! {}", err);
+            panic!("Cluster invalid! {}", err);
+        }
         if !msg_body.is_empty() {
             match &msg_body[0].parse::<SocketAddr>() {
                 Ok(sent_address) => {
@@ -252,8 +285,8 @@ impl Cluster {
 
     /**
      * read_and_heartbeat: &mut self * &PollRequest * &mut bool * &str -> null
-     * REQUIRES: request not empty, router in self is connected, names in self not empty, nodes in self not empty,
-     * lifetime in self > 0, pulse in self a valid Pulse object, full_address is properly formatted as ip:port,
+     * REQUIRES: request not empty, router in self is connected, is valid cluster
+     * lifetime in self > 0
      * ENSURES: reads incoming messages and sends out heartbeats every interval milliseconds.  
      */
     pub fn read_and_heartbeat(
@@ -262,6 +295,11 @@ impl Cluster {
         has_nodelist: &mut bool,
         full_address: &SocketAddr,
     ) {
+        let (valid, err) = self.is_valid_cluster();
+        if !valid {
+            error!("Cluster invalid! {}", err);
+            panic!("Cluster invalid! {}", err);
+        }
         if request.get_fds()[0].can_read() {
             //check message type
             let msg = self.read_message_to_u8();
@@ -364,9 +402,7 @@ impl Cluster {
                     }
                 };
             }
-
             self.read_and_heartbeat(&request, has_nodelist, full_address);
-
             self.send_and_tickdown(full_address, &request);
         }
         //Ok(())
