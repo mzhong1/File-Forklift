@@ -1,4 +1,5 @@
 use error::ForkliftResult;
+use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::path::Path;
 use utils;
@@ -51,13 +52,7 @@ impl Node {
         debug!("Tickdown Node {}, liveness {}", self.name, self.liveness);
     }
 }
-#[test]
-fn test_heartbeat() {
-    let mut n = Node::node_new("123.45.67.89:1111", 5, 3, false);
-    n.heartbeat();
-    assert_eq!(n.liveness, 5);
-    assert_eq!(n.has_heartbeat, true);
-}
+
 impl PartialEq for Node {
     fn eq(&self, other: &Node) -> bool {
         self.name == other.name && self.lifetime == other.lifetime
@@ -171,6 +166,58 @@ impl NodeList {
         trace!("Success! returning {:?} from socket list", names);
         names
     }
+}
+
+#[derive(Debug, Clone)]
+pub struct NodeMap {
+    pub node_map: HashMap<String, Node>,
+}
+
+impl NodeMap {
+    pub fn new() -> Self {
+        NodeMap {
+            node_map: HashMap::new(),
+        }
+    }
+
+    /*
+        make_nodemap: &Vec<SocketAddr> * &str * i64 -> Hashmap<String, Node>
+        REQUIRES: node_names not empty, full_address a proper ip:port address, lifetime the
+        number of ticks before a node is "dead"
+        ENSURES: returns a HashMap of Nodes referenced by the ip:port address
+    */
+    pub fn init_nodemap(full_address: &str, lifetime: i64, node_names: &[SocketAddr]) -> Self {
+        debug!{"Initialize hashmap of nodes with lifetime {} from socket list {:?} not including {}", lifetime, node_names, full_address};
+        let mut nodes = NodeMap::new();
+        nodes.node_map = HashMap::new();
+        for node_ip in node_names {
+            if node_ip.to_string() != full_address {
+                debug!("node ip addresses and port: {:?}", node_ip);
+                let mut temp_node = Node::new(&node_ip.to_string(), lifetime);
+                debug!("Node successfully created : {:?}", &temp_node);
+                nodes.node_map.insert(node_ip.to_string(), temp_node);
+            }
+        }
+        nodes
+    }
+
+    pub fn add_node_to_map(&mut self, full_address: &str, lifetime: i64, heartbeat: bool) {
+        trace!("Adding node to map");
+        if !self.node_map.contains_key(full_address) {
+            debug!("node ip addresses and port to add: {}", full_address);
+            let temp_node = Node::node_new(full_address, lifetime, lifetime, heartbeat);
+            debug!("Node successfully created : {:?}", &temp_node);
+            self.node_map.insert(full_address.to_string(), temp_node);
+        }
+    }
+}
+
+#[test]
+fn test_heartbeat() {
+    let mut n = Node::node_new("123.45.67.89:1111", 5, 3, false);
+    n.heartbeat();
+    assert_eq!(n.liveness, 5);
+    assert_eq!(n.has_heartbeat, true);
 }
 
 #[test]
@@ -321,4 +368,100 @@ fn test_to_string_vector() {
         "172.17.0.1:7654".to_string(),
     ];
     assert_eq!(expected_result, node_list.to_string_vector())
+}
+
+#[test]
+fn test_init_nodemap() {
+    let mut expected_result = HashMap::new();
+    expected_result.insert(
+        "172.17.0.2:5671".to_string(),
+        Node::new("172.17.0.2:5671", 5),
+    );
+    expected_result.insert(
+        "172.17.0.3:1234".to_string(),
+        Node::new("172.17.0.3:1234", 5),
+    );
+    expected_result.insert(
+        "172.17.0.4:5555".to_string(),
+        Node::new("172.17.0.4:5555", 5),
+    );
+    let mut names = vec![
+        SocketAddr::new(
+            ::std::net::IpAddr::V4(::std::net::Ipv4Addr::new(172, 17, 0, 2)),
+            5671,
+        ),
+        SocketAddr::new(
+            ::std::net::IpAddr::V4(::std::net::Ipv4Addr::new(172, 17, 0, 3)),
+            1234,
+        ),
+        SocketAddr::new(
+            ::std::net::IpAddr::V4(::std::net::Ipv4Addr::new(172, 17, 0, 4)),
+            5555,
+        ),
+        SocketAddr::new(
+            ::std::net::IpAddr::V4(::std::net::Ipv4Addr::new(172, 17, 0, 1)),
+            7654,
+        ),
+    ];
+    let my_full_address = "172.17.0.1:7654";
+    let map = NodeMap::init_nodemap(my_full_address, 5, &mut names);
+    println!("Expected Map {:?}", expected_result);
+    println!("My Map: {:?}", map.node_map);
+    assert_eq!(expected_result, map.node_map);
+}
+
+#[test]
+fn test_add_node_to_map() {
+    let mut map = NodeMap::new();
+    map.node_map = HashMap::new();
+    map.node_map.insert(
+        "172.17.0.2:5671".to_string(),
+        Node::new("172.17.0.2:5671", 5),
+    );
+    map.node_map.insert(
+        "172.17.0.3:1234".to_string(),
+        Node::new("172.17.0.3:1234", 5),
+    );
+    map.node_map.insert(
+        "172.17.0.4:5555".to_string(),
+        Node::new("172.17.0.4:5555", 5),
+    );
+
+    let mut expected_result = HashMap::new();
+    expected_result.insert(
+        "172.17.0.2:5671".to_string(),
+        Node::new("172.17.0.2:5671", 5),
+    );
+    expected_result.insert(
+        "172.17.0.3:1234".to_string(),
+        Node::new("172.17.0.3:1234", 5),
+    );
+    expected_result.insert(
+        "172.17.0.4:5555".to_string(),
+        Node::new("172.17.0.4:5555", 5),
+    );
+
+    map.add_node_to_map("172.17.0.3:1234", 5, false);
+    assert_eq!(expected_result, map.node_map);
+
+    let mut expected_result = HashMap::new();
+    expected_result.insert(
+        "172.17.0.2:5671".to_string(),
+        Node::new("172.17.0.2:5671", 5),
+    );
+    expected_result.insert(
+        "172.17.0.3:1234".to_string(),
+        Node::new("172.17.0.3:1234", 5),
+    );
+    expected_result.insert(
+        "172.17.0.4:5555".to_string(),
+        Node::new("172.17.0.4:5555", 5),
+    );
+    expected_result.insert(
+        "172.17.0.1:7654".to_string(),
+        Node::new("172.17.0.1:7654", 5),
+    );
+
+    map.add_node_to_map("172.17.0.1:7654", 5, false);
+    assert_eq!(expected_result, map.node_map);
 }
