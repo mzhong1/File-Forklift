@@ -75,7 +75,6 @@ fn parse_matches(matches: &clap::ArgMatches) -> (Vec<String>, PathBuf, bool) {
 }
 
 fn heartbeat(matches: &clap::ArgMatches) -> ForkliftResult<()> {
-    //Variables that don't depend on command line args
     trace!("Attempting to get local ip address");
     let ip_address = match local_ip::get_ip() {
         Ok(Some(ip)) => ip.ip(),
@@ -91,17 +90,17 @@ fn heartbeat(matches: &clap::ArgMatches) -> ForkliftResult<()> {
 
     let (joined, filename, mut has_nodelist) = parse_matches(matches);
 
-    let node_names: NodeList = NodeList::init_names(joined, filename);
+    let node_names: NodeList = NodeList::init_names(joined, &filename);
     let full_address = match node_names.get_full_address(&ip_address.to_string()) {
         Some(a) => a,
         None => {
             error!("ip address {} not in the node_list ", ip_address);
-            "".to_string()
-        } //Handle this later
+            panic!("ip address {} not in the node_list ", ip_address)
+        }
     };
     debug!("current full address: {:?}", full_address);
 
-    let router = init_router(&full_address)?; //Make the node
+    let router = init_router(&full_address.to_string())?; //Make the node
     std::thread::sleep(std::time::Duration::from_millis(10));
     let mut cluster = Cluster::new(router);
     cluster.nodes = NodeMap::init_nodemap(&full_address, cluster.lifetime, &node_names.node_list); //create mutable hashmap of nodes

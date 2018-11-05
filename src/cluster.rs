@@ -7,6 +7,7 @@ use message;
 use nanomsg::{Error, PollFd, PollInOut, PollRequest, Socket};
 use node::*;
 use pulse::*;
+use std::net::SocketAddr;
 
 pub struct Cluster {
     pub lifetime: u64,
@@ -17,13 +18,13 @@ pub struct Cluster {
 }
 
 impl Cluster {
-    pub fn new(router: Socket) -> Self {
+    pub fn new(r: Socket) -> Self {
         Cluster {
             lifetime: 5,
             pulse: Pulse::new(1000),
             names: NodeList::new(),
             nodes: NodeMap::new(),
-            router: router,
+            router: r,
         }
     }
 
@@ -33,9 +34,9 @@ impl Cluster {
      * ENSURES: connects router to the address of full_address, output
      * error otherwise
      */
-    pub fn connect_node(&mut self, full_address: &str) -> ForkliftResult<()> {
+    pub fn connect_node(&mut self, full_address: &SocketAddr) -> ForkliftResult<()> {
         debug!("Try to connect router to {}", full_address);
-        let tcp: String = format!("tcp://{}", full_address);
+        let tcp: String = format!("tcp://{}", full_address.to_string());
         self.router.connect(&tcp)?;
         Ok(())
     }
@@ -47,17 +48,11 @@ impl Cluster {
      * ENSURES: makes a new node given that the node names does not previously exist, and adds itself to both the
      * node_Names and the nodes, and connects the node to given.  Otherwise it does nothing.
      */
-    pub fn add_node(&mut self, full_address: &str, heartbeat: bool) {
-        if !self.names.contains_full_address(&full_address.to_string()) {
+    pub fn add_node(&mut self, full_address: &SocketAddr, heartbeat: bool) {
+        if !self.names.contains_full_address(full_address) {
             debug!("Node names before adding {:?}", self.names.node_list);
             debug!("Node Map before adding {:?}", self.nodes.node_map);
-            match self.names.add_node_to_list(&full_address) {
-                Ok(t) => t,
-                Err(e) => error!(
-                    "Unable to parse socket address, should be in the form ip:port:{:?}",
-                    e
-                ),
-            };
+            self.names.add_node_to_list(&full_address);
             self.nodes
                 .add_node_to_map(&full_address, self.lifetime, heartbeat);
             match self.connect_node(&full_address) {
@@ -77,7 +72,7 @@ impl Cluster {
      */
     pub fn send_getlist(
         &mut self,
-        full_address: &str,
+        full_address: &SocketAddr,
         request: &PollRequest,
     ) -> ForkliftResult<()> {
         let beat = self.pulse.beat();
@@ -107,13 +102,22 @@ impl Cluster {
         let buffer = message::create_message(MessageType::NODELIST, &address_names);
 
         if !msg_body.is_empty() {
-            let sent_address = &msg_body[0];
-            self.add_node(&sent_address, true);
-            debug!("Send a NODELIST to {}", sent_address);
-            match self.router.nb_write(buffer.as_slice()) {
-                Ok(_) => debug!("NODELIST sent to {}!", sent_address),
-                Err(Error::TryAgain) => error!("Receiver not ready, message can't be sen't"),
-                Err(err) => error!("Problem while writing: {}", err),
+            match &msg_body[0].parse::<SocketAddr>() {
+                Ok(s) => {
+                    self.add_node(&s, true);
+                    debug!("Send a NODELIST to {:?}", s);
+                    match self.router.nb_write(buffer.as_slice()) {
+                        Ok(_) => debug!("NODELIST sent to {:?}!", s),
+                        Err(Error::TryAgain) => {
+                            error!("Receiver not ready, message can't be sen't")
+                        }
+                        Err(err) => error!("Problem while writing: {}", err),
+                    };
+                }
+                Err(e) => error!(
+                    "Unable to parse the sender's address into a SocketAddr {}",
+                    e
+                ),
             };
         }
     }
@@ -123,7 +127,7 @@ impl Cluster {
      * REQUIRES: name is your full_address in the format ip:port, router in self a valid Socket
      * ENSURES: sends a HEARTBEAT message to all connected nodes
      */
-    pub fn send_heartbeat(&mut self, full_address: &str) {
+    pub fn send_heartbeat(&mut self, full_address: &SocketAddr) {
         debug!("Send a HEARTBEAT!");
         let buffer = vec![full_address.to_string()];
         let msg = message::create_message(MessageType::HEARTBEAT, &buffer);
@@ -165,7 +169,7 @@ impl Cluster {
      * ENSURES: returns Ok(()) if successfully sending a heartbeat to connected nodes and ticking down,
      * otherwise return Err
      */
-    pub fn send_and_tickdown(&mut self, full_address: &str, request: &PollRequest) {
+    pub fn send_and_tickdown(&mut self, full_address: &SocketAddr, request: &PollRequest) {
         if request.get_fds()[0].can_write() {
             let beat = self.pulse.beat();
             if beat {
@@ -197,6 +201,7 @@ impl Cluster {
      * ENSURES: parses a NODELIST message into a node_list and creates/adds the nodes received to the cluster
      */
     pub fn parse_nodelist_message(&mut self, has_nodelist: &mut bool, buf: &[u8]) {
+        let mut tossed = false;
         if !*has_nodelist {
             debug!("Parse the NODELIST!");
             let list = match message::read_message(buf) {
@@ -207,9 +212,15 @@ impl Cluster {
                 }
             };
             for l in &list {
-                self.add_node(&l, false)
+                match l.parse::<SocketAddr>() {
+                    Ok(s) => self.add_node(&s, false),
+                    Err(e) => {
+                        error!("Error {:?}, unable to parse socket address {:?}", e, l);
+                        tossed = true
+                    }
+                };
             }
-            if !list.is_empty() {
+            if !list.is_empty() && !tossed {
                 *has_nodelist = true;
             }
         }
@@ -224,14 +235,18 @@ impl Cluster {
      */
     pub fn heartbeat_heard(&mut self, msg_body: &[String]) {
         if !msg_body.is_empty() {
-            let sent_address = &msg_body[0];
-            self.add_node(&sent_address, true);
-            self.nodes
-                .node_map
-                .entry(sent_address.to_string())
-                .and_modify(|n| {
-                    let reactive = n.heartbeat();
-                });
+            match &msg_body[0].parse::<SocketAddr>() {
+                Ok(sent_address) => {
+                    self.add_node(&sent_address, true);
+                    self.nodes
+                        .node_map
+                        .entry(sent_address.to_string())
+                        .and_modify(|n| {
+                            let reactive = n.heartbeat();
+                        });
+                }
+                Err(e) => error!("Error {:?}, Unable to parse sender address", e),
+            };
         }
     }
 
@@ -245,7 +260,7 @@ impl Cluster {
         &mut self,
         request: &PollRequest,
         has_nodelist: &mut bool,
-        full_address: &str,
+        full_address: &SocketAddr,
     ) {
         if request.get_fds()[0].can_read() {
             //check message type
@@ -322,7 +337,7 @@ impl Cluster {
     */
     pub fn heartbeat_loop(
         &mut self,
-        full_address: &str,
+        full_address: &SocketAddr,
         has_nodelist: &mut bool,
     ) -> ForkliftResult<()> {
         let mut countdown = 0;
@@ -357,12 +372,12 @@ impl Cluster {
         //Ok(())
     }
 
-    pub fn init_connect(&mut self, full_address: &str) {
+    pub fn init_connect(&mut self, full_address: &SocketAddr) {
         trace!("Initializing connection...");
         for node_ip in self.names.node_list.clone() {
-            if node_ip.to_string() != full_address {
+            if node_ip != *full_address {
                 trace!("Attempting to connect to {}", node_ip);
-                match self.connect_node(&node_ip.to_string()) {
+                match self.connect_node(&node_ip) {
                     Ok(t) => t,
                     Err(e) => error!(
                         "Error: {} Unable to connect to the node at ip address: {}",

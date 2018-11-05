@@ -26,7 +26,7 @@ impl Pulse {
         let elapsed = self.c_time.elapsed();
         trace!(
             "Time elapsed in millis {:?}",
-            (elapsed.as_secs() * 1_000) + (elapsed.subsec_nanos() / 1_000_000) as u64
+            (elapsed.as_secs() * 1_000) + u64::from(elapsed.subsec_millis())
         );
         if elapsed > self.timeout {
             debug!("The previous instant was {:?}", self.c_time);
