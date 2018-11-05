@@ -1,7 +1,9 @@
 use error::ForkliftResult;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
+use std::net::SocketAddr;
 use std::path::Path;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 #[test]
 fn test_read_file_lines() {
@@ -43,4 +45,44 @@ pub fn read_file_lines(filename: &Path) -> ForkliftResult<Vec<String>> {
         node_list
     );
     Ok(node_list)
+}
+
+#[test]
+fn test_current_time_in_millis() {
+    let start = current_time_in_millis(SystemTime::now()).unwrap();
+    ::std::thread::sleep(::std::time::Duration::from_millis(1000));
+    let end = current_time_in_millis(SystemTime::now()).unwrap();
+    println!("Time difference {}", end - start);
+    assert!(end - start < 1002 && end - start >= 1000);
+}
+
+/*
+    current_time_in_millis: SystemTime -> u64
+    REQUIRES: start is the current System Time
+    ENSURES: returns the time since the UNIX_EPOCH in milliseconds
+*/
+fn current_time_in_millis(start: SystemTime) -> ForkliftResult<u64> {
+    let since_epoch = start.duration_since(UNIX_EPOCH)?;
+    trace!("Time since epoch {:?}", since_epoch);
+    Ok(since_epoch.as_secs() * 1000 + u64::from(since_epoch.subsec_nanos()) / 1_000_000)
+}
+
+/*
+    get_port_from_fulladdr: &str -> ForkliftResult<String>
+    REQUIRES: full_address the full ip:port address
+    ENSURES: returns Ok(port) associated with the input full address, otherwise
+    return Err (in otherwords, the full_address is improperly formatted)
+*/
+fn get_port_from_fulladdr(full_address: &str) -> ForkliftResult<String> {
+    trace!(
+        "Attempt to parse address {} into socket to get port number",
+        full_address
+    );
+    let addr = full_address.parse::<SocketAddr>()?;
+    trace!(
+        "Successfully parsed address {} into socket {:?}",
+        full_address,
+        addr
+    );
+    Ok(addr.port().to_string())
 }

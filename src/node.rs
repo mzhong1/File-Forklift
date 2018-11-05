@@ -75,7 +75,8 @@ impl NodeList {
         or returns a ForkliftError (AddrParseError, since IO errors and file parsing errors
         will fail the program).
     */
-    pub fn init_node_names(filename: &Path) -> ForkliftResult<Vec<SocketAddr>> {
+    pub fn init_node_names(filename: &Path) -> ForkliftResult<Self> {
+        let mut names = NodeList::new();
         let node_list = utils::read_file_lines(filename)?;
         trace!("Attempting to collect parsed Socket Addresses to vector");
         let mut node_names: Vec<SocketAddr> = Vec::new();
@@ -87,7 +88,8 @@ impl NodeList {
             "Parsing file to socket list ok! Node list: {:?}",
             node_names
         );
-        Ok(node_names)
+        names.node_list = node_names;
+        Ok(names)
     }
     /*
         get_full_address_from_ip: &str * &mut Vec<SocketAddr> -> String
@@ -252,7 +254,7 @@ fn test_init_node_names() {
         Ok(t) => {
             println!("Expected: {:?}", expected_result);
             println!("Vec: {:?}", t);
-            assert_eq!(expected_result, t)
+            assert_eq!(expected_result, t.node_list)
         }
         Err(e) => {
             println!("Error {}", e);
