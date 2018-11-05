@@ -1,7 +1,7 @@
 use error::ForkliftResult;
 use std::collections::HashMap;
 use std::net::SocketAddr;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use utils;
 
 #[derive(Debug, Clone)]
@@ -68,6 +68,7 @@ impl NodeList {
     pub fn new() -> Self {
         NodeList { node_list: vec![] }
     }
+
     /*
         init_node_names: &str -> ForkliftResult<Vec<String>>
         REQUIRES: filename is the name of a properly formatted File (each line has the ip:port of a node)
@@ -90,6 +91,35 @@ impl NodeList {
         );
         names.node_list = node_names;
         Ok(names)
+    }
+
+    pub fn init_names(joined: Vec<String>, filename: PathBuf) -> Self {
+        let mut names = NodeList::new();
+        if joined.len() == 2 {
+            for name in joined {
+                match names.add_node_to_list(&name) {
+                    Ok(t) => t,
+                    Err(e) => {
+                        error!(
+                    "Node Join Error: Unable to parse socket address when adding name to list; should be in the form ip:port:{:?}",
+                    e
+                    );
+                        panic!("Unable to parse the socket address when adding name to list; should be in the form ip:port.  Error was {}", e)
+                    }
+                }
+            }
+        } else
+        //We did not flag -j (since -j requires exactly two arguments)
+        {
+            names = match NodeList::init_node_names(filename.as_path()) {
+                Ok(n) => n,
+                Err(e) => {
+                    error!("Unable to parse the input file into a vector of SocketAddr's.  Line format should be ip:port.  Error was {}", e);
+                    panic!("Unable to parse the input file into a vector of SocketAddr's.  Line format should be ip:port.  Error was {}", e)
+                }
+            };
+        }
+        names
     }
     /*
         get_full_address_from_ip: &str * &mut Vec<SocketAddr> -> String

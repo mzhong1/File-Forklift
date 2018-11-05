@@ -1,4 +1,6 @@
 extern crate api;
+extern crate clap;
+
 use self::api::service_generated::*;
 use error::ForkliftResult;
 use message;

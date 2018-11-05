@@ -61,7 +61,7 @@ fn test_current_time_in_millis() {
     REQUIRES: start is the current System Time
     ENSURES: returns the time since the UNIX_EPOCH in milliseconds
 */
-fn current_time_in_millis(start: SystemTime) -> ForkliftResult<u64> {
+pub fn current_time_in_millis(start: SystemTime) -> ForkliftResult<u64> {
     let since_epoch = start.duration_since(UNIX_EPOCH)?;
     trace!("Time since epoch {:?}", since_epoch);
     Ok(since_epoch.as_secs() * 1000 + u64::from(since_epoch.subsec_nanos()) / 1_000_000)
@@ -73,7 +73,7 @@ fn current_time_in_millis(start: SystemTime) -> ForkliftResult<u64> {
     ENSURES: returns Ok(port) associated with the input full address, otherwise
     return Err (in otherwords, the full_address is improperly formatted)
 */
-fn get_port_from_fulladdr(full_address: &str) -> ForkliftResult<String> {
+pub fn get_port_from_fulladdr(full_address: &str) -> ForkliftResult<String> {
     trace!(
         "Attempt to parse address {} into socket to get port number",
         full_address
