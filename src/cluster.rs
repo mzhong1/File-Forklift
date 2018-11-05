@@ -9,7 +9,7 @@ use node::*;
 use pulse::*;
 
 pub struct Cluster {
-    pub lifetime: i64,
+    pub lifetime: u64,
     pub pulse: Pulse,
     pub names: NodeList,
     pub nodes: NodeMap,
@@ -41,7 +41,7 @@ impl Cluster {
     }
 
     /**
-     * add_node_to_cluster: &mut self * &str * bool-> null
+     * add_node: &mut self * &str * bool-> null
      * REQUIRES: full_address a properly formatted ip:port, heartbeat is whether or not the added node is "live" or not,
      * router in self is properly connected
      * ENSURES: makes a new node given that the node names does not previously exist, and adds itself to both the
@@ -229,7 +229,9 @@ impl Cluster {
             self.nodes
                 .node_map
                 .entry(sent_address.to_string())
-                .and_modify(|n| n.heartbeat());
+                .and_modify(|n| {
+                    let reactive = n.heartbeat();
+                });
         }
     }
 

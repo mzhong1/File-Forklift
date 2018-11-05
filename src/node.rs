@@ -8,21 +8,21 @@ use utils;
 pub struct Node {
     ///name of node
     pub name: String,
-    pub lifetime: i64,
+    pub lifetime: u64,
     pub liveness: i64,
     pub has_heartbeat: bool,
 }
 
 impl Node {
-    pub fn new(n: &str, lt: i64) -> Self {
+    pub fn new(n: &str, lt: u64) -> Self {
         Node {
             name: n.to_string(),
             lifetime: lt,
-            liveness: lt,
+            liveness: lt as i64,
             has_heartbeat: false,
         }
     }
-    pub fn node_new(n: &str, lt: i64, l: i64, h: bool) -> Self {
+    pub fn node_new(n: &str, lt: u64, l: i64, h: bool) -> Self {
         Node {
             name: n.to_string(),
             lifetime: lt,
@@ -41,7 +41,7 @@ impl Node {
             self.liveness
         );
         let prevl = self.liveness;
-        self.liveness = self.lifetime;
+        self.liveness = self.lifetime as i64;
         self.has_heartbeat = true;
         debug!("Heartbeat Node {}, liveness {}", self.name, self.liveness);
         prevl <= 0
@@ -239,7 +239,7 @@ impl NodeMap {
         number of ticks before a node is "dead"
         ENSURES: returns a HashMap of Nodes referenced by the ip:port address
     */
-    pub fn init_nodemap(full_address: &str, lifetime: i64, node_names: &[SocketAddr]) -> Self {
+    pub fn init_nodemap(full_address: &str, lifetime: u64, node_names: &[SocketAddr]) -> Self {
         debug!{"Initialize hashmap of nodes with lifetime {} from socket list {:?} not including {}", lifetime, node_names, full_address};
         let mut nodes = NodeMap::new();
         nodes.node_map = HashMap::new();
@@ -259,11 +259,11 @@ impl NodeMap {
      * REQUIRES: full_address properly formatted, lifetime > 0, self is properly initialized
      * ENSURES: new full_address node is added to the NodeMap
      */
-    pub fn add_node_to_map(&mut self, full_address: &str, lifetime: i64, heartbeat: bool) {
+    pub fn add_node_to_map(&mut self, full_address: &str, lifetime: u64, heartbeat: bool) {
         trace!("Adding node to map");
         if !self.node_map.contains_key(full_address) {
             debug!("node ip addresses and port to add: {}", full_address);
-            let temp_node = Node::node_new(full_address, lifetime, lifetime, heartbeat);
+            let temp_node = Node::node_new(full_address, lifetime, lifetime as i64, heartbeat);
             debug!("Node successfully created : {:?}", &temp_node);
             self.node_map.insert(full_address.to_string(), temp_node);
         }
