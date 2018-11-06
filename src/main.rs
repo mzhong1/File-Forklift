@@ -22,6 +22,7 @@ mod cluster;
 mod error;
 mod local_ip;
 mod message;
+mod nfs_listing;
 mod node;
 mod pulse;
 mod socket_node;
