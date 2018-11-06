@@ -3,15 +3,20 @@ extern crate log;
 #[macro_use]
 extern crate clap;
 extern crate api;
+extern crate crossbeam;
 extern crate dirs;
 extern crate nanomsg;
+extern crate rendezvous_hash;
 extern crate simplelog;
 
 use clap::{App, Arg};
+use crossbeam::channel;
 use nanomsg::{Protocol, Socket};
+use rendezvous_hash::{DefaultNodeHasher, RendezvousNodes};
 use std::fs::File;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 mod cluster;
 mod error;
@@ -19,12 +24,14 @@ mod local_ip;
 mod message;
 mod node;
 mod pulse;
+mod socket_node;
 mod utils;
 
 use cluster::Cluster;
 use error::ForkliftResult;
 use node::*;
 use simplelog::{CombinedLogger, Config, SharedLogger, TermLogger, WriteLogger};
+use socket_node::*;
 
 #[test]
 fn test_init_router() {
@@ -78,7 +85,10 @@ fn parse_matches(matches: &clap::ArgMatches) -> (Vec<String>, PathBuf, bool) {
     (joined, filename.to_path_buf(), has_nodelist)
 }
 
-fn heartbeat(matches: &clap::ArgMatches) -> ForkliftResult<()> {
+fn heartbeat(
+    matches: &clap::ArgMatches,
+    s: crossbeam::Sender<ChangeList>,
+) -> std::thread::JoinHandle<ForkliftResult<()>> {
     trace!("Attempting to get local ip address");
     let ip_address = match local_ip::get_ip() {
         Ok(Some(ip)) => ip.ip(),
@@ -103,16 +113,23 @@ fn heartbeat(matches: &clap::ArgMatches) -> ForkliftResult<()> {
         }
     };
     debug!("current full address: {:?}", full_address);
+    let mess = ChangeList::new(ChangeType::AddNode, SocketNode::new(full_address));
+    s.send(mess);
 
-    let router = init_router(&full_address)?; //Make the node
+    let router = match init_router(&full_address) {
+        Ok(t) => t,
+        Err(e) => {
+            error!("Error {:?}, Unable to connect router!", e);
+            panic!("Error {:?}, Unable to connect router!", e)
+        }
+    }; //Make the node
     std::thread::sleep(std::time::Duration::from_millis(10));
-    let mut cluster = Cluster::new(router, &full_address);
+    let mut cluster = Cluster::new(router, &full_address, s);
     cluster.nodes = NodeMap::init_nodemap(&full_address, cluster.lifetime, &node_names.node_list); //create mutable hashmap of nodes
                                                                                                    //sleep for a bit to let other nodes start up
     cluster.names = node_names;
     cluster.init_connect(&full_address);
-    cluster.heartbeat_loop(&full_address, &mut has_nodelist)
-    //Ok(())
+    std::thread::spawn(move || cluster.heartbeat_loop(&full_address, &mut has_nodelist))
 }
 
 fn init_logs(f: &Path, level: simplelog::LevelFilter) -> ForkliftResult<()> {
@@ -194,6 +211,47 @@ fn main() -> ForkliftResult<()> {
     init_logs(&path, level)?;
     debug!("Log path: {:?}", logfile);
     info!("Logs made");
-    heartbeat(&matches)?;
+    let (s, r) = channel::unbounded::<ChangeList>();
+    let mut active_nodes = Arc::new(RendezvousNodes::default());
+    let _handle = heartbeat(&matches, s);
+
+    rendezvous(&mut active_nodes, &r);
+    _handle.join().unwrap();
     Ok(())
+}
+
+/**
+ * Thread where rendezvous hash is dealt with
+ */
+fn rendezvous(
+    active_nodes: &mut Arc<RendezvousNodes<SocketNode, DefaultNodeHasher>>,
+    r: &crossbeam::Receiver<ChangeList>,
+) {
+    loop {
+        match r.try_recv() {
+            Some(c) => {
+                match c.change_type {
+                    ChangeType::AddNode => {
+                        debug!("Add Node {:?} to active list!", c.socket_node);
+                        let list = Arc::get_mut(active_nodes).unwrap();
+                        list.insert(c.socket_node);
+                        debug!(
+                            "The current list is {:?}",
+                            list.calc_candidates(&1).collect::<Vec<_>>()
+                        );
+                    }
+                    ChangeType::RemNode => {
+                        debug!("Remove Node {:?} from active list!", c.socket_node);
+                        let list = Arc::get_mut(active_nodes).unwrap();
+                        list.remove(&c.socket_node);
+                        debug!(
+                            "The current list is {:?}",
+                            list.calc_candidates(&1).collect::<Vec<_>>()
+                        );
+                    }
+                };
+            }
+            None => trace!("No Changes"),
+        }
+    }
 }

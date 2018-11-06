@@ -1,5 +1,6 @@
 extern crate api;
 extern crate clap;
+extern crate crossbeam;
 
 use self::api::service_generated::*;
 use error::ForkliftResult;
@@ -7,6 +8,7 @@ use message;
 use nanomsg::{Error, PollFd, PollInOut, PollRequest, Socket};
 use node::*;
 use pulse::*;
+use socket_node::*;
 use std::net::SocketAddr;
 
 pub struct Cluster {
@@ -15,10 +17,11 @@ pub struct Cluster {
     pub names: NodeList,
     pub nodes: NodeMap,
     pub router: Socket,
+    pub sender: crossbeam::Sender<ChangeList>,
 }
 
 impl Cluster {
-    pub fn new(r: Socket, init: &SocketAddr) -> Self {
+    pub fn new(r: Socket, init: &SocketAddr, s: crossbeam::Sender<ChangeList>) -> Self {
         let mut list = NodeList::new();
         list.add_node_to_list(init);
         Cluster {
@@ -27,6 +30,7 @@ impl Cluster {
             names: list,
             nodes: NodeMap::new(),
             router: r,
+            sender: s,
         }
     }
 
@@ -170,9 +174,13 @@ impl Cluster {
         }
         trace!("Tickdown and reset nodes");
         for name in &self.names.to_string_vector() {
+            let s = &self.sender;
             self.nodes.node_map.entry(name.to_string()).and_modify(|n| {
                 if !n.has_heartbeat {
-                    n.tickdown();
+                    if n.tickdown() {
+                        let cl = ChangeList::new(ChangeType::RemNode, SocketNode::new(n.name));
+                        s.send(cl);
+                    }
                 } else {
                     n.has_heartbeat = false;
                     debug!("HEARTBEAT was heard for node {:?}", n);
@@ -271,11 +279,18 @@ impl Cluster {
             match &msg_body[0].parse::<SocketAddr>() {
                 Ok(sent_address) => {
                     self.add_node(&sent_address, true);
+                    let s = &self.sender;
                     self.nodes
                         .node_map
                         .entry(sent_address.to_string())
                         .and_modify(|n| {
-                            let reactive = n.heartbeat();
+                            if n.heartbeat() {
+                                let cl = ChangeList::new(
+                                    ChangeType::AddNode,
+                                    SocketNode::new(*sent_address),
+                                );
+                                s.send(cl);
+                            }
                         });
                 }
                 Err(e) => error!("Error {:?}, Unable to parse sender address", e),
