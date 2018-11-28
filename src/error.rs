@@ -4,9 +4,17 @@ use std::error::Error as err;
 use std::fmt;
 use std::io::Error as IoError;
 use std::net::AddrParseError;
+use std::string::{FromUtf16Error, FromUtf8Error, ParseError as StringParseError};
 use std::time::SystemTimeError;
 
 pub type ForkliftResult<T> = Result<T, ForkliftError>;
+
+#[derive(Debug)]
+pub enum ConvertStringError {
+    FromUtf16Error(FromUtf16Error),
+    FromUtf8Error(FromUtf8Error),
+    StringParseError(StringParseError),
+}
 
 #[derive(Debug)]
 pub enum ForkliftError {
@@ -15,6 +23,7 @@ pub enum ForkliftError {
     NanomsgError(NanomsgError),
     AddrParseError(AddrParseError),
     SmbcError(SmbcError),
+    ConvertStringError(ConvertStringError),
     IpLocalError,
     InvalidConfigError,
     FSError(String),
@@ -39,6 +48,11 @@ impl err for ForkliftError {
             ForkliftError::NanomsgError(ref e) => e.description(),
             ForkliftError::AddrParseError(ref e) => e.description(),
             ForkliftError::SmbcError(ref e) => e.description(),
+            ForkliftError::ConvertStringError(c) => match c {
+                ConvertStringError::FromUtf16Error(e) => e.description(),
+                ConvertStringError::FromUtf8Error(e) => e.description(),
+                ConvertStringError::StringParseError(e) => e.description(),
+            },
             ForkliftError::IpLocalError => "Could not determine local ip address",
             ForkliftError::InvalidConfigError => "Invalid config formatting",
             ForkliftError::FSError(d) => &d,
@@ -52,6 +66,11 @@ impl err for ForkliftError {
             ForkliftError::NanomsgError(ref e) => e.cause(),
             ForkliftError::AddrParseError(ref e) => e.cause(),
             ForkliftError::SmbcError(ref e) => e.cause(),
+            ForkliftError::ConvertStringError(c) => match c {
+                ConvertStringError::FromUtf16Error(e) => e.cause(),
+                ConvertStringError::FromUtf8Error(e) => e.cause(),
+                ConvertStringError::StringParseError(e) => e.cause(),
+            },
             ForkliftError::IpLocalError => None,
             ForkliftError::InvalidConfigError => None,
             ForkliftError::FSError(d) => None,
@@ -86,5 +105,23 @@ impl From<AddrParseError> for ForkliftError {
 impl From<SmbcError> for ForkliftError {
     fn from(err: SmbcError) -> ForkliftError {
         ForkliftError::SmbcError(err)
+    }
+}
+
+impl From<FromUtf16Error> for ForkliftError {
+    fn from(err: FromUtf16Error) -> ForkliftError {
+        ForkliftError::ConvertStringError(ConvertStringError::FromUtf16Error(err))
+    }
+}
+
+impl From<FromUtf8Error> for ForkliftError {
+    fn from(err: FromUtf8Error) -> ForkliftError {
+        ForkliftError::ConvertStringError(ConvertStringError::FromUtf8Error(err))
+    }
+}
+
+impl From<StringParseError> for ForkliftError {
+    fn from(err: StringParseError) -> ForkliftError {
+        ForkliftError::ConvertStringError(ConvertStringError::StringParseError(err))
     }
 }
