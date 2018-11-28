@@ -20,3 +20,6 @@ libnfs = {path = "/home/mzhong215/libnfs"}
 crossbeam = "0.4"
 rayon = "1.0.2"
 spmc = "0.2.2"
+chrono = "0.4.6"
+smbc = {path = "/home/mzhong215/smbc"}
+smbclient-sys = {path = "/home/mzhong215/smbclient-sys" }

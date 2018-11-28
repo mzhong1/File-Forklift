@@ -8,6 +8,7 @@ extern crate dirs;
 extern crate nanomsg;
 extern crate rendezvous_hash;
 extern crate simplelog;
+extern crate smbc;
 
 use clap::{App, Arg};
 use crossbeam::channel;
@@ -20,6 +21,8 @@ use std::sync::Arc;
 
 mod cluster;
 mod error;
+mod filesystem;
+mod filesystem_entry;
 mod local_ip;
 mod message;
 mod nfs_listing;

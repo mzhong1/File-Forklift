@@ -8,6 +8,7 @@ use self::libnfs::*;
 use self::rayon::ThreadPoolBuilder;
 use crossbeam::channel;
 use std::collections::LinkedList;
+use std::io::Result;
 use std::path::{Path, PathBuf};
 use std::thread;
 
@@ -41,7 +42,7 @@ fn dir_loop(dir: NfsDirectory, stack: &mut LinkedList<String>, parent: &str) {
     }
 }
 
-fn create_nfs(uid: i32, gid: i32, level: i32, ip: &str, root: &str) -> std::io::Result<Nfs> {
+fn create_nfs(uid: i32, gid: i32, level: i32, ip: &str, root: &str) -> Result<Nfs> {
     let nfs = Nfs::new()?;
     nfs.set_uid(uid)?;
     nfs.set_gid(gid)?;
@@ -50,7 +51,7 @@ fn create_nfs(uid: i32, gid: i32, level: i32, ip: &str, root: &str) -> std::io::
     Ok(nfs)
 }
 
-fn list_files(nfs: &mut Nfs) -> std::io::Result<()> {
+fn list_files(nfs: &mut Nfs) -> Result<()> {
     let mut stack: LinkedList<String> = LinkedList::new();
     let dir = nfs.opendir(&Path::new("/"))?;
     dir_loop(dir, &mut stack, &"".to_string());
@@ -147,14 +148,7 @@ fn thread_exp2(nodes: Vec<String>) {
     });
 }
 
-fn t_traversal(
-    uid: i32,
-    gid: i32,
-    level: i32,
-    ip: &str,
-    root: &str,
-    path: &str,
-) -> std::io::Result<()> {
+fn t_traversal(uid: i32, gid: i32, level: i32, ip: &str, root: &str, path: &str) -> Result<()> {
     rayon::scope(|spawner| {
         let mut nfs = create_nfs(uid, gid, level, ip, root).unwrap();
         let dir = nfs.opendir(&Path::new(&path)).unwrap();
