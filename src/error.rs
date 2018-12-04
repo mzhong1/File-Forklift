@@ -34,7 +34,7 @@ impl fmt::Display for ForkliftError {
         match *self {
             ForkliftError::InvalidConfigError => f.write_str("InvalidConfigError"),
             ForkliftError::IpLocalError => f.write_str("IpLocalError"),
-            ForkliftError::FSError(d) => f.write_str("FileSystemError"),
+            ForkliftError::FSError(_) => f.write_str("FileSystemError"),
             _ => f.write_str(self.description()),
         }
     }
@@ -48,14 +48,14 @@ impl err for ForkliftError {
             ForkliftError::NanomsgError(ref e) => e.description(),
             ForkliftError::AddrParseError(ref e) => e.description(),
             ForkliftError::SmbcError(ref e) => e.description(),
-            ForkliftError::ConvertStringError(c) => match c {
-                ConvertStringError::FromUtf16Error(e) => e.description(),
-                ConvertStringError::FromUtf8Error(e) => e.description(),
-                ConvertStringError::StringParseError(e) => e.description(),
+            ForkliftError::ConvertStringError(ref c) => match c {
+                ConvertStringError::FromUtf16Error(ref e) => e.description(),
+                ConvertStringError::FromUtf8Error(ref e) => e.description(),
+                ConvertStringError::StringParseError(ref e) => e.description(),
             },
             ForkliftError::IpLocalError => "Could not determine local ip address",
             ForkliftError::InvalidConfigError => "Invalid config formatting",
-            ForkliftError::FSError(d) => &d,
+            ForkliftError::FSError(ref d) => &d,
         }
     }
 
@@ -66,14 +66,14 @@ impl err for ForkliftError {
             ForkliftError::NanomsgError(ref e) => e.cause(),
             ForkliftError::AddrParseError(ref e) => e.cause(),
             ForkliftError::SmbcError(ref e) => e.cause(),
-            ForkliftError::ConvertStringError(c) => match c {
-                ConvertStringError::FromUtf16Error(e) => e.cause(),
-                ConvertStringError::FromUtf8Error(e) => e.cause(),
-                ConvertStringError::StringParseError(e) => e.cause(),
+            ForkliftError::ConvertStringError(ref c) => match c {
+                ConvertStringError::FromUtf16Error(ref e) => e.cause(),
+                ConvertStringError::FromUtf8Error(ref e) => e.cause(),
+                ConvertStringError::StringParseError(ref e) => e.cause(),
             },
             ForkliftError::IpLocalError => None,
             ForkliftError::InvalidConfigError => None,
-            ForkliftError::FSError(d) => None,
+            ForkliftError::FSError(ref d) => None,
         }
     }
 }

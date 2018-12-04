@@ -11,19 +11,19 @@ use error::ForkliftResult;
 use smbc::*;
 use std::path::Path;
 
+#[derive(Clone, Debug)]
 pub enum FileSystemType {
     Nfs,
     Samba,
 }
 
-#[derive(Clone)]
-pub enum NetworkContext {
-    Samba(Smbc),
-    Nfs(Nfs),
+pub enum NetworkContext<'a> {
+    Samba(&'a mut Smbc),
+    Nfs(&'a mut Nfs),
 }
 
-impl FileSystem for NetworkContext {
-    fn create(&self, path: &Path, flags: OFlag, mode: Mode) -> ForkliftResult<FileType> {
+impl<'a> FileSystem<'a> for NetworkContext<'a> {
+    fn create(&mut self, path: &Path, flags: OFlag, mode: Mode) -> ForkliftResult<FileType> {
         match self {
             NetworkContext::Nfs(nfs) => {
                 let file = nfs.create(path, flags, mode)?;
@@ -105,7 +105,7 @@ impl FileSystem for NetworkContext {
             }
         }
     }
-    fn open(&self, path: &Path, flags: OFlag, mode: Mode) -> ForkliftResult<FileType> {
+    fn open(&mut self, path: &Path, flags: OFlag, mode: Mode) -> ForkliftResult<FileType> {
         match self {
             NetworkContext::Nfs(nfs) => {
                 let file = nfs.open(path, flags)?;
@@ -117,7 +117,7 @@ impl FileSystem for NetworkContext {
             }
         }
     }
-    fn opendir(&self, path: &Path) -> ForkliftResult<DirectoryType> {
+    fn opendir(&mut self, path: &Path) -> ForkliftResult<DirectoryType> {
         match self {
             NetworkContext::Nfs(nfs) => {
                 let dir = nfs.opendir(path)?;
@@ -188,6 +188,10 @@ impl File for FileType {
             }
         }
     }
+    /// Please NOTE: Samba stat function's attributes only have certain attributes that are
+    /// the same values as a Unix call:
+    /// inode, size, nlink, atime, mtime, and ctime
+    /// blksize is hardcoded, mode uses Dos Mode, so use getxattr,
     fn fstat(&self) -> ForkliftResult<Stat> {
         match self {
             FileType::Nfs(nfile) => {
@@ -261,7 +265,7 @@ pub enum DirectoryType {
     Nfs(NfsDirectory),
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Copy)]
 pub struct Timespec {
     tv_sec: i64,
     tv_nsec: i64,
@@ -317,7 +321,7 @@ impl Timespec {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Copy)]
 pub struct Stat {
     st_dev: u64,
     st_ino: u64,
@@ -407,13 +411,13 @@ impl Stat {
     }
 }
 
-pub trait FileSystem {
-    fn create(&self, path: &Path, flags: OFlag, mode: Mode) -> ForkliftResult<FileType>;
+pub trait FileSystem<'a> {
+    fn create(&'a mut self, path: &Path, flags: OFlag, mode: Mode) -> ForkliftResult<FileType>;
     fn chmod(&self, path: &Path, mode: Mode) -> ForkliftResult<()>;
     fn stat(&self, path: &Path) -> ForkliftResult<Stat>;
     fn mkdir(&self, path: &Path) -> ForkliftResult<()>;
-    fn open(&self, path: &Path, flags: OFlag, mode: Mode) -> ForkliftResult<FileType>;
-    fn opendir(&self, path: &Path) -> ForkliftResult<DirectoryType>;
+    fn open(&'a mut self, path: &Path, flags: OFlag, mode: Mode) -> ForkliftResult<FileType>;
+    fn opendir(&mut self, path: &Path) -> ForkliftResult<DirectoryType>;
     fn rename(&self, oldpath: &Path, newpath: &Path) -> ForkliftResult<()>;
     fn unlink(&self, path: &Path) -> ForkliftResult<()>;
 }
