@@ -7,8 +7,9 @@ use filesystem::*;
 use smbc::*;
 use std::path::{Path, PathBuf};
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct Entry {
+    context: NetworkContext,
     path: PathBuf,
     metadata: Option<Stat>,
     is_link: bool,
@@ -29,10 +30,15 @@ impl Entry {
             None => false,
         };
         Entry {
+            context: context.clone(),
             path: epath.to_path_buf(),
             metadata,
             is_link,
         }
+    }
+
+    pub fn context(&self) -> &NetworkContext {
+        &self.context
     }
 
     pub fn path(&self) -> &PathBuf {
@@ -118,7 +124,7 @@ pub fn has_different_size(src: &Entry, dest: &Entry) -> bool {
 /// Since #time attributes remain the same for samba + nfs calls,
 /// we can do comparison.
 /// returns true if src is more recent than dest (need to update dest then...)
-fn is_more_recent(src: &Entry, dest: &Entry) -> bool {
+pub fn is_more_recent(src: &Entry, dest: &Entry) -> bool {
     let dest_meta = match dest.metadata() {
         Some(stat) => stat,
         None => {
@@ -148,12 +154,9 @@ fn is_more_recent(src: &Entry, dest: &Entry) -> bool {
     src_ctime.num_microseconds() > dest_ctime.num_microseconds()
 }
 
-fn has_different_permissions(
-    src: &mut Entry,
-    src_context: &mut NetworkContext,
-    dest: &mut Entry,
-    dest_context: &mut NetworkContext,
-) -> bool {
+pub fn has_different_permissions(src: &Entry, dest: &Entry) -> bool {
+    let src_context = src.context();
+    let dest_context = dest.context();
     //check if context types are the same (which they really should be...)
     let matching_context = match src_context {
         NetworkContext::Nfs(_) => match dest_context {
@@ -207,12 +210,26 @@ fn has_different_permissions(
                     panic!("Filesystems do not match!")
                 }
                 NetworkContext::Samba(dctx) => {
-                    let src_xattr_values =
-                        ctx.getxattr(src.path().as_path(), &SmbcXAttr::All).unwrap();
-                    let dest_xattr_values = dctx
-                        .getxattr(dest.path().as_path(), &SmbcXAttr::All)
+                    let src_acl_values = ctx
+                        .getxattr(
+                            src.path().as_path(),
+                            &SmbcXAttr::AclAttr(SmbcAclAttr::AclAll),
+                        ).unwrap();
+                    let dest_acl_values = dctx
+                        .getxattr(
+                            dest.path().as_path(),
+                            &SmbcXAttr::AclAttr(SmbcAclAttr::AclAll),
+                        ).unwrap();
+
+                    let src_mod_values = ctx
+                        .getxattr(src.path().as_path(), &SmbcXAttr::DosAttr(SmbcDosAttr::Mode))
                         .unwrap();
-                    src_xattr_values == dest_xattr_values
+                    let dest_mod_values = dctx
+                        .getxattr(
+                            dest.path().as_path(),
+                            &SmbcXAttr::DosAttr(SmbcDosAttr::Mode),
+                        ).unwrap();
+                    src_acl_values != dest_acl_values || src_mod_values != dest_mod_values
                 }
             }
         }

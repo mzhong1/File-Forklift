@@ -17,12 +17,13 @@ pub enum FileSystemType {
     Samba,
 }
 
-pub enum NetworkContext<'a> {
-    Samba(&'a mut Smbc),
-    Nfs(&'a mut Nfs),
+#[derive(Clone)]
+pub enum NetworkContext {
+    Samba(Smbc),
+    Nfs(Nfs),
 }
 
-impl<'a> FileSystem<'a> for NetworkContext<'a> {
+impl FileSystem for NetworkContext {
     fn create(&mut self, path: &Path, flags: OFlag, mode: Mode) -> ForkliftResult<FileType> {
         match self {
             NetworkContext::Nfs(nfs) => {
@@ -411,7 +412,7 @@ impl Stat {
     }
 }
 
-pub trait FileSystem<'a> {
+pub trait FileSystem {
     fn create(&mut self, path: &Path, flags: OFlag, mode: Mode) -> ForkliftResult<FileType>;
     fn chmod(&self, path: &Path, mode: Mode) -> ForkliftResult<()>;
     fn stat(&self, path: &Path) -> ForkliftResult<Stat>;
