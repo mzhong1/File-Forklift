@@ -412,11 +412,11 @@ impl Stat {
 }
 
 pub trait FileSystem<'a> {
-    fn create(&'a mut self, path: &Path, flags: OFlag, mode: Mode) -> ForkliftResult<FileType>;
+    fn create(&mut self, path: &Path, flags: OFlag, mode: Mode) -> ForkliftResult<FileType>;
     fn chmod(&self, path: &Path, mode: Mode) -> ForkliftResult<()>;
     fn stat(&self, path: &Path) -> ForkliftResult<Stat>;
     fn mkdir(&self, path: &Path) -> ForkliftResult<()>;
-    fn open(&'a mut self, path: &Path, flags: OFlag, mode: Mode) -> ForkliftResult<FileType>;
+    fn open(&mut self, path: &Path, flags: OFlag, mode: Mode) -> ForkliftResult<FileType>;
     fn opendir(&mut self, path: &Path) -> ForkliftResult<DirectoryType>;
     fn rename(&self, oldpath: &Path, newpath: &Path) -> ForkliftResult<()>;
     fn unlink(&self, path: &Path) -> ForkliftResult<()>;

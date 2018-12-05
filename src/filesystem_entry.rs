@@ -15,11 +15,12 @@ pub struct Entry {
 }
 
 impl Entry {
-    pub fn new(epath: &Path, context: &mut NetworkContext) -> Self {
+    pub fn new(epath: &Path, context: &NetworkContext) -> Self {
         let metadata = match context.stat(epath) {
             Ok(stat) => Some(stat),
             Err(e) => {
                 error!("File {} does not exist! {}", epath.to_string_lossy(), e);
+                println!("Error {:?}", e);
                 None // note: file DNE
             }
         };
@@ -98,7 +99,7 @@ pub fn make_dir_all(p: &Path, fs: &mut NetworkContext) {
 /// Can do comparison
 /// returns true if src, dest files size are different or dest file does not exist
 /// false otherwise
-fn has_different_size(src: &Entry, dest: &Entry) -> bool {
+pub fn has_different_size(src: &Entry, dest: &Entry) -> bool {
     let src_meta = match src.metadata() {
         Some(stat) => stat,
         None => {
