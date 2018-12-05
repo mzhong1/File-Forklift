@@ -9,6 +9,7 @@ use self::nix::fcntl::OFlag;
 use self::nix::sys::stat::Mode;
 use error::ForkliftResult;
 use smbc::*;
+
 use std::path::Path;
 
 #[derive(Clone, Debug)]
@@ -36,6 +37,9 @@ impl FileSystem for NetworkContext {
             }
         }
     }
+    /// Please note, that Samba's chmod is very peculiar, and may conditionally work
+    /// or fail depending on the samba config file.  As such, it is recommended to
+    /// use setxattr, since samba uses DOS permissions
     fn chmod(&self, path: &Path, mode: Mode) -> ForkliftResult<()> {
         match self {
             NetworkContext::Nfs(nfs) => {
@@ -106,6 +110,11 @@ impl FileSystem for NetworkContext {
             }
         }
     }
+    ///
+    /// Please note that neither Samba nor Nfs use mode in their open function (
+    /// the option might exist, but does nothing.) the mode parameter exists should
+    /// another Filesystem need to be implemented where it's open function uses mode.
+    ///
     fn open(&mut self, path: &Path, flags: OFlag, mode: Mode) -> ForkliftResult<FileType> {
         match self {
             NetworkContext::Nfs(nfs) => {
@@ -176,7 +185,7 @@ impl File for FileType {
             }
         }
     }
-    fn write<F: File>(&self, f: F, buf: &[u8], offset: u64) -> ForkliftResult<i32> {
+    fn write(&self, buf: &[u8], offset: u64) -> ForkliftResult<i32> {
         match self {
             FileType::Nfs(nfile) => {
                 let bytes = nfile.pwrite(buf, offset)?;
@@ -253,21 +262,29 @@ impl File for FileType {
     }
 }
 
+/// general trait describing a File
 pub trait File {
+    /// read some number of bytes starting at offset from the file
     fn read(&self, count: u64, offset: u64) -> ForkliftResult<Vec<u8>>;
-    fn write<F: File>(&self, f: F, buf: &[u8], offset: u64) -> ForkliftResult<i32>;
+    /// write something to the file starting at offset
+    fn write(&self, buf: &[u8], offset: u64) -> ForkliftResult<i32>;
+    /// get this file's metadata
     fn fstat(&self) -> ForkliftResult<Stat>;
+    /// truncate the file to size
     fn truncate(&self, size: u64) -> ForkliftResult<()>;
 }
 
 #[derive(Clone)]
+/// an enum to hold the Directory structs of some generic FileSystem
 pub enum DirectoryType {
     Samba(SmbcDirectory),
     Nfs(NfsDirectory),
 }
 
 #[derive(Clone, Debug, Copy)]
+/// a generic struct to hold the time values of a struct
 pub struct Timespec {
+    /// number of seconds since the system's EPOCH
     tv_sec: i64,
     tv_nsec: i64,
 }
@@ -314,6 +331,7 @@ impl Timespec {
         }
     }
 
+    /// print the time formatted
     pub fn print_timeval_secs(&self) {
         let time = self.num_seconds();
         let naive_datetime = NaiveDateTime::from_timestamp(time, 0);
@@ -323,19 +341,33 @@ impl Timespec {
 }
 
 #[derive(Clone, Debug, Copy)]
+/// A general struct for stat
 pub struct Stat {
+    /// ID of device containing file
     st_dev: u64,
+    /// inode number
     st_ino: u64,
+    /// Protection (access permissions)
     st_mode: u32,
+    /// Number of hard links
     st_nlink: u64,
+    /// User ID of the owner
     st_uid: u32,
+    /// Group ID of the owner
     st_gid: u32,
+    /// Device ID if special file
     st_rdev: u64,
+    /// total size in bytes
     st_size: i64,
+    /// blocksize for file system I/O
     st_blksize: i64,
+    /// number of 512B blocks allocated
     st_blocks: i64,
+    /// time of last Access
     st_atime: Timespec,
+    /// time of last modification
     st_mtime: Timespec,
+    /// time of last status change
     st_ctime: Timespec,
 }
 
@@ -412,13 +444,22 @@ impl Stat {
     }
 }
 
+/// General trait describing a Filesystem
 pub trait FileSystem {
+    /// create a new FileType with the File trait
     fn create(&mut self, path: &Path, flags: OFlag, mode: Mode) -> ForkliftResult<FileType>;
+    /// change the permissions on a file/directory to mode
     fn chmod(&self, path: &Path, mode: Mode) -> ForkliftResult<()>;
+    /// get the metadata of a file
     fn stat(&self, path: &Path) -> ForkliftResult<Stat>;
+    /// make a new directory at path
     fn mkdir(&self, path: &Path) -> ForkliftResult<()>;
+    /// open a file at path
     fn open(&mut self, path: &Path, flags: OFlag, mode: Mode) -> ForkliftResult<FileType>;
+    /// open a directory at path
     fn opendir(&mut self, path: &Path) -> ForkliftResult<DirectoryType>;
+    /// rename a file/directory
     fn rename(&self, oldpath: &Path, newpath: &Path) -> ForkliftResult<()>;
+    /// unlink (remove) a file/directory
     fn unlink(&self, path: &Path) -> ForkliftResult<()>;
 }

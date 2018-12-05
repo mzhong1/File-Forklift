@@ -1,15 +1,17 @@
 extern crate nix;
 extern crate smbc;
 
+use self::nix::fcntl::OFlag;
 use self::nix::sys::stat::{Mode, SFlag};
 use error::{ForkliftError, ForkliftResult};
 use filesystem::*;
 use smbc::*;
 use std::path::{Path, PathBuf};
 
+const BUFF_SIZE: u64 = 1024 * 1024;
+
 #[derive(Clone)]
 pub struct Entry {
-    context: NetworkContext,
     path: PathBuf,
     metadata: Option<Stat>,
     is_link: bool,
@@ -30,15 +32,10 @@ impl Entry {
             None => false,
         };
         Entry {
-            context: context.clone(),
             path: epath.to_path_buf(),
             metadata,
             is_link,
         }
-    }
-
-    pub fn context(&self) -> &NetworkContext {
-        &self.context
     }
 
     pub fn path(&self) -> &PathBuf {
@@ -124,6 +121,8 @@ pub fn has_different_size(src: &Entry, dest: &Entry) -> bool {
 /// Since #time attributes remain the same for samba + nfs calls,
 /// we can do comparison.
 /// returns true if src is more recent than dest (need to update dest then...)
+/// NOTE: this only checks mtime, since ctime are attr changes and we want
+/// to know if there were any recent write changes
 pub fn is_more_recent(src: &Entry, dest: &Entry) -> bool {
     let dest_meta = match dest.metadata() {
         Some(stat) => stat,
@@ -144,26 +143,22 @@ pub fn is_more_recent(src: &Entry, dest: &Entry) -> bool {
     let src_mtime = src_meta.mtime();
     let dest_mtime = dest_meta.mtime();
 
-    if src_mtime.num_microseconds() > dest_mtime.num_microseconds() {
-        return true;
-    }
-
-    //check c_time for inode changes (owner, group, link, mode, etc.)
-    let src_ctime = src_meta.ctime();
-    let dest_ctime = dest_meta.ctime();
-    src_ctime.num_microseconds() > dest_ctime.num_microseconds()
+    src_mtime.num_microseconds() > dest_mtime.num_microseconds()
 }
 
-pub fn has_different_permissions(src: &Entry, dest: &Entry) -> bool {
-    let src_context = src.context();
-    let dest_context = dest.context();
+pub fn has_different_permissions(
+    src: &Entry,
+    src_context: &NetworkContext,
+    dest: &Entry,
+    dest_context: &NetworkContext,
+) -> bool {
     //check if context types are the same (which they really should be...)
     let matching_context = match src_context {
         NetworkContext::Nfs(_) => match dest_context {
             NetworkContext::Nfs(_) => true,
             NetworkContext::Samba(_) => false,
         },
-        NetworkContext::Samba(ctx) => match dest_context {
+        NetworkContext::Samba(_) => match dest_context {
             NetworkContext::Nfs(_) => false,
             NetworkContext::Samba(_) => true,
         },
@@ -236,11 +231,11 @@ pub fn has_different_permissions(src: &Entry, dest: &Entry) -> bool {
     }
 }
 
-fn copy_link(
+pub fn copy_link(
     src: &Entry,
-    src_context: &mut NetworkContext,
-    dest: &mut Entry,
-    dest_context: &mut NetworkContext,
+    src_context: &NetworkContext,
+    dest: &Entry,
+    dest_context: &NetworkContext,
 ) -> ForkliftResult<SyncOutcome> {
     //Check if correct Filesytem
     let context = match src_context {
@@ -271,47 +266,47 @@ fn copy_link(
     //read the link target into buf
     let src_size = src_stat.size();
     let readmax = context.get_readmax()?;
-    let mut buf: Vec<u8> = vec![];
+    let mut src_target: Vec<u8> = vec![];
     if src_size <= readmax as i64 {
         if src_size > 0 {
-            let mut buf: Vec<u8> = Vec::with_capacity(src_size as usize);
+            src_target = Vec::with_capacity(src_size as usize);
             unsafe {
-                buf.set_len(src_size as usize);
+                src_target.set_len(src_size as usize);
             }
         } else {
-            let mut buf: Vec<u8> = Vec::with_capacity(readmax as usize);
+            src_target = Vec::with_capacity(readmax as usize);
             unsafe {
-                buf.set_len(readmax as usize);
+                src_target.set_len(readmax as usize);
             }
         }
     } else {
         return Err(ForkliftError::FSError("File Name too long".to_string()));
     }
-    context.readlink(src.path().as_path(), &mut buf)?;
+    context.readlink(src.path().as_path(), &mut src_target)?;
 
     let outcome: SyncOutcome;
     if dest.is_link() {
-        let mut dbuf;
+        let mut dest_target;
         match dest.metadata() {
             Some(stat) => {
                 let dest_size = stat.size();
                 let readmax = dcontext.get_readmax()?;
                 if dest_size <= readmax as i64 {
                     if src_size > 0 {
-                        dbuf = Vec::with_capacity(src_size as usize);
+                        dest_target = Vec::with_capacity(src_size as usize);
                         unsafe {
-                            buf.set_len(src_size as usize);
+                            dest_target.set_len(src_size as usize);
                         }
                     } else {
-                        dbuf = Vec::with_capacity(readmax as usize);
+                        dest_target = Vec::with_capacity(readmax as usize);
                         unsafe {
-                            buf.set_len(readmax as usize);
+                            dest_target.set_len(readmax as usize);
                         }
                     }
                 } else {
                     return Err(ForkliftError::FSError("File Name too long".to_string()));
                 }
-                context.readlink(dest.path().as_path(), &mut dbuf)?;
+                context.readlink(dest.path().as_path(), &mut dest_target)?;
                 outcome = SyncOutcome::SymlinkUpdated;
             }
             None => {
@@ -326,6 +321,81 @@ fn copy_link(
         return Err(ForkliftError::FSError(err));
     }
 
-    dcontext.symlink(Path::new(&String::from_utf8(buf)?), dest.path().as_path())?;
+    dcontext.symlink(
+        Path::new(&String::from_utf8(src_target)?),
+        dest.path().as_path(),
+    )?;
     Ok(outcome)
+}
+
+/// determine size + num of buffers needed to copy
+/// returns (#max size buff, #min size buf, sizeof b/w buf)
+fn buffer_division(size: usize) {}
+
+pub fn copy_entry(
+    src: &Entry,
+    src_context: &mut NetworkContext,
+    dest: &Entry,
+    dest_context: &mut NetworkContext,
+) -> ForkliftResult<SyncOutcome> {
+    let mut src_file = match src_context.open(&src.path().as_path(), OFlag::O_RDWR, Mode::S_IRWXU) {
+        Ok(f) => f,
+        Err(e) => {
+            println!("Error {:?}", e);
+            let err = format!(
+                "Could not open {} for reading",
+                src.path().to_string_lossy()
+            );
+            return Err(ForkliftError::FSError(err));
+        }
+    };
+
+    let src_meta = match src.metadata() {
+        Some(s) => s,
+        None => panic!("src meta should not be None"),
+    };
+    let src_size = src_meta.size();
+
+    let mut dest_file =
+        match dest_context.open(&dest.path().as_path(), OFlag::O_RDWR, Mode::S_IRWXU) {
+            Ok(f) => f,
+            Err(e) => {
+                println!("Error {:?}", e);
+                let err = format!(
+                    "Could not open {} for writing",
+                    src.path().to_string_lossy()
+                );
+                return Err(ForkliftError::FSError(err));
+            }
+        };
+
+    //let mut buffer = vec![0, BUFF_SIZE];
+    let mut offset = 0;
+    let mut buffer;
+    let mut end = false;
+    while { !end } {
+        buffer = match src_file.read(BUFF_SIZE, offset) {
+            Ok(buf) => buf,
+            Err(e) => {
+                let err = format!("Could not read from {}", src.path().to_string_lossy());
+                return Err(ForkliftError::FSError(err));
+            }
+        };
+        if buffer.len() <= BUFF_SIZE as usize {
+            end = true;
+        }
+
+        match dest_file.write(&buffer, offset) {
+            Ok(_) => (),
+            Err(e) => {
+                let err = format!("Could not write to {}", src.path().to_string_lossy());
+                return Err(ForkliftError::FSError(err));
+            }
+        };
+        offset = offset + BUFF_SIZE;
+        //INSERT PROGRESS MESSAGE HERE
+        //SEND PROGRESS
+    }
+
+    Ok(SyncOutcome::FileCopied)
 }
