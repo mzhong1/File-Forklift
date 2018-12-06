@@ -14,7 +14,7 @@ const BUFF_SIZE: u64 = 1024 * 1024;
 pub struct Entry {
     path: PathBuf,
     metadata: Option<Stat>,
-    is_link: bool,
+    is_link: Option<bool>,
 }
 
 impl Entry {
@@ -28,8 +28,8 @@ impl Entry {
             }
         };
         let is_link = match metadata {
-            Some(m) => m.mode() & SFlag::S_IFMT.bits() == SFlag::S_IFLNK.bits(),
-            None => false,
+            Some(m) => Some(m.mode() & SFlag::S_IFMT.bits() == SFlag::S_IFLNK.bits()),
+            None => None,
         };
         Entry {
             path: epath.to_path_buf(),
@@ -46,7 +46,7 @@ impl Entry {
         self.metadata
     }
 
-    pub fn is_link(&self) -> bool {
+    pub fn is_link(&self) -> Option<bool> {
         self.is_link
     }
 }
@@ -152,22 +152,6 @@ pub fn has_different_permissions(
     dest: &Entry,
     dest_context: &NetworkContext,
 ) -> bool {
-    //check if context types are the same (which they really should be...)
-    let matching_context = match src_context {
-        NetworkContext::Nfs(_) => match dest_context {
-            NetworkContext::Nfs(_) => true,
-            NetworkContext::Samba(_) => false,
-        },
-        NetworkContext::Samba(_) => match dest_context {
-            NetworkContext::Nfs(_) => false,
-            NetworkContext::Samba(_) => true,
-        },
-    };
-    if !matching_context {
-        error!("Filesystems do not match!");
-        panic!("Filesystems do not match!")
-    }
-
     //check file existence
     let dest_meta = match dest.metadata() {
         Some(stat) => stat,
@@ -186,13 +170,20 @@ pub fn has_different_permissions(
     };
 
     match src_context {
-        NetworkContext::Nfs(_) =>
-        //check for matching mode values from stat
-        {
-            if src_meta.mode() != dest_meta.mode() {
-                return true;
-            } else {
-                return false;
+        NetworkContext::Nfs(_) => {
+            match dest_context {
+                //check for matching mode values from stat
+                NetworkContext::Nfs(_) => {
+                    if src_meta.mode() != dest_meta.mode() {
+                        return true;
+                    } else {
+                        return false;
+                    }
+                }
+                NetworkContext::Samba(_) => {
+                    error!("Filesystems do not match!");
+                    panic!("Filesystems do not match!")
+                }
             }
         }
         NetworkContext::Samba(ctx) => {
@@ -265,8 +256,9 @@ pub fn copy_link(
     };
     //read the link target into buf
     let src_size = src_stat.size();
+    let src_path = src.path();
     let readmax = context.get_readmax()?;
-    let mut src_target: Vec<u8> = vec![];
+    let mut src_target: Vec<u8>;
     if src_size <= readmax as i64 {
         if src_size > 0 {
             src_target = Vec::with_capacity(src_size as usize);
@@ -282,55 +274,97 @@ pub fn copy_link(
     } else {
         return Err(ForkliftError::FSError("File Name too long".to_string()));
     }
-    context.readlink(src.path().as_path(), &mut src_target)?;
-
+    match context.readlink(src_path.as_path(), &mut src_target) {
+        Ok(_) => (),
+        Err(e) => {
+            let err = format!(
+                "Unable to read link at {}, {:?}",
+                src_path.to_string_lossy(),
+                e
+            );
+            return Err(ForkliftError::FSError(err));
+        }
+    };
+    let src_target = String::from_utf8(src_target)?;
     let outcome: SyncOutcome;
-    if dest.is_link() {
-        let mut dest_target;
-        match dest.metadata() {
-            Some(stat) => {
-                let dest_size = stat.size();
-                let readmax = dcontext.get_readmax()?;
-                if dest_size <= readmax as i64 {
-                    if src_size > 0 {
-                        dest_target = Vec::with_capacity(src_size as usize);
-                        unsafe {
-                            dest_target.set_len(src_size as usize);
-                        }
-                    } else {
-                        dest_target = Vec::with_capacity(readmax as usize);
-                        unsafe {
-                            dest_target.set_len(readmax as usize);
-                        }
+    let dest_path = dest.path();
+    match dest.is_link() {
+        Some(true) => {
+            //NOTE, this is safe since is_link is SOME(true) only if metadata exists
+            let dest_stat = dest.metadata().unwrap();
+            //read the link target into buf
+            let dest_size = dest_stat.size();
+            let dest_path = dest.path();
+            let readmax = dcontext.get_readmax()?;
+            let mut dest_target: Vec<u8>;
+            if dest_size <= readmax as i64 {
+                if dest_size > 0 {
+                    dest_target = Vec::with_capacity(dest_size as usize);
+                    unsafe {
+                        dest_target.set_len(dest_size as usize);
                     }
                 } else {
-                    return Err(ForkliftError::FSError("File Name too long".to_string()));
+                    dest_target = Vec::with_capacity(readmax as usize);
+                    unsafe {
+                        dest_target.set_len(readmax as usize);
+                    }
                 }
-                context.readlink(dest.path().as_path(), &mut dest_target)?;
-                outcome = SyncOutcome::SymlinkUpdated;
+            } else {
+                return Err(ForkliftError::FSError("File Name too long".to_string()));
             }
-            None => {
-                outcome = SyncOutcome::SymlinkCreated;
+            match dcontext.readlink(dest_path.as_path(), &mut dest_target) {
+                Ok(_) => (),
+                Err(e) => {
+                    let err = format!(
+                        "Unable to read link at {}, {:?}",
+                        src_path.to_string_lossy(),
+                        e
+                    );
+                    return Err(ForkliftError::FSError(err));
+                }
+            };
+            let dest_target = String::from_utf8(dest_target)?;
+            if dest_target != src_target {
+                match dcontext.unlink(dest_path.as_path()) {
+                    Ok(_) => (),
+                    Err(e) => {
+                        let err = format!(
+                            "Could not remove {:?} while updating link, {}",
+                            dest_path, e
+                        );
+                        return Err(ForkliftError::FSError(err));
+                    }
+                }
             }
+            outcome = SyncOutcome::SymlinkUpdated
         }
-    } else {
-        let err = format!(
-            "Refusing to replace existing path {:?} by symlink",
-            dest.path()
-        );
-        return Err(ForkliftError::FSError(err));
+        Some(false) => {
+            //Not safe to delete...
+            let err = format!(
+                "Refusing to replace existing path {:?} by symlink",
+                dest_path
+            );
+            return Err(ForkliftError::FSError(err));
+        }
+        None => {
+            outcome = SyncOutcome::SymlinkCreated;
+        }
     }
 
-    dcontext.symlink(
-        Path::new(&String::from_utf8(src_target)?),
-        dest.path().as_path(),
-    )?;
+    match dcontext.symlink(Path::new(&src_target), dest.path().as_path()) {
+        Ok(_) => (),
+        Err(e) => {
+            let err = format!(
+                "Error {}, Could not create link from {} to {:?}",
+                e,
+                dest_path.to_string_lossy(),
+                src_target
+            );
+            return Err(ForkliftError::FSError(err));
+        }
+    };
     Ok(outcome)
 }
-
-/// determine size + num of buffers needed to copy
-/// returns (#max size buff, #min size buf, sizeof b/w buf)
-fn buffer_division(size: usize) {}
 
 pub fn copy_entry(
     src: &Entry,
@@ -338,7 +372,7 @@ pub fn copy_entry(
     dest: &Entry,
     dest_context: &mut NetworkContext,
 ) -> ForkliftResult<SyncOutcome> {
-    let mut src_file = match src_context.open(&src.path().as_path(), OFlag::O_RDWR, Mode::S_IRWXU) {
+    let src_file = match src_context.open(&src.path().as_path(), OFlag::O_RDONLY, Mode::S_IRWXU) {
         Ok(f) => f,
         Err(e) => {
             println!("Error {:?}", e);
@@ -354,20 +388,22 @@ pub fn copy_entry(
         Some(s) => s,
         None => panic!("src meta should not be None"),
     };
-    let src_size = src_meta.size();
 
-    let mut dest_file =
-        match dest_context.open(&dest.path().as_path(), OFlag::O_RDWR, Mode::S_IRWXU) {
-            Ok(f) => f,
-            Err(e) => {
-                println!("Error {:?}", e);
-                let err = format!(
-                    "Could not open {} for writing",
-                    src.path().to_string_lossy()
-                );
-                return Err(ForkliftError::FSError(err));
-            }
-        };
+    let dest_file = match dest_context.create(
+        &dest.path().as_path(),
+        OFlag::O_RDWR | OFlag::O_CREAT,
+        Mode::S_IRWXU,
+    ) {
+        Ok(f) => f,
+        Err(e) => {
+            println!("Error {:?}", e);
+            let err = format!(
+                "Could not open {} for writing",
+                dest.path().to_string_lossy()
+            );
+            return Err(ForkliftError::FSError(err));
+        }
+    };
 
     //let mut buffer = vec![0, BUFF_SIZE];
     let mut offset = 0;
@@ -377,7 +413,11 @@ pub fn copy_entry(
         buffer = match src_file.read(BUFF_SIZE, offset) {
             Ok(buf) => buf,
             Err(e) => {
-                let err = format!("Could not read from {}", src.path().to_string_lossy());
+                let err = format!(
+                    "Could not read from {}, {}",
+                    src.path().to_string_lossy(),
+                    e
+                );
                 return Err(ForkliftError::FSError(err));
             }
         };
@@ -388,7 +428,11 @@ pub fn copy_entry(
         match dest_file.write(&buffer, offset) {
             Ok(_) => (),
             Err(e) => {
-                let err = format!("Could not write to {}", src.path().to_string_lossy());
+                let err = format!(
+                    "Error {}, Could not write to {}",
+                    e,
+                    dest.path().to_string_lossy()
+                );
                 return Err(ForkliftError::FSError(err));
             }
         };
@@ -396,6 +440,5 @@ pub fn copy_entry(
         //INSERT PROGRESS MESSAGE HERE
         //SEND PROGRESS
     }
-
     Ok(SyncOutcome::FileCopied)
 }
