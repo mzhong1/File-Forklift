@@ -518,7 +518,7 @@ pub fn checksum_copy(
         //update offset
         //check if num_written > 0
         if num_written > 0 {
-            offset = 0;
+            offset += (num_written - 1) as u64;
         } else {
             offset += src_buf.len() as u64;
         }
