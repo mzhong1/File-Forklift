@@ -5,6 +5,8 @@ extern crate clap;
 extern crate api;
 extern crate crossbeam;
 extern crate dirs;
+#[macro_use]
+extern crate lazy_static;
 extern crate nanomsg;
 extern crate rendezvous_hash;
 extern crate simplelog;
