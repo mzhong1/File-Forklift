@@ -4,10 +4,10 @@ extern crate nix;
 extern crate smbc;
 
 use self::chrono::*;
-use self::libnfs::*;
-use self::nix::fcntl::OFlag;
-use self::nix::sys::stat::Mode;
 use error::ForkliftResult;
+use libnfs::*;
+use nix::fcntl::OFlag;
+use nix::sys::stat::Mode;
 use smbc::*;
 
 use std::path::Path;

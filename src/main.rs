@@ -7,7 +7,9 @@ extern crate crossbeam;
 extern crate dirs;
 #[macro_use]
 extern crate lazy_static;
+extern crate libnfs;
 extern crate nanomsg;
+extern crate nix;
 extern crate rendezvous_hash;
 extern crate simplelog;
 extern crate smbc;
