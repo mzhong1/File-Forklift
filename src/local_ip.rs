@@ -2,7 +2,7 @@ extern crate log;
 extern crate nix;
 
 use self::nix::ifaddrs::getifaddrs;
-use error::{ForkliftError, ForkliftResult};
+use crate::error::{ForkliftError, ForkliftResult};
 
 use std::fs::File;
 use std::io::{BufRead, BufReader, Result};

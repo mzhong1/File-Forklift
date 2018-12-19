@@ -1,4 +1,4 @@
-use error::ForkliftResult;
+use crate::error::ForkliftResult;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::Path;

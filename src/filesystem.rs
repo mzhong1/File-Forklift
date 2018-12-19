@@ -4,7 +4,7 @@ extern crate nix;
 extern crate smbc;
 
 use self::chrono::*;
-use error::ForkliftResult;
+use crate::error::ForkliftResult;
 use libnfs::*;
 use nix::fcntl::OFlag;
 use nix::sys::stat::Mode;

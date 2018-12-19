@@ -73,7 +73,7 @@ impl err for ForkliftError {
             },
             ForkliftError::IpLocalError => None,
             ForkliftError::InvalidConfigError => None,
-            ForkliftError::FSError(ref d) => None,
+            ForkliftError::FSError(ref _d) => None,
         }
     }
 }

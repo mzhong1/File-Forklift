@@ -1,12 +1,12 @@
 extern crate rendezvous_hash;
 
-use error::{ForkliftError, ForkliftResult};
+use crate::error::{ForkliftError, ForkliftResult};
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
-use utils;
+use crate::utils;
 
 #[derive(Debug, Clone, Eq)]
 pub struct Node {

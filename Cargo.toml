@@ -21,8 +21,8 @@ crossbeam = "0.4"
 rayon = "1.0.2"
 spmc = "0.2.2"
 chrono = "0.4.6"
-smbc = {path = "/home/mzhong215/smbc"}
-smbclient-sys = {path = "/home/mzhong215/smbclient-sys" }
+smbc = {git = "ssh://git@github.comcast.com/SDS/smbc.git"}
+smbclient-sys = {git = "ssh://git@github.comcast.com/SDS/smbclient-sys.git"}
 meowhash = "0.1.2"
 digest = "0.8.0"
 nom = "4.1.1"

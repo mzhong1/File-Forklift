@@ -35,11 +35,11 @@ mod pulse;
 mod socket_node;
 mod utils;
 
-use cluster::Cluster;
-use error::ForkliftResult;
-use node::*;
+use crate::cluster::Cluster;
+use crate::error::ForkliftResult;
+use crate::node::*;
+use crate::socket_node::*;
 use simplelog::{CombinedLogger, Config, SharedLogger, TermLogger, WriteLogger};
-use socket_node::*;
 
 #[test]
 fn test_init_router() {
@@ -155,11 +155,11 @@ fn init_logs(f: &Path, level: simplelog::LevelFilter) -> ForkliftResult<()> {
 }
 
 /*
-    main takes in two flags: 
+    main takes in two flags:
     j: computer is a new node, not a part of the original list
     d: create debug logs
     When the 'j' flag is raised, the program takes in the arguments ip_addr:port, otherip_addr:port
-    Without the 'j' flag, the program takes in a file argument of ip_addr:port 
+    Without the 'j' flag, the program takes in a file argument of ip_addr:port
     addresses of all nodes in the graph
 */
 fn main() -> ForkliftResult<()> {
@@ -224,7 +224,7 @@ fn main() -> ForkliftResult<()> {
     let _handle = heartbeat(&matches, s);
 
     rendezvous(&mut active_nodes, &r);
-    _handle.join().unwrap();
+    _handle.join().unwrap().unwrap();
     Ok(())
 }
 

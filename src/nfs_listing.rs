@@ -191,9 +191,9 @@ fn t_traversal(uid: i32, gid: i32, level: i32, ip: &str, root: &str, path: &str)
     Ok(())
 }
 
-fn linear_thread_lister(uid: i32, gid: i32, ip: &str, root: &str, num_threads: usize) {
+fn linear_thread_lister(uid: i32, gid: i32, _ip: &str, _root: &str, num_threads: usize) {
     let (tx, rx) = channel::unbounded();
-    let pool = rayon::ThreadPoolBuilder::new()
+    let _pool = rayon::ThreadPoolBuilder::new()
         .num_threads(num_threads)
         .build()
         .unwrap();
@@ -242,7 +242,7 @@ fn linear_thread_lister(uid: i32, gid: i32, ip: &str, root: &str, num_threads: u
         for _ in 0..(num_threads - 1) {
             let rx = rx.clone();
             rayon::scope(|s| {
-                s.spawn(|s| {
+                s.spawn(|_s| {
                     match rx.recv() {
                         Some(m) => {
                             let mut nfs = Nfs::new().unwrap();
@@ -253,7 +253,7 @@ fn linear_thread_lister(uid: i32, gid: i32, ip: &str, root: &str, num_threads: u
                                 Some(p) => {
                                     println!("opening: {}", p.display());
                                     let dir = nfs.opendir(&p).unwrap();
-                                    for f in dir {}
+                                    for _f in dir {}
                                 }
                                 None => {
                                     processing_done = true;
