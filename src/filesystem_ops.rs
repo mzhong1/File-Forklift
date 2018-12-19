@@ -50,10 +50,7 @@ pub enum SyncOutcome {
 /// @return         true if the path exists (is valid), false otherwise
 ///
 pub fn exist(path: &Path, fs: &mut NetworkContext) -> bool {
-    match fs.stat(path) {
-        Ok(_) => true,
-        Err(_) => false,
-    }
+    fs.stat(path).is_ok()
 }
 
 pub fn get_rel_path(a: &Path, b: &Path) -> ForkliftResult<PathBuf> {
@@ -368,7 +365,7 @@ pub fn has_different_permissions(
     match (src_context, dest_context) {
         (NetworkContext::Nfs(_), NetworkContext::Nfs(_)) => {
             trace!("src mode {:?}, dest mode {:?}", src_mode, dest_mode);
-            return Ok(src_mode != dest_mode);
+            Ok(src_mode != dest_mode)
         }
         (NetworkContext::Samba(ctx), NetworkContext::Samba(dctx)) => {
             let xattr = SmbcXAttr::DosAttr(SmbcDosAttr::Mode);
@@ -386,9 +383,9 @@ pub fn has_different_permissions(
         }
         (_, _) => {
             error!("Filesystems do not match!");
-            return Err(ForkliftError::FSError(
+            Err(ForkliftError::FSError(
                 "Filesystems do not match!".to_string(),
-            ));
+            ))
         }
     }
 }
@@ -596,7 +593,7 @@ fn open_file(
         Err(e) => {
             let err = format!("Error {}, {}", e, error);
             error!("{}", err);
-            return Err(ForkliftError::FSError(err));
+            Err(ForkliftError::FSError(err))
         }
     }
 }
@@ -628,7 +625,7 @@ fn write_file(path: &Path, file: &FileType, buffer: &[u8], offset: u64) -> Forkl
         Err(e) => {
             let err = format!("Error {}, Could not write to {:?}", e, path);
             error!("{}", err);
-            return Err(ForkliftError::FSError(err));
+            Err(ForkliftError::FSError(err))
         }
     }
 }
@@ -680,7 +677,7 @@ pub fn copy_entry(
         if num_written == 0 {
             end = true;
         }
-        offset = offset + num_written as u64;
+        offset += num_written as u64;
         //INSERT PROGRESS MESSAGE HERE
         //SEND PROGRESS
     }
@@ -754,7 +751,7 @@ pub fn checksum_copy(
             file_buf.append(&mut src_buf);
             offset += src_buf.len() as u64;
         }
-        if src_buf.len() == 0 {
+        if src_buf.is_empty() {
             end = true;
         }
     } //end loop
@@ -820,18 +817,14 @@ pub fn sync_entry(
         (Ok(size_dif), Ok(recent)) => {
             if size_dif || recent {
                 debug!("Is different!!! size {}  recent {}", size_dif, recent);
-                return copy_entry(src, src_context, dest, dest_context);
+                copy_entry(src, src_context, dest, dest_context)
             } else {
-                return checksum_copy(src, src_context, dest, dest_context);
+                checksum_copy(src, src_context, dest, dest_context)
             }
         }
-        (Err(e), _) => {
-            return Err(e);
-        }
-        (_, Err(e)) => {
-            return Err(e);
-        }
-    };
+        (Err(e), _) => Err(e),
+        (_, Err(e)) => Err(e),
+    }
 }
 
 ///
@@ -848,25 +841,26 @@ pub fn sync_entry(
 ///                     input sid
 ///
 fn check_acl_sid_remove(check_sid: &Sid, dest_acls: &mut Vec<SmbcAclValue>) -> Option<ACE> {
-    let mut count = 0;
-    for dest_acl in dest_acls.clone() {
-        match dest_acl {
-            SmbcAclValue::Acl(ACE::Numeric(
-                SidType::Numeric(Some(dest_sid)),
-                atype,
-                flag,
-                mask,
-            )) => {
-                debug!("Sid to check {}, dest sid {}", *check_sid, &dest_sid);
-                if *check_sid == dest_sid {
-                    let ret = ACE::Numeric(SidType::Numeric(Some(dest_sid)), atype, flag, mask);
-                    &dest_acls.remove(count);
-                    return Some(ret);
-                }
+    for (count, dest_acl) in dest_acls.iter().enumerate() {
+        if let SmbcAclValue::Acl(ACE::Numeric(
+            SidType::Numeric(Some(dest_sid)),
+            atype,
+            flag,
+            mask,
+        )) = dest_acl
+        {
+            debug!("Sid to check {}, dest sid {}", *check_sid, &dest_sid);
+            if check_sid == dest_sid {
+                let ret = ACE::Numeric(
+                    SidType::Numeric(Some(dest_sid.clone())),
+                    atype.clone(),
+                    *flag,
+                    *mask,
+                );
+                dest_acls.remove(count);
+                return Some(ret);
             }
-            _ => (),
         }
-        count += 1;
     }
     None
 }
@@ -937,31 +931,25 @@ fn change_mode(
 ///
 fn get_mapped_sid(
     sid: &str,
-    dest_acls_plus: &Vec<SmbcAclValue>,
+    dest_acls_plus: &[SmbcAclValue],
     dest_ctx: &Smbc,
     dest_path: &Path,
 ) -> ForkliftResult<Option<Sid>> {
     //let dest_acls = get_acl_list(dest_ctx, dest_path, false);
-    let mut count = 0;
-    for ace in dest_acls_plus {
-        match ace {
-            SmbcAclValue::AclPlus(ACE::Named(SidType::Named(Some(dest_sid)), _, _, _)) => {
-                debug!("src sid {} dest_sid {}", &sid, &dest_sid);
-                if sid == dest_sid {
-                    trace!("equals src sid {} dest_sid {}", &sid, &dest_sid);
-                    let dest_acls = get_acl_list(dest_ctx, dest_path, false)?;
-                    let send_ace = &dest_acls[count];
-                    match send_ace {
-                        SmbcAclValue::Acl(ACE::Numeric(SidType::Numeric(Some(send)), _, _, _)) => {
-                            return Ok(Some(send.clone()));
-                        }
-                        _ => (),
-                    }
+    for (count, ace) in dest_acls_plus.iter().enumerate() {
+        if let SmbcAclValue::AclPlus(ACE::Named(SidType::Named(Some(dest_sid)), _, _, _)) = ace {
+            debug!("src sid {} dest_sid {}", &sid, &dest_sid);
+            if sid == dest_sid {
+                trace!("equals src sid {} dest_sid {}", &sid, &dest_sid);
+                let dest_acls = get_acl_list(dest_ctx, dest_path, false)?;
+                let send_ace = &dest_acls[count];
+                if let SmbcAclValue::Acl(ACE::Numeric(SidType::Numeric(Some(send)), _, _, _)) =
+                    send_ace
+                {
+                    return Ok(Some(send.clone()));
                 }
             }
-            _ => (),
         }
-        count += 1;
     }
     Ok(None)
 }
@@ -1165,8 +1153,8 @@ fn copy_acl(
 /// then replace the incorrect destination acls with the source acls
 ///
 pub fn map_names_and_copy(
-    src_acls: &Vec<SmbcAclValue>,
-    src_acls_plus: &Vec<SmbcAclValue>,
+    src_acls: &[SmbcAclValue],
+    src_acls_plus: &[SmbcAclValue],
     dest_acls: &mut Vec<SmbcAclValue>,
     dest_ctx: &Smbc,
     dest_path: &Path,
@@ -1244,13 +1232,12 @@ pub fn map_names_and_copy(
 ///
 pub fn get_acl_list(fs: &Smbc, path: &Path, plus: bool) -> ForkliftResult<Vec<SmbcAclValue>> {
     let err = format!("unable to get acls from {:?}", path);
-    let suc = format!("acl all get success");
-    let mut acls = match plus {
-        true => {
+    let suc = "acl all get success";
+    let mut acls = {
+        if plus {
             let acl_plus_xattr = SmbcXAttr::AclAttr(SmbcAclAttr::AclAllPlus);
-            get_xattr(path, fs, &acl_plus_xattr, &err, &suc)?
-        }
-        false => {
+            get_xattr(path, fs, &acl_plus_xattr, &err, suc)?
+        } else {
             let acl_xattr = SmbcXAttr::AclAttr(SmbcAclAttr::AclAll);
             get_xattr(path, fs, &acl_xattr, &err, &suc)?
         }

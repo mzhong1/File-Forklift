@@ -4,19 +4,13 @@ extern crate nix;
 extern crate smbc;
 
 use self::chrono::*;
+use self::libnfs::*;
+use self::nix::fcntl::OFlag;
+use self::nix::sys::stat::Mode;
 use crate::error::ForkliftResult;
-use libnfs::*;
-use nix::fcntl::OFlag;
-use nix::sys::stat::Mode;
 use smbc::*;
 
 use std::path::Path;
-
-#[derive(Clone, Debug)]
-pub enum FileSystemType {
-    Nfs,
-    Samba,
-}
 
 #[derive(Clone)]
 pub enum NetworkContext {
@@ -43,14 +37,13 @@ impl FileSystem for NetworkContext {
     fn chmod(&self, path: &Path, mode: Mode) -> ForkliftResult<()> {
         match self {
             NetworkContext::Nfs(nfs) => {
-                let ret = nfs.lchmod(path, mode)?;
-                Ok(ret)
+                nfs.lchmod(path, mode)?;
             }
             NetworkContext::Samba(smbc) => {
-                let ret = smbc.chmod(path, mode)?;
-                Ok(ret)
+                smbc.chmod(path, mode)?;
             }
         }
+        Ok(())
     }
     fn stat(&self, path: &Path) -> ForkliftResult<Stat> {
         match self {
@@ -59,7 +52,7 @@ impl FileSystem for NetworkContext {
                 let atime = Timespec::new(stat.nfs_atime as i64, stat.nfs_atime_nsec as i64);
                 let mtime = Timespec::new(stat.nfs_mtime as i64, stat.nfs_mtime_nsec as i64);
                 let ctime = Timespec::new(stat.nfs_ctime as i64, stat.nfs_ctime_nsec as i64);
-                Ok(Stat::new(
+                let s = (
                     stat.nfs_dev,
                     stat.nfs_ino,
                     stat.nfs_mode as u32,
@@ -70,17 +63,15 @@ impl FileSystem for NetworkContext {
                     stat.nfs_size as i64,
                     stat.nfs_blksize as i64,
                     stat.nfs_blocks as i64,
-                    atime,
-                    mtime,
-                    ctime,
-                ))
+                );
+                Ok(Stat::new(s, atime, mtime, ctime))
             }
             NetworkContext::Samba(sfile) => {
                 let stat = sfile.stat(path)?;
                 let atime = Timespec::new(stat.st_atim.tv_sec as i64, stat.st_atim.tv_nsec as i64);
                 let ctime = Timespec::new(stat.st_ctim.tv_sec as i64, stat.st_ctim.tv_nsec as i64);
                 let mtime = Timespec::new(stat.st_mtim.tv_sec as i64, stat.st_mtim.tv_nsec as i64);
-                Ok(Stat::new(
+                let s = (
                     stat.st_dev as u64,
                     stat.st_ino as u64,
                     stat.st_mode as u32,
@@ -91,24 +82,21 @@ impl FileSystem for NetworkContext {
                     stat.st_size as i64,
                     stat.st_blksize as i64,
                     stat.st_blocks as i64,
-                    atime,
-                    mtime,
-                    ctime,
-                ))
+                );
+                Ok(Stat::new(s, atime, mtime, ctime))
             }
         }
     }
     fn mkdir(&self, path: &Path) -> ForkliftResult<()> {
         match self {
             NetworkContext::Nfs(nfs) => {
-                let ret = nfs.mkdir(path)?;
-                Ok(ret)
+                nfs.mkdir(path)?;
             }
             NetworkContext::Samba(smbc) => {
-                let ret = smbc.mkdir(path, Mode::S_IRWXU)?;
-                Ok(ret)
+                smbc.mkdir(path, Mode::S_IRWXU)?;
             }
         }
+        Ok(())
     }
     ///
     /// Please note that neither Samba nor Nfs use mode in their open function (
@@ -142,26 +130,24 @@ impl FileSystem for NetworkContext {
     fn rename(&self, oldpath: &Path, newpath: &Path) -> ForkliftResult<()> {
         match self {
             NetworkContext::Nfs(nfs) => {
-                let ret = nfs.rename(oldpath, newpath)?;
-                Ok(ret)
+                nfs.rename(oldpath, newpath)?;
             }
             NetworkContext::Samba(smbc) => {
-                let ret = smbc.rename(oldpath, newpath)?;
-                Ok(ret)
+                smbc.rename(oldpath, newpath)?;
             }
         }
+        Ok(())
     }
     fn unlink(&self, path: &Path) -> ForkliftResult<()> {
         match self {
             NetworkContext::Nfs(nfs) => {
-                let ret = nfs.unlink(path)?;
-                Ok(ret)
+                nfs.unlink(path)?;
             }
             NetworkContext::Samba(smbc) => {
-                let ret = smbc.unlink(path)?;
-                Ok(ret)
+                smbc.unlink(path)?;
             }
         }
+        Ok(())
     }
 }
 
@@ -209,7 +195,7 @@ impl File for FileType {
                 let atime = Timespec::new(stat.nfs_atime as i64, stat.nfs_atime_nsec as i64);
                 let mtime = Timespec::new(stat.nfs_mtime as i64, stat.nfs_mtime_nsec as i64);
                 let ctime = Timespec::new(stat.nfs_ctime as i64, stat.nfs_ctime_nsec as i64);
-                Ok(Stat::new(
+                let s = (
                     stat.nfs_dev,
                     stat.nfs_ino,
                     stat.nfs_mode as u32,
@@ -220,17 +206,15 @@ impl File for FileType {
                     stat.nfs_size as i64,
                     stat.nfs_blksize as i64,
                     stat.nfs_blocks as i64,
-                    atime,
-                    mtime,
-                    ctime,
-                ))
+                );
+                Ok(Stat::new(s, atime, mtime, ctime))
             }
             FileType::Samba(sfile) => {
                 let stat = sfile.fstat()?;
                 let atime = Timespec::new(stat.st_atim.tv_sec as i64, stat.st_atim.tv_nsec as i64);
                 let ctime = Timespec::new(stat.st_ctim.tv_sec as i64, stat.st_ctim.tv_nsec as i64);
                 let mtime = Timespec::new(stat.st_mtim.tv_sec as i64, stat.st_mtim.tv_nsec as i64);
-                Ok(Stat::new(
+                let s = (
                     stat.st_dev as u64,
                     stat.st_ino as u64,
                     stat.st_mode as u32,
@@ -241,24 +225,21 @@ impl File for FileType {
                     stat.st_size as i64,
                     stat.st_blksize as i64,
                     stat.st_blocks as i64,
-                    atime,
-                    mtime,
-                    ctime,
-                ))
+                );
+                Ok(Stat::new(s, atime, mtime, ctime))
             }
         }
     }
     fn truncate(&self, size: u64) -> ForkliftResult<()> {
         match self {
             FileType::Nfs(nfile) => {
-                let ret = nfile.ftruncate(size)?;
-                Ok(ret)
+                nfile.ftruncate(size)?;
             }
             FileType::Samba(sfile) => {
-                let ret = sfile.ftruncate(size as i64)?;
-                Ok(ret)
+                sfile.ftruncate(size as i64)?;
             }
         }
+        Ok(())
     }
 }
 
@@ -318,14 +299,14 @@ impl Timespec {
     }
 
     pub fn num_microseconds(&self) -> i64 {
-        let secs = self.num_seconds() * 1000000;
+        let secs = self.num_seconds() * 1_000_000;
         let usecs = self.micros_mod_sec();
         secs + usecs
     }
 
     fn micros_mod_sec(&self) -> i64 {
         if self.tv_sec < 0 && self.tv_nsec > 0 {
-            self.tv_sec - 1000000
+            self.tv_sec - 1_000_000
         } else {
             self.tv_nsec
         }
@@ -373,31 +354,22 @@ pub struct Stat {
 
 impl Stat {
     pub fn new(
-        dev: u64,
-        ino: u64,
-        mode: u32,
-        nlink: u64,
-        uid: u32,
-        gid: u32,
-        rdev: u64,
-        size: i64,
-        blksize: i64,
-        blocks: i64,
+        stat: (u64, u64, u32, u64, u32, u32, u64, i64, i64, i64),
         atime: Timespec,
         mtime: Timespec,
         ctime: Timespec,
     ) -> Self {
         Stat {
-            st_dev: dev,
-            st_ino: ino,
-            st_mode: mode,
-            st_nlink: nlink,
-            st_uid: uid,
-            st_gid: gid,
-            st_rdev: rdev,
-            st_size: size,
-            st_blksize: blksize,
-            st_blocks: blocks,
+            st_dev: stat.0,
+            st_ino: stat.1,
+            st_mode: stat.2,
+            st_nlink: stat.3,
+            st_uid: stat.4,
+            st_gid: stat.5,
+            st_rdev: stat.6,
+            st_size: stat.7,
+            st_blksize: stat.8,
+            st_blocks: stat.9,
             st_atime: atime,
             st_mtime: mtime,
             st_ctime: ctime,
