@@ -619,7 +619,7 @@ fn open_file(
 ///                 against the size of the buffer to see if we
 ///                 need to write again
 ///
-fn write_file(path: &Path, file: &FileType, buffer: &[u8], offset: u64) -> ForkliftResult<i32> {
+fn write_file(path: &Path, file: &FileType, buffer: &[u8], offset: u64) -> ForkliftResult<u64> {
     match file.write(buffer, offset) {
         Ok(n) => Ok(n),
         Err(e) => {
@@ -724,7 +724,7 @@ pub fn checksum_copy(
     let mut end = false;
     let mut file_buf: Vec<u8> = vec![];
     while { !end } {
-        let mut num_written: i32 = 0;
+        let mut num_written = 0;
         //read 1M from src and hash it
         let mut src_buf = read_chunk(&src_file, offset, src_path)?;
         meowhash.input(&src_buf);
@@ -746,7 +746,7 @@ pub fn checksum_copy(
         if num_written > 0 {
             src_buf.truncate(num_written as usize);
             file_buf.append(&mut src_buf);
-            offset += (num_written - 1) as u64;
+            offset += num_written - 1;
         } else {
             file_buf.append(&mut src_buf);
             offset += src_buf.len() as u64;

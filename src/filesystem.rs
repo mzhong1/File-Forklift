@@ -13,6 +13,7 @@ use smbc::*;
 use std::path::Path;
 
 #[derive(Clone)]
+/// a generic wrapper for filesystem contexts
 pub enum NetworkContext {
     Samba(Smbc),
     Nfs(Nfs),
@@ -152,6 +153,7 @@ impl FileSystem for NetworkContext {
 }
 
 #[derive(Clone)]
+/// a generic wrapper for File handles
 pub enum FileType {
     Samba(SmbcFile),
     Nfs(NfsFile),
@@ -171,16 +173,18 @@ impl File for FileType {
             }
         }
     }
-    fn write(&self, buf: &[u8], offset: u64) -> ForkliftResult<i32> {
+    /// @note: we can return a u64 when the actual write calls return i32 because
+    /// any negative values are indicative of errors, so they are already handled
+    fn write(&self, buf: &[u8], offset: u64) -> ForkliftResult<u64> {
         match self {
             FileType::Nfs(nfile) => {
                 let bytes = nfile.pwrite(buf, offset)?;
-                Ok(bytes)
+                Ok(bytes as u64)
             }
             FileType::Samba(sfile) => {
                 sfile.lseek(offset as i64, 0)?;
                 let bytes = sfile.fwrite(buf)?;
-                Ok(bytes as i32)
+                Ok(bytes as u64)
             }
         }
     }
@@ -248,7 +252,7 @@ pub trait File {
     /// read some number of bytes starting at offset from the file
     fn read(&self, count: u64, offset: u64) -> ForkliftResult<Vec<u8>>;
     /// write something to the file starting at offset
-    fn write(&self, buf: &[u8], offset: u64) -> ForkliftResult<i32>;
+    fn write(&self, buf: &[u8], offset: u64) -> ForkliftResult<u64>;
     /// get this file's metadata
     fn fstat(&self) -> ForkliftResult<Stat>;
     /// truncate the file to size
@@ -375,42 +379,55 @@ impl Stat {
             st_ctime: ctime,
         }
     }
+    /// return ID of device containing file
     pub fn dev(&self) -> u64 {
         self.st_dev
     }
+    /// return inode number
     pub fn ino(&self) -> u64 {
         self.st_ino
     }
+    /// return file Protection (access permissions)
     pub fn mode(&self) -> u32 {
         self.st_mode
     }
+    /// return Number of hard links
     pub fn nlink(&self) -> u64 {
         self.st_nlink
     }
+    /// return User ID of the owner
     pub fn uid(&self) -> u32 {
         self.st_uid
     }
+    /// return Group ID of the owner
     pub fn gid(&self) -> u32 {
         self.st_gid
     }
+    /// return Device ID if special file
     pub fn rdev(&self) -> u64 {
         self.st_rdev
     }
+    /// return total size in bytes
     pub fn size(&self) -> i64 {
         self.st_size
     }
+    /// return blocksize for file system I/O
     pub fn blksize(&self) -> i64 {
         self.st_blksize
     }
+    /// return number of 512B blocks allocated
     pub fn blocks(&self) -> i64 {
         self.st_blocks
     }
+    /// return time of last Access
     pub fn atime(&self) -> Timespec {
         self.st_atime
     }
+    /// return time of last modification
     pub fn mtime(&self) -> Timespec {
         self.st_mtime
     }
+    /// return time of last status change
     pub fn ctime(&self) -> Timespec {
         self.st_ctime
     }
