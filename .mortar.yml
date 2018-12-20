@@ -11,6 +11,7 @@ script:
   - git clone https://github.com/google/flatbuffers  flatbuffers
   - cd flatbuffers
   - cmake -G "Unix Makefiles" -DCMAKE_BUILD_TYPE=Release
+  - make
   - ls -l
   - sudo cp flatc /usr/local/bin/flatc
   - cd ..
