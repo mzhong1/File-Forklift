@@ -2,12 +2,12 @@ use std::process::Command;
 
 fn main() {
     // call flatc
-    let output = Command::new("/home/mzhong215/flatbuffers/flatc")
+    let output = Command::new("/usr/local/bin/flatc")
         .args(&[
             "-r",
             "-o",
-            "/home/mzhong215/filesystem_forklift/api/src/",
-            "/home/mzhong215/filesystem_forklift/api/protos/service.fbs",
+            "src/",
+            "protos/service.fbs",
         ]).output()
         .expect("Failed to execute process");
     println!("status: {}", output.status);

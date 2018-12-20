@@ -13,4 +13,9 @@ script:
   - chmod +x rustup.sh
   - ./rustup.sh -y
   - sudo yum install -y gcc openssl-devel.x86_64
+  - git clone https://github.com/google/flatbuffers  flatbuffers
+  - cd flatbuffers
+  - BUILD STEPS
+  - make 
+  - cp bin/flatc /usr/bin/flatc
   - ~/.cargo/bin/cargo test
