@@ -13,10 +13,10 @@ script:
   - chmod +x rustup.sh
   - ./rustup.sh -y
   - sudo yum update
-  - sudo yum install -y gcc openssl-devel.x86_64 git
+  - sudo yum install -y gcc openssl-devel.x86_64 git cmake make gcc-c++
   - git clone https://github.com/google/flatbuffers  flatbuffers
   - cd flatbuffers
-  - BUILD STEPS
-  - make 
-  - sudo cp bin/flatc /usr/local/bin/flatc
+  - cmake -G "Unix Makefiles" -DCMAKE_BUILD_TYPE=Release
+  - sudo cp flatc /usr/local/bin/flatc
+  - cd ..
   - ~/.cargo/bin/cargo test
