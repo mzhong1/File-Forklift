@@ -1,6 +1,5 @@
 language: "shell"
 sudo: "true"
-os: centos7x
 branches:
   only:
     - master
