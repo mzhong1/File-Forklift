@@ -9,11 +9,10 @@ jenkins:
     artifacts:
       - "rustup.sh"
 script:
+  - sudo yum install -y gcc openssl-devel.x86_64 git cmake make gcc-c++
   - curl https://sh.rustup.rs -o rustup.sh
   - chmod +x rustup.sh
   - ./rustup.sh -y
-  - sudo yum update
-  - sudo yum install -y gcc openssl-devel.x86_64 git cmake make gcc-c++
   - git clone https://github.com/google/flatbuffers  flatbuffers
   - cd flatbuffers
   - cmake -G "Unix Makefiles" -DCMAKE_BUILD_TYPE=Release
