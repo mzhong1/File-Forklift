@@ -9,6 +9,7 @@ jenkins:
     artifacts:
       - "rustup.sh"
 script:
+  - sudo yum update -y
   - sudo yum install -y gcc openssl-devel.x86_64 git cmake make gcc-c++
   - curl https://sh.rustup.rs -o rustup.sh
   - chmod +x rustup.sh
