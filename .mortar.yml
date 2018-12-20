@@ -12,10 +12,11 @@ script:
   - curl https://sh.rustup.rs -o rustup.sh
   - chmod +x rustup.sh
   - ./rustup.sh -y
-  - sudo yum install -y gcc openssl-devel.x86_64
+  - sudo yum update
+  - sudo yum install -y gcc openssl-devel.x86_64 git
   - git clone https://github.com/google/flatbuffers  flatbuffers
   - cd flatbuffers
   - BUILD STEPS
   - make 
-  - cp bin/flatc /usr/bin/flatc
+  - sudo cp bin/flatc /usr/local/bin/flatc
   - ~/.cargo/bin/cargo test
