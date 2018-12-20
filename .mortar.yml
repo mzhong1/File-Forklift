@@ -4,7 +4,7 @@ branches:
   only:
     - master
 script:
-  - sudo yum install -y gcc openssl-devel.x86_64 git cmake make gcc-c++
+  - sudo yum install -y gcc openssl-devel.x86_64 cmake make gcc-c++
   - curl https://sh.rustup.rs -o rustup.sh
   - chmod +x rustup.sh
   - ./rustup.sh -y
