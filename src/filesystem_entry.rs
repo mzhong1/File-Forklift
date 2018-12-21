@@ -4,7 +4,7 @@ use crate::filesystem::*;
 use nix::sys::stat::SFlag;
 use std::path::{Path, PathBuf};
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialOrd, PartialEq)]
 pub struct Entry {
     path: PathBuf,
     metadata: Option<Stat>,

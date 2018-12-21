@@ -54,7 +54,7 @@ pub fn exist(path: &Path, fs: &mut NetworkContext) -> bool {
 }
 
 pub fn get_rel_path(a: &Path, b: &Path) -> ForkliftResult<PathBuf> {
-    match pathdiff::diff_paths(&a, &b) {
+    match diff_paths(&a, &b) {
         None => {
             let err = format!("Could not get relative path from {:?} to {:?}", &a, &b);
             Err(ForkliftError::FSError(err))

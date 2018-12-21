@@ -266,7 +266,7 @@ pub enum DirectoryType {
     Nfs(NfsDirectory),
 }
 
-#[derive(Clone, Debug, Copy)]
+#[derive(Clone, Debug, Copy, PartialEq, PartialOrd)]
 /// a generic struct to hold the time values of a struct
 pub struct Timespec {
     /// number of seconds since the system's EPOCH
@@ -325,7 +325,7 @@ impl Timespec {
     }
 }
 
-#[derive(Clone, Debug, Copy)]
+#[derive(Clone, Debug, Copy, PartialOrd, PartialEq)]
 /// A general struct for stat
 pub struct Stat {
     /// ID of device containing file
