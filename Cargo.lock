@@ -343,7 +343,7 @@ dependencies = [
  "flatbuffers 0.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "hex 0.3.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "lazy_static 1.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "libnfs 0.1.0",
+ "libnfs 0.1.0 (git+https://github.com/cholcombe973/libnfs.git?branch=async)",
  "log 0.4.5 (registry+https://github.com/rust-lang/crates.io-index)",
  "meowhash 0.1.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "nanomsg 0.7.2 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -432,6 +432,7 @@ dependencies = [
 [[package]]
 name = "libnfs"
 version = "0.1.0"
+source = "git+https://github.com/cholcombe973/libnfs.git?branch=async#fd48655b72114845db12f266ca43361c3156ed59"
 dependencies = [
  "libc 0.2.43 (registry+https://github.com/rust-lang/crates.io-index)",
  "libnfs-sys 0.2.1 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -1047,6 +1048,7 @@ dependencies = [
 "checksum lazy_static 1.2.0 (registry+https://github.com/rust-lang/crates.io-index)" = "a374c89b9db55895453a74c1e38861d9deec0b01b405a82516e9d5de4820dea1"
 "checksum libc 0.2.43 (registry+https://github.com/rust-lang/crates.io-index)" = "76e3a3ef172f1a0b9a9ff0dd1491ae5e6c948b94479a3021819ba7d860c8645d"
 "checksum libloading 0.5.0 (registry+https://github.com/rust-lang/crates.io-index)" = "9c3ad660d7cb8c5822cd83d10897b0f1f1526792737a179e73896152f85b88c2"
+"checksum libnfs 0.1.0 (git+https://github.com/cholcombe973/libnfs.git?branch=async)" = "<none>"
 "checksum libnfs-sys 0.2.1 (registry+https://github.com/rust-lang/crates.io-index)" = "e8d9077fc53fc15dcd604c0c8c558bfa317aae6559b67df0ce260f5a9a153bd1"
 "checksum lock_api 0.1.4 (registry+https://github.com/rust-lang/crates.io-index)" = "775751a3e69bde4df9b38dd00a1b5d6ac13791e4223d4a0506577f0dd27cfb7a"
 "checksum log 0.4.5 (registry+https://github.com/rust-lang/crates.io-index)" = "d4fcce5fa49cc693c312001daf1d13411c4a5283796bac1084299ea3e567113f"
