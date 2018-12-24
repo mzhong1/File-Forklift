@@ -3,12 +3,12 @@ extern crate clap;
 extern crate crossbeam;
 
 use self::api::service_generated::*;
-use error::ForkliftResult;
-use message;
+use crate::error::ForkliftResult;
+use crate::message;
 use nanomsg::{Error, PollFd, PollInOut, PollRequest, Socket};
-use node::*;
-use pulse::*;
-use socket_node::*;
+use crate::node::*;
+use crate::pulse::*;
+use crate::socket_node::*;
 use std::net::SocketAddr;
 
 pub struct Cluster {

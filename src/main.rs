@@ -5,9 +5,14 @@ extern crate clap;
 extern crate api;
 extern crate crossbeam;
 extern crate dirs;
+#[macro_use]
+extern crate lazy_static;
+extern crate libnfs;
 extern crate nanomsg;
+extern crate nix;
 extern crate rendezvous_hash;
 extern crate simplelog;
+extern crate smbc;
 
 use clap::{App, Arg};
 use crossbeam::channel;
@@ -20,6 +25,8 @@ use std::sync::Arc;
 
 mod cluster;
 mod error;
+mod filesystem;
+mod filesystem_entry;
 mod local_ip;
 mod message;
 mod nfs_listing;
@@ -28,11 +35,11 @@ mod pulse;
 mod socket_node;
 mod utils;
 
-use cluster::Cluster;
-use error::ForkliftResult;
-use node::*;
+use crate::cluster::Cluster;
+use crate::error::ForkliftResult;
+use crate::node::*;
+use crate::socket_node::*;
 use simplelog::{CombinedLogger, Config, SharedLogger, TermLogger, WriteLogger};
-use socket_node::*;
 
 #[test]
 fn test_init_router() {
@@ -148,11 +155,11 @@ fn init_logs(f: &Path, level: simplelog::LevelFilter) -> ForkliftResult<()> {
 }
 
 /*
-    main takes in two flags: 
+    main takes in two flags:
     j: computer is a new node, not a part of the original list
     d: create debug logs
     When the 'j' flag is raised, the program takes in the arguments ip_addr:port, otherip_addr:port
-    Without the 'j' flag, the program takes in a file argument of ip_addr:port 
+    Without the 'j' flag, the program takes in a file argument of ip_addr:port
     addresses of all nodes in the graph
 */
 fn main() -> ForkliftResult<()> {
@@ -217,7 +224,7 @@ fn main() -> ForkliftResult<()> {
     let _handle = heartbeat(&matches, s);
 
     rendezvous(&mut active_nodes, &r);
-    _handle.join().unwrap();
+    _handle.join().unwrap().unwrap();
     Ok(())
 }
 
