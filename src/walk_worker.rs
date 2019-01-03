@@ -10,7 +10,6 @@ use crossbeam::*;
 use rayon::*;
 
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, RwLock};
 
 pub struct WalkWorker {
     entry_output: Sender<Entry>,
@@ -45,192 +44,80 @@ impl WalkWorker {
             let mut check_paths: Vec<PathBuf> = vec![];
             let check_path = self.get_check_path(&path, root_path)?;
             check = exist(&check_path, dest_context);
-            match src_context {
-                NetworkContext::Nfs(nfs) => {
-                    let dir = nfs.opendir(&path)?;
-
-                    for f in dir {
-                        let file = match f {
-                            Ok(f) => f,
-                            Err(e) => {
-                                error!("Error, non-unicode character in file path");
-                                return Err(ForkliftError::IoError(e));
-                            }
-                        };
-                        if file.path != this && file.path != parent {
-                            let p = file.path;
-                            let newpath = path.join(&p);
-                            let meta = self.process_file(&newpath, src_context);
-                            if let Some(meta) = meta {
-                                num_files += 1;
-                                total_size += meta.size();
-                                self.progress_output.send(ProgressMessage::Todo {
-                                    num_files,
-                                    total_size: total_size as usize,
-                                });
-                            }
-
-                            match file.d_type {
-                                EntryType::Directory => {
-                                    println!("dir: {:?}", &newpath);
-                                    let rec_ctx = src_context.clone();
-                                    let drec_ctx = dest_context.clone();
-                                    spawner.spawn(|_| {
-                                        let mut rec_ctx = rec_ctx;
-                                        let mut drec_ctx = drec_ctx;
-                                        let newpath = newpath;
-                                        self.t_walk(
-                                            &root_path,
-                                            &newpath,
-                                            &mut rec_ctx,
-                                            &mut drec_ctx,
-                                        )
-                                        .unwrap()
-                                    });
-                                }
-                                EntryType::File => {
-                                    println!("file: {:?}", &newpath);
-                                }
-                                EntryType::Symlink => {
-                                    println!("file: {:?}", &newpath);
-                                }
-                                _ => {}
-                            }
-                            if check {
-                                let check_path = check_path.join(&p);
-                                println!("check path {:?}", &check_path);
-                                check_paths.push(check_path);
-                            }
-                        }
+            let dir = src_context.opendir(&path)?;
+            for entrytype in dir {
+                let entry = match entrytype {
+                    Ok(f) => f,
+                    Err(e) => {
+                        error!("Error, non-unicode character in file path");
+                        return Err(e);
                     }
-                }
-                NetworkContext::Samba(smb) => {
-                    let dir = smb.opendir(&path)?;
-                    for f in dir {
-                        let file = match f {
-                            Ok(f) => f,
-                            Err(e) => {
-                                error!("Error, non-unicode character in file path");
-                                return Err(ForkliftError::IoError(e));
-                            }
-                        };
-                        if file.path != this && file.path != parent {
-                            let p = file.path;
-                            let newpath = path.join(&p);
-                            let meta = self.process_file(&newpath, src_context);
-                            if let Some(meta) = meta {
-                                num_files += 1;
-                                total_size += meta.size();
-                                self.progress_output.send(ProgressMessage::Todo {
-                                    num_files,
-                                    total_size: total_size as usize,
+                };
+                let file_path = entry.path();
+                if file_path != this && file_path != parent {
+                    let newpath = path.join(&file_path);
+                    let meta = self.process_file(&newpath, src_context);
+                    if let Some(meta) = meta {
+                        num_files += 1;
+                        total_size += meta.size();
+                        self.progress_output.send(ProgressMessage::Todo {
+                            num_files,
+                            total_size: total_size as usize,
+                        });
+                        match entry.filetype() {
+                            GenericFileType::Directory => {
+                                println!("dir: {:?}", &newpath);
+                                let rec_ctx = src_context.clone();
+                                let drec_ctx = dest_context.clone();
+                                spawner.spawn(|_| {
+                                    let mut rec_ctx = rec_ctx;
+                                    let mut drec_ctx = drec_ctx;
+                                    let newpath = newpath;
+                                    self.t_walk(&root_path, &newpath, &mut rec_ctx, &mut drec_ctx)
+                                        .unwrap()
                                 });
                             }
-                            if check {
-                                let check_path = check_path.join(&p);
-                                check_paths.push(check_path);
+                            GenericFileType::File => {
+                                println!("file: {:?}", &newpath);
                             }
-                            match file.s_type {
-                                SmbcType::DIR => {
-                                    println!("dir: {:?}", &newpath);
-                                    let rec_ctx = src_context.clone();
-                                    let drec_ctx = dest_context.clone();
-                                    spawner.spawn(|_| {
-                                        let mut rec_ctx = rec_ctx;
-                                        let root_path = root_path;
-                                        let mut drec_ctx = drec_ctx;
-                                        let newpath = newpath;
-                                        self.t_walk(
-                                            &root_path,
-                                            &newpath,
-                                            &mut rec_ctx,
-                                            &mut drec_ctx,
-                                        )
-                                        .unwrap()
-                                    });
-                                }
-                                SmbcType::FILE => {
-                                    println!("file: {:?}", &newpath);
-                                }
-                                SmbcType::LINK => {
-                                    println!("file: {:?}", &newpath);
-                                }
-                                _ => {}
+                            GenericFileType::Link => {
+                                println!("link: {:?}", &newpath);
                             }
+                            GenericFileType::Other => {}
+                        }
+                        if check {
+                            let check_path = check_path.join(&file_path);
+                            check_paths.push(check_path);
                         }
                     }
                 }
             }
             // check through dest files
-            if check {
-                let (this, parent) = (Path::new("."), Path::new(".."));
-                let rel_path = get_rel_path(&path, &self.source)?;
-                let check_path = root_path.join(rel_path);
-                println!("check path {:?}", check_path);
-                match dest_context {
-                    NetworkContext::Nfs(nfs) => {
-                        let dir = nfs.opendir(&check_path)?;
-                        for f in dir {
-                            let file = f?;
-                            if file.path != this && file.path != parent {
-                                let newpath = check_path.join(file.path);
-                                //check if newpath in check_path
-                                if !check_paths.contains(&newpath) {
-                                    //remove the file
-                                    println!("remove: {:?}", &newpath);
-                                    self.remove_extra(&newpath, dest_context)?;
-                                }
-                            }
-                        }
-                    }
-                    NetworkContext::Samba(smb) => {
-                        let dir = smb.opendir(&check_path)?;
-                        for f in dir {
-                            let file = f?;
-                            if file.path != this && file.path != parent {
-                                let newpath = check_path.join(file.path);
-                                //check if newpath in check_path
-                                if !check_paths.contains(&newpath) {
-                                    //remove the file
-                                    println!("remove: {:?}", &newpath);
-                                    self.remove_extra(&newpath, dest_context)?;
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+            self.check_and_remove(
+                (check, &mut check_paths),
+                (root_path, &path, dest_context),
+                (this, parent),
+            )?;
+
             Ok(())
         })?;
 
         Ok(())
     }
 
-    fn walk_nfs(
+    fn walk_loop(
         &self,
-        (check, check_path, check_paths): (&bool, &Path, &mut Vec<PathBuf>),
-        (path, nfs, src_context): (&Path, &mut Nfs, &mut NetworkContext),
-        (num_files, total_size, stack): (&mut u64, &mut i64, &mut Vec<PathBuf>),
-        (this, parent): (&Path, &Path),
+        (num_files, total_size): (&mut u64, &mut i64),
+        (this, parent, path, stack): (&Path, &Path, &Path, &mut Vec<PathBuf>),
+        (check, check_path, check_paths): (bool, &Path, &mut Vec<PathBuf>),
+        (dir, src_context): (DirectoryType, &mut NetworkContext),
     ) -> ForkliftResult<()> {
-        let dir = nfs.opendir(&path)?;
-        for f in dir {
-            let file = f?;
-            if file.path != this && file.path != parent {
-                let newpath = path.join(&file.path);
-                match file.d_type {
-                    EntryType::Directory => {
-                        println!("dir: {:?}", &newpath);
-                        stack.push(newpath.clone());
-                    }
-                    EntryType::File => {
-                        println!("file: {:?}", newpath);
-                    }
-                    EntryType::Symlink => {
-                        println!("link: {:?}", newpath);
-                    }
-                    _ => {}
-                }
+        for entrytype in dir {
+            let entry = entrytype?;
+            let file_path = entry.path();
+            if file_path != this && file_path != parent {
+                let newpath = path.join(&file_path);
+                //file exists?
                 let meta = self.process_file(&newpath, src_context);
                 if let Some(meta) = meta {
                     *num_files += 1;
@@ -239,53 +126,23 @@ impl WalkWorker {
                         num_files: *num_files,
                         total_size: *total_size as usize,
                     });
-                }
-                if *check {
-                    let check_path = check_path.join(file.path);
-                    check_paths.push(check_path);
-                }
-            }
-        }
-        Ok(())
-    }
-
-    fn walk_smb(
-        &self,
-        (check, check_path, check_paths): (&bool, &Path, &mut Vec<PathBuf>),
-        (path, smb, src_context): (&Path, &mut Smbc, &mut NetworkContext),
-        (num_files, total_size, stack): (&mut u64, &mut i64, &mut Vec<PathBuf>),
-        (this, parent): (&Path, &Path),
-    ) -> ForkliftResult<()> {
-        let dir = smb.opendir(&path)?;
-        for f in dir {
-            let file = f?;
-            if file.path != this && file.path != parent {
-                let newpath = path.join(&file.path);
-                match file.s_type {
-                    SmbcType::DIR => {
-                        println!("dir: {:?}", &newpath);
-                        stack.push(newpath.clone());
+                    match entry.filetype() {
+                        GenericFileType::Directory => {
+                            println!("dir: {:?}", &newpath);
+                            stack.push(newpath.clone());
+                        }
+                        GenericFileType::File => {
+                            println!("file: {:?}", newpath);
+                        }
+                        GenericFileType::Link => {
+                            println!("link: {:?}", newpath);
+                        }
+                        GenericFileType::Other => {}
                     }
-                    SmbcType::FILE => {
-                        println!("file: {:?}", &newpath);
+                    if check {
+                        let check_path = check_path.join(file_path);
+                        check_paths.push(check_path);
                     }
-                    SmbcType::LINK => {
-                        println!("link: {:?}", &newpath);
-                    }
-                    _ => {}
-                }
-                let meta = self.process_file(&newpath, src_context);
-                if let Some(meta) = meta {
-                    *num_files += 1;
-                    *total_size += meta.size();
-                    self.progress_output.send(ProgressMessage::Todo {
-                        num_files: *num_files,
-                        total_size: *total_size as usize,
-                    });
-                }
-                if *check {
-                    let check_path = check_path.join(file.path);
-                    check_paths.push(check_path);
                 }
             }
         }
@@ -308,28 +165,13 @@ impl WalkWorker {
                 Some(p) => {
                     let check_path = self.get_check_path(&p, root_path)?;
                     check = exist(&check_path, dest_context);
-                    match &src_context {
-                        NetworkContext::Nfs(nfs) => {
-                            let mut rec_ctx = src_context.clone();
-                            let mut send = nfs.clone();
-                            self.walk_nfs(
-                                (&check, &check_path, &mut check_paths),
-                                (&p, &mut send, &mut rec_ctx),
-                                (&mut num_files, &mut total_size, &mut stack),
-                                (this, parent),
-                            )?;
-                        }
-                        NetworkContext::Samba(smb) => {
-                            let mut rec_ctx = src_context.clone();
-                            let mut send = smb.clone();
-                            self.walk_smb(
-                                (&check, &check_path, &mut check_paths),
-                                (&p, &mut send, &mut rec_ctx),
-                                (&mut num_files, &mut total_size, &mut stack),
-                                (this, parent),
-                            )?;
-                        }
-                    }
+                    let dir = src_context.opendir(&p)?;
+                    self.walk_loop(
+                        (&mut num_files, &mut total_size),
+                        (this, parent, &p, &mut stack),
+                        (check, &check_path, &mut check_paths),
+                        (dir, src_context),
+                    )?;
                     // check through dest files
                     self.check_and_remove(
                         (check, &mut check_paths),
@@ -337,84 +179,6 @@ impl WalkWorker {
                         (this, parent),
                     )?;
                 }
-                None => {
-                    break;
-                }
-            }
-        }
-        Ok(())
-    }
-
-    pub fn walk(&self, src_context: &mut NetworkContext) -> ForkliftResult<()> {
-        let (mut num_files, mut total_size) = (0, 0);
-        let mut stack: Vec<PathBuf> = vec![self.source.clone()];
-        let (this, parent) = (Path::new("."), Path::new(".."));
-        loop {
-            match stack.pop() {
-                Some(p) => match src_context {
-                    NetworkContext::Nfs(nfs) => {
-                        let dir = nfs.opendir(&p)?;
-                        for f in dir {
-                            let file = f?;
-                            if file.path != this && file.path != parent {
-                                let newpath = p.join(file.path);
-                                match file.d_type {
-                                    EntryType::Directory => {
-                                        println!("dir: {:?}", &newpath);
-                                        stack.push(newpath.clone());
-                                    }
-                                    EntryType::File => {
-                                        println!("file: {:?}", newpath);
-                                    }
-                                    EntryType::Symlink => {
-                                        println!("link: {:?}", newpath);
-                                    }
-                                    _ => {}
-                                }
-                                let meta = self.process_file(&newpath, src_context);
-                                if let Some(meta) = meta {
-                                    num_files += 1;
-                                    total_size += meta.size();
-                                    self.progress_output.send(ProgressMessage::Todo {
-                                        num_files,
-                                        total_size: total_size as usize,
-                                    });
-                                }
-                            }
-                        }
-                    }
-                    NetworkContext::Samba(smb) => {
-                        let dir = smb.opendir(&p)?;
-                        for f in dir {
-                            let file = f?;
-                            if file.path != this && file.path != parent {
-                                let newpath = p.join(file.path);
-                                match file.s_type {
-                                    SmbcType::DIR => {
-                                        println!("dir: {:?}", &newpath);
-                                        stack.push(newpath.clone());
-                                    }
-                                    SmbcType::FILE => {
-                                        println!("file: {:?}", &newpath);
-                                    }
-                                    SmbcType::LINK => {
-                                        println!("link: {:?}", &newpath);
-                                    }
-                                    _ => {}
-                                }
-                                let meta = self.process_file(&newpath, src_context);
-                                if let Some(meta) = meta {
-                                    num_files += 1;
-                                    total_size += meta.size();
-                                    self.progress_output.send(ProgressMessage::Todo {
-                                        num_files,
-                                        total_size: total_size as usize,
-                                    });
-                                }
-                            }
-                        }
-                    }
-                },
                 None => {
                     break;
                 }
@@ -439,74 +203,37 @@ impl WalkWorker {
                 Some(p) => {
                     let check_path = self.get_check_path(&p, root_path)?;
                     check = exist(&check_path, dest_context);
-                    match src_context {
-                        NetworkContext::Nfs(nfs) => {
-                            let dir = nfs.opendir(&p)?;
-                            for f in dir {
-                                let file = f?;
-                                if file.path != this && file.path != parent {
-                                    let newpath = p.join(&file.path);
-                                    match file.d_type {
-                                        EntryType::Directory => {
-                                            println!("dir: {:?}", &newpath);
-                                            stack.push(newpath.clone());
-                                        }
-                                        EntryType::File => {
-                                            println!("file: {:?}", newpath);
-                                        }
-                                        EntryType::Symlink => {
-                                            println!("link: {:?}", newpath);
-                                        }
-                                        _ => {}
+                    let dir = src_context.opendir(&p)?;
+                    for entrytype in dir {
+                        let entry = entrytype?;
+                        let file_path = entry.path();
+                        if file_path != this && file_path != parent {
+                            let newpath = p.join(&file_path);
+                            //file exists?
+                            let meta = self.process_file(&newpath, src_context);
+                            if let Some(meta) = meta {
+                                num_files += 1;
+                                total_size += meta.size();
+                                self.progress_output.send(ProgressMessage::Todo {
+                                    num_files,
+                                    total_size: total_size as usize,
+                                });
+                                match entry.filetype() {
+                                    GenericFileType::Directory => {
+                                        println!("dir: {:?}", &newpath);
+                                        stack.push(newpath.clone());
                                     }
-                                    let meta = self.process_file(&newpath, src_context);
-                                    if let Some(meta) = meta {
-                                        num_files += 1;
-                                        total_size += meta.size();
-                                        self.progress_output.send(ProgressMessage::Todo {
-                                            num_files,
-                                            total_size: total_size as usize,
-                                        });
+                                    GenericFileType::File => {
+                                        println!("file: {:?}", newpath);
                                     }
-                                    if check {
-                                        let check_path = check_path.join(file.path);
-                                        check_paths.push(check_path);
+                                    GenericFileType::Link => {
+                                        println!("link: {:?}", newpath);
                                     }
+                                    GenericFileType::Other => {}
                                 }
-                            }
-                        }
-                        NetworkContext::Samba(smb) => {
-                            let dir = smb.opendir(&p)?;
-                            for f in dir {
-                                let file = f?;
-                                if file.path != this && file.path != parent {
-                                    let newpath = p.join(&file.path);
-                                    match file.s_type {
-                                        SmbcType::DIR => {
-                                            println!("dir: {:?}", &newpath);
-                                            stack.push(newpath.clone());
-                                        }
-                                        SmbcType::FILE => {
-                                            println!("file: {:?}", &newpath);
-                                        }
-                                        SmbcType::LINK => {
-                                            println!("link: {:?}", &newpath);
-                                        }
-                                        _ => {}
-                                    }
-                                    let meta = self.process_file(&newpath, src_context);
-                                    if let Some(meta) = meta {
-                                        num_files += 1;
-                                        total_size += meta.size();
-                                        self.progress_output.send(ProgressMessage::Todo {
-                                            num_files,
-                                            total_size: total_size as usize,
-                                        });
-                                    }
-                                    if check {
-                                        let check_path = check_path.join(file.path);
-                                        check_paths.push(check_path);
-                                    }
+                                if check {
+                                    let check_path = check_path.join(file_path);
+                                    check_paths.push(check_path);
                                 }
                             }
                         }
@@ -540,8 +267,6 @@ impl WalkWorker {
         // check through dest files
         if check {
             let check_path = self.get_check_path(&source_path, root_path)?;
-            println!("check path {:?}", check_path);
-            println!("check_paths {:?}", check_paths);
             match dest_context {
                 NetworkContext::Nfs(nfs) => {
                     let dir = nfs.opendir(&check_path)?;
@@ -552,13 +277,8 @@ impl WalkWorker {
                             //check if newpath in check_path
                             if !contains_and_remove(check_paths, &newpath) {
                                 println!("remove: {:?}", &newpath);
-                                self.remove_extra(&newpath, dest_context)?;
+                                remove_extra(&newpath, dest_context)?;
                             }
-                            /*if !check_paths.contains(&newpath) {
-                                //remove the file
-                                println!("remove: {:?}", &newpath);
-                                self.remove_extra(&newpath, dest_context)?;
-                            }*/
                         }
                     }
                 }
@@ -571,23 +291,14 @@ impl WalkWorker {
                             //check if newpath in check_path
                             if !contains_and_remove(check_paths, &newpath) {
                                 println!("remove: {:?}", &newpath);
-                                self.remove_extra(&newpath, dest_context)?;
+                                remove_extra(&newpath, dest_context)?;
                             }
-                            /*if !check_paths.contains(&newpath) {
-                                //remove the file
-                                println!("remove: {:?}", &newpath);
-                                self.remove_extra(&newpath, dest_context)?;
-                            }*/
                         }
                     }
                 }
             }
         }
         Ok(())
-    }
-
-    fn remove_extra(&self, path: &Path, dest_context: &mut NetworkContext) -> ForkliftResult<()> {
-        dest_context.unlink(path)
     }
 
     fn process_file(&self, entry: &Path, src_context: &mut NetworkContext) -> Option<Stat> {
@@ -598,9 +309,7 @@ impl WalkWorker {
                 return None;
             }
         };
-
         self.entry_output.send(src_entry.clone());
-
         Some(metadata.clone())
     }
 }
@@ -613,4 +322,8 @@ fn contains_and_remove(check_paths: &mut Vec<PathBuf>, check_path: &Path) -> boo
         }
     }
     false
+}
+
+fn remove_extra(path: &Path, dest_context: &mut NetworkContext) -> ForkliftResult<()> {
+    dest_context.unlink(path)
 }

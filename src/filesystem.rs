@@ -7,10 +7,10 @@ use self::chrono::*;
 use self::libnfs::*;
 use self::nix::fcntl::OFlag;
 use self::nix::sys::stat::Mode;
-use crate::error::ForkliftResult;
+use crate::error::*;
 use smbc::*;
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 #[derive(Clone)]
 /// a generic wrapper for filesystem contexts
@@ -260,10 +260,69 @@ pub trait File {
 }
 
 #[derive(Clone)]
+pub enum GenericFileType {
+    Directory,
+    File,
+    Link,
+    Other,
+}
+
+#[derive(Clone)]
+pub enum DirEntryType {
+    Samba(SmbcDirEntry),
+    Nfs(DirEntry),
+}
+
+impl DirEntryType {
+    pub fn path(&self) -> &Path {
+        match self {
+            DirEntryType::Samba(smbentry) => smbentry.path.as_path(),
+            DirEntryType::Nfs(nfsentry) => nfsentry.path.as_path(),
+        }
+    }
+
+    pub fn filetype(&self) -> GenericFileType {
+        match self {
+            DirEntryType::Samba(smbentry) => match smbentry.s_type {
+                SmbcType::DIR => GenericFileType::Directory,
+                SmbcType::FILE => GenericFileType::File,
+                SmbcType::LINK => GenericFileType::Link,
+                _ => GenericFileType::Other,
+            },
+            DirEntryType::Nfs(nfsentry) => match nfsentry.d_type {
+                EntryType::Directory => GenericFileType::Directory,
+                EntryType::File => GenericFileType::File,
+                EntryType::Symlink => GenericFileType::Link,
+                _ => GenericFileType::Other,
+            },
+        }
+    }
+}
+
+#[derive(Clone)]
 /// an enum to hold the Directory structs of some generic FileSystem
 pub enum DirectoryType {
     Samba(SmbcDirectory),
     Nfs(NfsDirectory),
+}
+
+/// a generic iterator for DirectoryType
+impl Iterator for DirectoryType {
+    type Item = ForkliftResult<DirEntryType>;
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            DirectoryType::Nfs(dir) => match dir.next() {
+                Some(Ok(entry)) => Some(Ok(DirEntryType::Nfs(entry))),
+                Some(Err(e)) => Some(Err(ForkliftError::IoError(e))),
+                None => None,
+            },
+            DirectoryType::Samba(dir) => match dir.next() {
+                Some(Ok(entry)) => Some(Ok(DirEntryType::Samba(entry))),
+                Some(Err(e)) => Some(Err(ForkliftError::IoError(e))),
+                None => None,
+            },
+        }
+    }
 }
 
 #[derive(Clone, Debug, Copy, PartialEq, PartialOrd)]
