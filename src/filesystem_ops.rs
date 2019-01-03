@@ -1145,6 +1145,33 @@ fn copy_acl(
     }
 }
 
+pub fn init_creator_map(dest_ctx: &Smbc, dest_path: &Path) -> ForkliftResult<()> {
+    let mut map = match NAME_MAP.lock() {
+        Ok(hm) => hm,
+        Err(_) => {
+            return Err(ForkliftError::FSError(
+                "Could not get sid name map".to_string(),
+            ))
+        }
+    };
+    let own = "Creator Owner".to_string();
+    let grp = "Creator Group".to_string();
+    match map.entry(own.clone()) {
+        E::Occupied(_) => (),
+        E::Vacant(v) => {
+            v.insert(map_name(&own, dest_ctx, dest_path)?);
+        }
+    };
+    match map.entry(grp.clone()) {
+        E::Occupied(_) => (),
+        E::Vacant(v) => {
+            v.insert(map_name(&grp, dest_ctx, dest_path)?);
+        }
+    };
+
+    Ok(())
+}
+
 /*
    map named acl Sids from a src file to their destination sids
 */
@@ -1168,24 +1195,31 @@ pub fn map_names_and_copy(
         }
     };
     let (mut copied, mut count) = (false, 0);
+    let mut creator_reached = false;
     for src_acl in src_acls_plus {
         match (src_acl.clone(), src_acls[count].clone()) {
             (
                 SmbcAclValue::AclPlus(ACE::Named(SidType::Named(Some(sid)), _, _, _)),
                 SmbcAclValue::Acl(ACE::Numeric(SidType::Numeric(Some(_)), atype, aflags, mask)),
             ) => {
+                if sid == "\\Creator Owner" {
+                    creator_reached = true;
+                }
                 //technically this part is the map names...
                 //check if sid is mapped, add to map if not already in
                 let mapped = match map.entry(sid.clone()) {
                     E::Occupied(o) => o.into_mut(),
                     E::Vacant(v) => v.insert(map_name(&sid, dest_ctx, dest_path)?),
                 };
-                copied = copy_acl(
-                    (mapped.clone(), atype, aflags, mask),
-                    dest_acls,
-                    dest_ctx,
-                    dest_path,
-                )?;
+                //if reached "CREATOR" sids, ignore
+                if !creator_reached {
+                    copied = copy_acl(
+                        (mapped.clone(), atype, aflags, mask),
+                        dest_acls,
+                        dest_ctx,
+                        dest_path,
+                    )?;
+                }
             }
             (_, _) => {
                 return Err(ForkliftError::FSError(
@@ -1195,19 +1229,31 @@ pub fn map_names_and_copy(
         }
         count += 1;
     }
+    //get creator owner/group mapping...
+    let own = "\\Creator Owner".to_string();
+    let c_owner = match map.entry(own.clone()) {
+        E::Occupied(o) => o.into_mut(),
+        E::Vacant(v) => v.insert(map_name(&own, dest_ctx, dest_path)?),
+    };
     for dest_acl in dest_acls.clone() {
         match dest_acl {
-            SmbcAclValue::Acl(ace) => match dest_ctx.removexattr(
-                dest_path,
-                &SmbcXAttr::AclAttr(SmbcAclAttr::Acl(ace.clone())),
-            ) {
-                Ok(_) => debug!("Removed extra acl {}", ace),
-                Err(e) => {
-                    let err = format!("Error {}, failed to remove the old acl {}", e, ace);
-                    error!("{}", err);
-                    return Err(ForkliftError::FSError(err));
+            SmbcAclValue::Acl(ACE::Numeric(SidType::Numeric(Some(dest_sid)), a, f, m)) => {
+                if dest_sid == *c_owner {
+                    break;
                 }
-            },
+                let ace = ACE::Numeric(SidType::Numeric(Some(dest_sid)), a, f, m);
+                match dest_ctx.removexattr(
+                    dest_path,
+                    &SmbcXAttr::AclAttr(SmbcAclAttr::Acl(ace.clone())),
+                ) {
+                    Ok(_) => debug!("Removed extra acl {}", ace),
+                    Err(e) => {
+                        let err = format!("Error {}, failed to remove the old acl {}", e, ace);
+                        error!("{}", err);
+                        return Err(ForkliftError::FSError(err));
+                    }
+                }
+            }
             _ => {
                 return Err(ForkliftError::FSError(
                     "input dest acls are not formatted correctly!".to_string(),
