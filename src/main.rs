@@ -237,7 +237,7 @@ fn rendezvous(
 ) {
     loop {
         match r.try_recv() {
-            Some(c) => {
+            Ok(c) => {
                 match c.change_type {
                     ChangeType::AddNode => {
                         debug!("Add Node {:?} to active list!", c.socket_node);
@@ -259,7 +259,7 @@ fn rendezvous(
                     }
                 };
             }
-            None => trace!("No Changes"),
+            Err(_) => trace!("No Changes"),
         }
     }
 }

@@ -244,7 +244,7 @@ fn linear_thread_lister(uid: i32, gid: i32, _ip: &str, _root: &str, num_threads:
             rayon::scope(|s| {
                 s.spawn(|_s| {
                     match rx.recv() {
-                        Some(m) => {
+                        Ok(m) => {
                             let mut nfs = Nfs::new().unwrap();
                             nfs.set_uid(uid).unwrap();
                             nfs.set_gid(gid).unwrap();
@@ -260,7 +260,7 @@ fn linear_thread_lister(uid: i32, gid: i32, _ip: &str, _root: &str, num_threads:
                                 }
                             }
                         }
-                        None => processing_done = true,
+                        Err(_) => processing_done = true,
                     };
                 });
             });
