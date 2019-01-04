@@ -1,13 +1,10 @@
-use crate::error::{ForkliftError, ForkliftResult};
+use crate::error::ForkliftResult;
 use crate::filesystem::*;
 use crate::filesystem_entry::Entry;
 use crate::filesystem_ops::*;
 use crate::progress_message::ProgressMessage;
 
-use ::libnfs::*;
-use ::smbc::*;
 use crossbeam::*;
-use rayon::*;
 
 use std::path::{Path, PathBuf};
 
@@ -98,7 +95,6 @@ impl WalkWorker {
                 (root_path, &path, dest_context),
                 (this, parent),
             )?;
-
             Ok(())
         })?;
 
@@ -172,72 +168,6 @@ impl WalkWorker {
                         (check, &check_path, &mut check_paths),
                         (dir, src_context),
                     )?;
-                    // check through dest files
-                    self.check_and_remove(
-                        (check, &mut check_paths),
-                        (root_path, &p, dest_context),
-                        (this, parent),
-                    )?;
-                }
-                None => {
-                    break;
-                }
-            }
-        }
-        Ok(())
-    }
-
-    pub fn remove_walk(
-        &self,
-        root_path: &Path,
-        src_context: &mut NetworkContext,
-        dest_context: &mut NetworkContext,
-    ) -> ForkliftResult<()> {
-        let (mut num_files, mut total_size) = (0, 0);
-        let mut stack: Vec<PathBuf> = vec![self.source.clone()];
-        let (this, parent) = (Path::new("."), Path::new(".."));
-        loop {
-            let check: bool;
-            let mut check_paths: Vec<PathBuf> = vec![];
-            match stack.pop() {
-                Some(p) => {
-                    let check_path = self.get_check_path(&p, root_path)?;
-                    check = exist(&check_path, dest_context);
-                    let dir = src_context.opendir(&p)?;
-                    for entrytype in dir {
-                        let entry = entrytype?;
-                        let file_path = entry.path();
-                        if file_path != this && file_path != parent {
-                            let newpath = p.join(&file_path);
-                            //file exists?
-                            let meta = self.process_file(&newpath, src_context);
-                            if let Some(meta) = meta {
-                                num_files += 1;
-                                total_size += meta.size();
-                                self.progress_output.send(ProgressMessage::Todo {
-                                    num_files,
-                                    total_size: total_size as usize,
-                                });
-                                match entry.filetype() {
-                                    GenericFileType::Directory => {
-                                        println!("dir: {:?}", &newpath);
-                                        stack.push(newpath.clone());
-                                    }
-                                    GenericFileType::File => {
-                                        println!("file: {:?}", newpath);
-                                    }
-                                    GenericFileType::Link => {
-                                        println!("link: {:?}", newpath);
-                                    }
-                                    GenericFileType::Other => {}
-                                }
-                                if check {
-                                    let check_path = check_path.join(file_path);
-                                    check_paths.push(check_path);
-                                }
-                            }
-                        }
-                    }
                     // check through dest files
                     self.check_and_remove(
                         (check, &mut check_paths),
