@@ -1,3 +1,4 @@
+use crossbeam::channel::RecvError;
 use nanomsg::Error as NanomsgError;
 use smbc::Error as SmbcError;
 use std::error::Error as err;
@@ -27,6 +28,7 @@ pub enum ForkliftError {
     IpLocalError,
     InvalidConfigError,
     FSError(String),
+    RecvError(RecvError),
 }
 
 impl fmt::Display for ForkliftError {
@@ -56,6 +58,7 @@ impl err for ForkliftError {
             ForkliftError::IpLocalError => "Could not determine local ip address",
             ForkliftError::InvalidConfigError => "Invalid config formatting",
             ForkliftError::FSError(ref d) => &d,
+            ForkliftError::RecvError(ref e) => e.description(),
         }
     }
 
@@ -74,6 +77,7 @@ impl err for ForkliftError {
             ForkliftError::IpLocalError => None,
             ForkliftError::InvalidConfigError => None,
             ForkliftError::FSError(ref _d) => None,
+            ForkliftError::RecvError(ref e) => e.cause(),
         }
     }
 }
@@ -123,5 +127,11 @@ impl From<FromUtf8Error> for ForkliftError {
 impl From<StringParseError> for ForkliftError {
     fn from(err: StringParseError) -> ForkliftError {
         ForkliftError::ConvertStringError(ConvertStringError::StringParseError(err))
+    }
+}
+
+impl From<RecvError> for ForkliftError {
+    fn from(err: RecvError) -> ForkliftError {
+        ForkliftError::RecvError(err)
     }
 }

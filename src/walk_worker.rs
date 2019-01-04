@@ -117,10 +117,18 @@ impl WalkWorker {
                 if let Some(meta) = meta {
                     *num_files += 1;
                     *total_size += meta.size();
-                    self.progress_output.send(ProgressMessage::Todo {
+                    match self.progress_output.send(ProgressMessage::Todo {
                         num_files: *num_files,
                         total_size: *total_size as usize,
-                    });
+                    }) {
+                        Ok(_) => {}
+                        Err(e) => {
+                            return Err(ForkliftError::FSError(format!(
+                                "Error: {:?}, unable to send progress",
+                                e
+                            )));
+                        }
+                    };
                     match entry.filetype() {
                         GenericFileType::Directory => {
                             println!("dir: {:?}", &newpath);
@@ -175,7 +183,15 @@ impl WalkWorker {
                     )?;
                 }
                 None => {
-                    self.entry_output.send(None);
+                    match self.entry_output.send(None) {
+                        Ok(_) => {}
+                        Err(e) => {
+                            return Err(ForkliftError::FSError(format!(
+                                "Error: {:?}, unable to send end processing signal",
+                                e
+                            )));
+                        }
+                    };
                     break;
                 }
             }
@@ -229,7 +245,15 @@ impl WalkWorker {
                 return None;
             }
         };
-        self.entry_output.send(Some(src_entry.clone()));
+        match self.entry_output.send(Some(src_entry.clone())) {
+            Ok(_) => {}
+            Err(e) => {
+                return Err(ForkliftError::FSError(format!(
+                    "Error: {:?}, unable to send entry for processing",
+                    e
+                )));
+            }
+        };
         Some(metadata.clone())
     }
 }
