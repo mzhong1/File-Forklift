@@ -1,15 +1,14 @@
-use crate::error::ForkliftResult;
+use crate::error::*;
 use crate::filesystem::*;
 use crate::filesystem_entry::Entry;
 use crate::filesystem_ops::*;
 use crate::progress_message::ProgressMessage;
 
-use crossbeam::*;
-
+use crossbeam::channel::Sender;
 use std::path::{Path, PathBuf};
 
 pub struct WalkWorker {
-    entry_output: Sender<Entry>,
+    entry_output: Sender<Option<Entry>>,
     progress_output: Sender<ProgressMessage>,
     source: PathBuf,
 }
@@ -17,7 +16,7 @@ pub struct WalkWorker {
 impl WalkWorker {
     pub fn new(
         source: &Path,
-        entry_output: Sender<Entry>,
+        entry_output: Sender<Option<Entry>>,
         progress_output: Sender<ProgressMessage>,
     ) -> WalkWorker {
         WalkWorker {
@@ -97,7 +96,7 @@ impl WalkWorker {
             )?;
             Ok(())
         })?;
-
+        self.entry_output.send(None);
         Ok(())
     }
 
@@ -176,6 +175,7 @@ impl WalkWorker {
                     )?;
                 }
                 None => {
+                    self.entry_output.send(None);
                     break;
                 }
             }
@@ -197,29 +197,19 @@ impl WalkWorker {
         // check through dest files
         if check {
             let check_path = self.get_check_path(&source_path, root_path)?;
-            match dest_context {
-                NetworkContext::Nfs(nfs) => {
-                    let dir = nfs.opendir(&check_path)?;
-                    for f in dir {
-                        let file = f?;
-                        if file.path != this && file.path != parent {
-                            let newpath = check_path.join(file.path);
-                            //check if newpath in check_path
-                            if !contains_and_remove(check_paths, &newpath) {
-                                println!("remove: {:?}", &newpath);
-                                remove_extra(&newpath, dest_context)?;
+            let dir = dest_context.opendir(&check_path)?;
+            for entrytype in dir {
+                let entry = entrytype?;
+                let file_path = entry.path();
+                if file_path != this && file_path != parent {
+                    let newpath = check_path.join(file_path);
+                    if !contains_and_remove(check_paths, &newpath) {
+                        match entry.filetype() {
+                            GenericFileType::Directory => {
+                                println!("call remove_dir: {:?}", &newpath);
+                                remove_dir(&newpath, dest_context)?;
                             }
-                        }
-                    }
-                }
-                NetworkContext::Samba(smb) => {
-                    let dir = smb.opendir(&check_path)?;
-                    for f in dir {
-                        let file = f?;
-                        if file.path != this && file.path != parent {
-                            let newpath = check_path.join(file.path);
-                            //check if newpath in check_path
-                            if !contains_and_remove(check_paths, &newpath) {
+                            _ => {
                                 println!("remove: {:?}", &newpath);
                                 remove_extra(&newpath, dest_context)?;
                             }
@@ -239,7 +229,7 @@ impl WalkWorker {
                 return None;
             }
         };
-        self.entry_output.send(src_entry.clone());
+        self.entry_output.send(Some(src_entry.clone()));
         Some(metadata.clone())
     }
 }
@@ -256,4 +246,59 @@ fn contains_and_remove(check_paths: &mut Vec<PathBuf>, check_path: &Path) -> boo
 
 fn remove_extra(path: &Path, dest_context: &mut NetworkContext) -> ForkliftResult<()> {
     dest_context.unlink(path)
+}
+
+fn remove_dir(path: &Path, dest_context: &mut NetworkContext) -> ForkliftResult<()> {
+    let (this, parent) = (Path::new("."), Path::new(".."));
+    let mut stack: Vec<PathBuf> = vec![path.clone().to_path_buf()];
+    let mut remove_stack: Vec<PathBuf> = vec![path.clone().to_path_buf()];
+    loop {
+        match stack.pop() {
+            Some(p) => {
+                let dir = dest_context.opendir(&p)?;
+                for entrytype in dir {
+                    let entry = match entrytype {
+                        Ok(e) => e,
+                        Err(e) => {
+                            return Err(e);
+                        }
+                    };
+                    let file_path = entry.path();
+                    if file_path != this && file_path != parent {
+                        let newpath = p.join(&file_path);
+                        println!("remove: {:?}", &newpath);
+                        match entry.filetype() {
+                            GenericFileType::Directory => {
+                                stack.push(newpath.clone());
+                                remove_stack.push(newpath);
+                            }
+                            GenericFileType::File => {
+                                remove_extra(&newpath, dest_context)?;
+                            }
+                            GenericFileType::Link => {
+                                remove_extra(&newpath, dest_context)?;
+                            }
+                            GenericFileType::Other => {}
+                        }
+                    }
+                }
+                // check through dest files
+            }
+            None => {
+                break;
+            }
+        }
+    }
+    while !remove_stack.is_empty() {
+        let dir = match remove_stack.pop() {
+            Some(e) => e,
+            None => {
+                return Err(ForkliftError::FSError(
+                    "remove stack should not be empty!".to_string(),
+                ));
+            }
+        };
+        dest_context.rmdir(&dir)?;
+    }
+    Ok(())
 }

@@ -139,6 +139,19 @@ impl FileSystem for NetworkContext {
         }
         Ok(())
     }
+
+    fn rmdir(&self, path: &Path) -> ForkliftResult<()> {
+        match self {
+            NetworkContext::Nfs(nfs) => {
+                nfs.rmdir(path)?;
+            }
+            NetworkContext::Samba(smbc) => {
+                smbc.rmdir(path)?;
+            }
+        }
+        Ok(())
+    }
+
     fn unlink(&self, path: &Path) -> ForkliftResult<()> {
         match self {
             NetworkContext::Nfs(nfs) => {
@@ -508,6 +521,8 @@ pub trait FileSystem {
     fn opendir(&mut self, path: &Path) -> ForkliftResult<DirectoryType>;
     /// rename a file/directory
     fn rename(&self, oldpath: &Path, newpath: &Path) -> ForkliftResult<()>;
-    /// unlink (remove) a file/directory
+    ///remove a directory
+    fn rmdir(&self, path: &Path) -> ForkliftResult<()>;
+    /// unlink (remove) a file
     fn unlink(&self, path: &Path) -> ForkliftResult<()>;
 }
