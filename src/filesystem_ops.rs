@@ -28,7 +28,7 @@ lazy_static! {
     pub static ref NAME_MAP: Mutex<HashMap<String, Sid>> = Mutex::new(HashMap::new());
 }
 
-#[derive(PartialEq, Debug)]
+#[derive(PartialEq, Debug, Clone)]
 pub enum SyncOutcome {
     UpToDate,
     FileCopied,
@@ -227,6 +227,7 @@ pub fn make_dir_all(
             None => false,
         }
     } {
+        trace!("dest_parent {:?} , root {:?}", dest_parent, root);
         dest_parent = match dest_parent {
             Some(parent) => {
                 stack.push(parent);
@@ -1144,34 +1145,6 @@ fn copy_acl(
         }
     }
 }
-
-pub fn init_creator_map(dest_ctx: &Smbc, dest_path: &Path) -> ForkliftResult<()> {
-    let mut map = match NAME_MAP.lock() {
-        Ok(hm) => hm,
-        Err(_) => {
-            return Err(ForkliftError::FSError(
-                "Could not get sid name map".to_string(),
-            ))
-        }
-    };
-    let own = "Creator Owner".to_string();
-    let grp = "Creator Group".to_string();
-    match map.entry(own.clone()) {
-        E::Occupied(_) => (),
-        E::Vacant(v) => {
-            v.insert(map_name(&own, dest_ctx, dest_path)?);
-        }
-    };
-    match map.entry(grp.clone()) {
-        E::Occupied(_) => (),
-        E::Vacant(v) => {
-            v.insert(map_name(&grp, dest_ctx, dest_path)?);
-        }
-    };
-
-    Ok(())
-}
-
 /*
    map named acl Sids from a src file to their destination sids
 */
