@@ -13,6 +13,12 @@ use smbc::*;
 use std::path::{Path, PathBuf};
 
 #[derive(Clone)]
+pub enum FileSystemType {
+    Samba,
+    Nfs,
+}
+
+#[derive(Clone)]
 /// a generic wrapper for filesystem contexts
 pub enum NetworkContext {
     Samba(Smbc),

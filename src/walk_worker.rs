@@ -3,14 +3,19 @@ use crate::filesystem::*;
 use crate::filesystem_entry::Entry;
 use crate::filesystem_ops::*;
 use crate::progress_message::ProgressMessage;
+use crate::socket_node::*;
 
 use crossbeam::channel::Sender;
+use rendezvous_hash::{DefaultNodeHasher, RendezvousNodes};
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 
 pub struct WalkWorker {
     entry_output: Sender<Option<Entry>>,
     progress_output: Sender<ProgressMessage>,
     source: PathBuf,
+    nodes: Arc<Mutex<RendezvousNodes<SocketNode, DefaultNodeHasher>>>,
+    node: SocketNode,
 }
 
 impl WalkWorker {
@@ -18,11 +23,15 @@ impl WalkWorker {
         source: &Path,
         entry_output: Sender<Option<Entry>>,
         progress_output: Sender<ProgressMessage>,
+        nodes: Arc<Mutex<RendezvousNodes<SocketNode, DefaultNodeHasher>>>,
+        node: SocketNode,
     ) -> WalkWorker {
         WalkWorker {
             entry_output,
             progress_output,
             source: source.to_path_buf(),
+            nodes,
+            node,
         }
     }
 
@@ -52,39 +61,43 @@ impl WalkWorker {
                 let file_path = entry.path();
                 if file_path != this && file_path != parent {
                     let newpath = path.join(&file_path);
-                    let meta = self.process_file(&newpath, src_context);
+                    let meta = self.process_file(&newpath, src_context, self.nodes.clone())?;
                     if let Some(meta) = meta {
+                        debug!("Sent: {:?}", &file_path);
                         num_files += 1;
-                        total_size += meta.size();
-                        self.progress_output.send(ProgressMessage::Todo {
-                            num_files,
-                            total_size: total_size as usize,
-                        });
-                        match entry.filetype() {
-                            GenericFileType::Directory => {
-                                println!("dir: {:?}", &newpath);
-                                let rec_ctx = src_context.clone();
-                                let drec_ctx = dest_context.clone();
-                                spawner.spawn(|_| {
-                                    let mut rec_ctx = rec_ctx;
-                                    let mut drec_ctx = drec_ctx;
-                                    let newpath = newpath;
-                                    self.t_walk(&root_path, &newpath, &mut rec_ctx, &mut drec_ctx)
-                                        .unwrap()
-                                });
-                            }
-                            GenericFileType::File => {
-                                println!("file: {:?}", &newpath);
-                            }
-                            GenericFileType::Link => {
-                                println!("link: {:?}", &newpath);
-                            }
-                            GenericFileType::Other => {}
+                        total_size += meta.size() as usize;
+                        //why is this not a forkliftResult? because threading sucks
+                        self.progress_output
+                            .send(ProgressMessage::Todo {
+                                num_files,
+                                total_size: total_size as usize,
+                            })
+                            .unwrap();
+                    }
+                    match entry.filetype() {
+                        GenericFileType::Directory => {
+                            debug!("dir: {:?}", &newpath);
+                            let rec_ctx = src_context.clone();
+                            let drec_ctx = dest_context.clone();
+                            spawner.spawn(|_| {
+                                let mut rec_ctx = rec_ctx;
+                                let mut drec_ctx = drec_ctx;
+                                let newpath = newpath;
+                                self.t_walk(&root_path, &newpath, &mut rec_ctx, &mut drec_ctx)
+                                    .unwrap()
+                            });
                         }
-                        if check {
-                            let check_path = check_path.join(&file_path);
-                            check_paths.push(check_path);
+                        GenericFileType::File => {
+                            debug!("file: {:?}", &newpath);
                         }
+                        GenericFileType::Link => {
+                            debug!("link: {:?}", &newpath);
+                        }
+                        GenericFileType::Other => {}
+                    }
+                    if check {
+                        let check_path = check_path.join(&file_path);
+                        check_paths.push(check_path);
                     }
                 }
             }
@@ -102,7 +115,7 @@ impl WalkWorker {
 
     fn walk_loop(
         &self,
-        (num_files, total_size): (&mut u64, &mut i64),
+        (num_files, total_size): (&mut u64, &mut u64),
         (this, parent, path, stack): (&Path, &Path, &Path, &mut Vec<PathBuf>),
         (check, check_path, check_paths): (bool, &Path, &mut Vec<PathBuf>),
         (dir, src_context): (DirectoryType, &mut NetworkContext),
@@ -113,10 +126,10 @@ impl WalkWorker {
             if file_path != this && file_path != parent {
                 let newpath = path.join(&file_path);
                 //file exists?
-                let meta = self.process_file(&newpath, src_context);
+                let meta = self.process_file(&newpath, src_context, self.nodes.clone())?;
                 if let Some(meta) = meta {
                     *num_files += 1;
-                    *total_size += meta.size();
+                    *total_size += meta.size() as u64;
                     match self.progress_output.send(ProgressMessage::Todo {
                         num_files: *num_files,
                         total_size: *total_size as usize,
@@ -129,23 +142,23 @@ impl WalkWorker {
                             )));
                         }
                     };
-                    match entry.filetype() {
-                        GenericFileType::Directory => {
-                            println!("dir: {:?}", &newpath);
-                            stack.push(newpath.clone());
-                        }
-                        GenericFileType::File => {
-                            println!("file: {:?}", newpath);
-                        }
-                        GenericFileType::Link => {
-                            println!("link: {:?}", newpath);
-                        }
-                        GenericFileType::Other => {}
+                }
+                match entry.filetype() {
+                    GenericFileType::Directory => {
+                        debug!("dir: {:?}", &newpath);
+                        stack.push(newpath.clone());
                     }
-                    if check {
-                        let check_path = check_path.join(file_path);
-                        check_paths.push(check_path);
+                    GenericFileType::File => {
+                        debug!("file: {:?}", newpath);
                     }
+                    GenericFileType::Link => {
+                        debug!("link: {:?}", newpath);
+                    }
+                    GenericFileType::Other => {}
+                }
+                if check {
+                    let check_path = check_path.join(file_path);
+                    check_paths.push(check_path);
                 }
             }
         }
@@ -222,11 +235,11 @@ impl WalkWorker {
                     if !contains_and_remove(check_paths, &newpath) {
                         match entry.filetype() {
                             GenericFileType::Directory => {
-                                println!("call remove_dir: {:?}", &newpath);
+                                trace!("call remove_dir: {:?}", &newpath);
                                 remove_dir(&newpath, dest_context)?;
                             }
                             _ => {
-                                println!("remove: {:?}", &newpath);
+                                debug!("remove: {:?}", &newpath);
                                 remove_extra(&newpath, dest_context)?;
                             }
                         }
@@ -237,24 +250,49 @@ impl WalkWorker {
         Ok(())
     }
 
-    fn process_file(&self, entry: &Path, src_context: &mut NetworkContext) -> Option<Stat> {
-        let src_entry = Entry::new(entry, src_context);
-        let metadata = match src_entry.metadata() {
-            Some(stat) => stat,
-            None => {
-                return None;
+    fn process_file(
+        &self,
+        entry: &Path,
+        src_context: &mut NetworkContext,
+        nodes: Arc<Mutex<RendezvousNodes<SocketNode, DefaultNodeHasher>>>,
+    ) -> ForkliftResult<Option<Stat>> {
+        let n = match nodes.lock() {
+            Ok(e) => {
+                let mut list = e;
+                match list.calc_candidates(&entry.to_string_lossy()).nth(0) {
+                    Some(p) => p.clone(),
+                    None => {
+                        return Err(ForkliftError::FSError("calc candidates failed".to_string()));
+                    }
+                }
+            }
+            Err(_) => {
+                error!("Failed to lock!");
+                return Err(ForkliftError::FSError("failed to lock".to_string()));
             }
         };
-        match self.entry_output.send(Some(src_entry.clone())) {
-            Ok(_) => {}
-            Err(e) => {
-                return Err(ForkliftError::FSError(format!(
-                    "Error: {:?}, unable to send entry for processing",
-                    e
-                )));
-            }
-        };
-        Some(metadata.clone())
+        if n == self.node {
+            let src_entry = Entry::new(entry, src_context);
+            let metadata = match src_entry.metadata() {
+                Some(stat) => stat,
+                None => {
+                    return Ok(None);
+                }
+            };
+            //Note, send only returns an error should the channel disconnect ->
+            //Should we attempt to reconnect the channel?
+            match self.entry_output.send(Some(src_entry.clone())) {
+                Ok(_) => {}
+                Err(e) => {
+                    return Err(ForkliftError::FSError(format!(
+                        "Error: {:?}, unable to send entry for procesing",
+                        e
+                    )));
+                }
+            };
+            return Ok(Some(metadata.clone()));
+        }
+        Ok(None)
     }
 }
 
@@ -290,7 +328,7 @@ fn remove_dir(path: &Path, dest_context: &mut NetworkContext) -> ForkliftResult<
                     let file_path = entry.path();
                     if file_path != this && file_path != parent {
                         let newpath = p.join(&file_path);
-                        println!("remove: {:?}", &newpath);
+                        debug!("remove: {:?}", &newpath);
                         match entry.filetype() {
                             GenericFileType::Directory => {
                                 stack.push(newpath.clone());

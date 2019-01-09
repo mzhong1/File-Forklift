@@ -1,5 +1,13 @@
 //SyncStats
+use crate::error::ForkliftResult;
+use crate::filesystem::FileSystemType;
+use crate::filesystem_entry::Entry;
 use crate::filesystem_ops::SyncOutcome;
+use crate::progress_message::*;
+use crate::walk_worker::*;
+
+use crossbeam::channel;
+use std::path::{Path, PathBuf};
 
 #[derive(Default, Debug, Clone)]
 pub struct SyncStats {
@@ -57,5 +65,41 @@ impl SyncStats {
             SyncOutcome::DirectoryUpdated => self.directory_updated += 1,
             SyncOutcome::DirectoryCreated => self.directory_created += 1,
         }
+    }
+}
+
+pub struct Rsyncer {
+    source: PathBuf,
+    destination: PathBuf,
+    filesystem_type: FileSystemType,
+    progress_info: Box<ProgressInfo + Send>,
+}
+
+impl Rsyncer {
+    pub fn new(
+        source: &Path,
+        destination: &Path,
+        filesystem_type: FileSystemType,
+        progress_info: Box<ProgressInfo + Send>,
+    ) -> Rsyncer {
+        Rsyncer {
+            source: source.to_path_buf(),
+            destination: destination.to_path_buf(),
+            filesystem_type,
+            progress_info,
+        }
+    }
+
+    pub fn sync(self) -> ForkliftResult<()> {
+        let (walker_output, rsync_input) = channel::unbounded::<Entry>();
+        let (stat_output, progress_input) = channel::unbounded::<ProgressMessage>();
+        let progress_output = walker_output.clone();
+
+        //depending on filesystem, create src/dest contexts
+        //create init function???
+        //
+
+        //let walk_worker = WalkWorker::new(source: &Path, entry_output: Sender<Option<Entry>>, progress_output: Sender<ProgressMessage>)
+        Ok(())
     }
 }
