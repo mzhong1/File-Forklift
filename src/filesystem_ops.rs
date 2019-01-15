@@ -34,6 +34,7 @@ pub enum SyncOutcome {
     FileCopied,
     SymlinkUpdated,
     SymlinkCreated,
+    SymlinkSkipped,
     PermissionsUpdated,
     DirectoryCreated,
     DirectoryUpdated,
@@ -169,7 +170,10 @@ pub fn make_dir(
     let exists = exist(dest_path, destfs);
     if !exists {
         if let Err(e) = destfs.mkdir(dest_path) {
-            let err = format!("Error {}, Could not create {:?}", e, dest_path);
+            let err = format!(
+                "Error {}, Could not create {:?}, exists: {:?}",
+                e, dest_path, exists
+            );
             error!("{}", err);
             return Err(ForkliftError::FSError(err));
         }
@@ -427,17 +431,15 @@ fn make_target(size: i64, readmax: u64) -> ForkliftResult<Vec<u8>> {
 ///
 /// @param size     the length of the name of the link's target file
 ///
-/// @param readmax  the maximum read length
-///
 /// @param context  the filesystem context
 ///
 /// @return         returns a String containing the name of the target file
 ///
 fn read_link(path: &Path, size: i64, context: &Nfs) -> ForkliftResult<String> {
-    let readmax = context.get_readmax()?;
-    let mut src_target: Vec<u8> = make_target(size, readmax)?;
+    //let readmax = context.get_readmax()?;
+    let mut src_target: Vec<u8> = make_target(size, BUFF_SIZE)?;
     if let Err(e) = context.readlink(path, &mut src_target) {
-        let err = format!("Unable to read link at {}, {:?}", path.to_string_lossy(), e);
+        let err = format!("Unable to read link at {:?}, {:?}", path, e);
         error!("{}", err);
         return Err(ForkliftError::FSError(err));
     }
@@ -462,12 +464,12 @@ fn read_link(path: &Path, size: i64, context: &Nfs) -> ForkliftResult<String> {
 ///
 pub fn copy_link(
     src: &Entry,
-    src_context: &NetworkContext,
+    src_context: &mut NetworkContext,
     dest: &Entry,
-    dest_context: &NetworkContext,
+    dest_context: &mut NetworkContext,
 ) -> ForkliftResult<SyncOutcome> {
     //Check if correct Filesytem
-    let (context, dcontext) = match (src_context, dest_context) {
+    let (context, dcontext) = match (src_context.clone(), dest_context.clone()) {
         (NetworkContext::Nfs(ctx), NetworkContext::Nfs(dctx)) => (ctx, dctx),
         (_, _) => {
             return Err(ForkliftError::FSError(
@@ -486,12 +488,13 @@ pub fn copy_link(
         (Some(src_stat), Some(dest_stat)) => (src_stat.size(), dest_stat.size()),
     };
     let (src_path, dest_path) = (src.path(), dest.path());
-    let src_target = read_link(src_path, src_size, context)?;
-    let outcome: SyncOutcome;
+    let src_target = read_link(src_path, src_size, &context)?;
+
+    let mut outcome: SyncOutcome;
 
     match dest.is_link() {
         Some(true) => {
-            let dest_target = read_link(dest_path, dest_size, dcontext)?;
+            let dest_target = read_link(dest_path, dest_size, &dcontext)?;
             if dest_target != src_target {
                 match dcontext.unlink(dest_path) {
                     Ok(_) => (),
@@ -522,6 +525,7 @@ pub fn copy_link(
     }
 
     //create new symlink
+    //If creation fails, skip the link
     match dcontext.symlink(Path::new(&src_target), dest_path) {
         Ok(_) => (),
         Err(e) => {
@@ -530,7 +534,7 @@ pub fn copy_link(
                 e, dest_path, src_target
             );
             error!("{}", err);
-            return Err(ForkliftError::FSError(err));
+            outcome = SyncOutcome::SymlinkSkipped;
         }
     };
     Ok(outcome)
@@ -557,11 +561,7 @@ fn read_chunk(file: &FileType, offset: u64, path: &Path) -> ForkliftResult<Vec<u
     match file.read(BUFF_SIZE, offset) {
         Ok(buf) => Ok(buf),
         Err(e) => {
-            let err = format!(
-                "Error {:?}, Could not read from {}",
-                e,
-                path.to_string_lossy(),
-            );
+            let err = format!("Error {:?}, Could not read from {:?}", e, path,);
             error!("{}", err);
             Err(ForkliftError::FSError(err))
         }
@@ -652,7 +652,7 @@ pub fn copy_entry(
 ) -> ForkliftResult<SyncOutcome> {
     //check if src exists (which it should...)
     let (src_path, dest_path) = (src.path(), dest.path());
-    if !exist(src_path, src_context) {
+    if let None = src.metadata() {
         let err = format!("Source file {:?} should exist!", src_path);
         error!("{}", err);
         return Err(ForkliftError::FSError(err));
@@ -708,7 +708,7 @@ pub fn checksum_copy(
 ) -> ForkliftResult<SyncOutcome> {
     let (src_path, dest_path) = (src.path(), dest.path());
     //check if src exists (which it should...)
-    if !exist(src_path, src_context) {
+    if let None = src.metadata() {
         let err = format!("Source file {:?} should exist", src_path);
         error!("{}", err);
         return Err(ForkliftError::FSError(err));
