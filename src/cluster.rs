@@ -5,10 +5,10 @@ extern crate crossbeam;
 use self::api::service_generated::*;
 use crate::error::ForkliftResult;
 use crate::message;
-use nanomsg::{Error, PollFd, PollInOut, PollRequest, Socket};
 use crate::node::*;
 use crate::pulse::*;
 use crate::socket_node::*;
+use nanomsg::{Error, PollFd, PollInOut, PollRequest, Socket};
 use std::net::SocketAddr;
 
 pub struct Cluster {
@@ -176,11 +176,9 @@ impl Cluster {
         for name in &self.names.to_string_vector() {
             let s = &self.sender;
             self.nodes.node_map.entry(name.to_string()).and_modify(|n| {
-                if !n.has_heartbeat {
-                    if n.tickdown() {
-                        let cl = ChangeList::new(ChangeType::RemNode, SocketNode::new(n.name));
-                        s.send(cl);
-                    }
+                if !n.has_heartbeat && n.tickdown() {
+                    let cl = ChangeList::new(ChangeType::RemNode, SocketNode::new(n.name));
+                    s.send(cl);
                 } else {
                     n.has_heartbeat = false;
                     debug!("HEARTBEAT was heard for node {:?}", n);
@@ -353,24 +351,24 @@ impl Cluster {
     }
 
     /*
-        if node_joined has been flagged, then we need to connect the node to the graph. 
+        if node_joined has been flagged, then we need to connect the node to the graph.
         This is done by sending a GETLIST signal to the node that we are connected to
-        every second until we get a NODELIST back. 
+        every second until we get a NODELIST back.
         Poll THIS machine's node
             Pollin using timeout of pulse interval
             if !has_nodelist:
                 send GETLIST to connected nodes
-            if can_read(): 
+            if can_read():
                 if NODESLIST:
                     unpack message to get list of nodes,
                     update nodelist and nodes,
                     connect to list of nodes
                     set has_nodelist to true
-                if GETLIST: 
+                if GETLIST:
                     unpack message to get the sender address
                     add sender to node_names + map
                     send Nodelist to sender address
-                if HEARTBEAT message from some socket 
+                if HEARTBEAT message from some socket
                 (ip address of the heartbeat sender):
                     unpack message to find out sender
                     if the sender is not in the list of nodes, add it to the node_names
