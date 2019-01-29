@@ -1,6 +1,5 @@
-use nix;
-
 use crate::filesystem::*;
+use log::{debug, error};
 use nix::sys::stat::SFlag;
 use std::path::{Path, PathBuf};
 

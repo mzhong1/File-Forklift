@@ -10,10 +10,11 @@ use crate::socket_node::*;
 use crate::walk_worker::*;
 
 use crossbeam::channel;
+use crossbeam::channel::{Receiver, Sender};
+use log::{debug, error, trace};
 use rendezvous_hash::{DefaultNodeHasher, RendezvousNodes};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::{Arc, Mutex};
-use std::thread;
 
 #[derive(Default, Debug, Clone)]
 pub struct SyncStats {
@@ -79,133 +80,126 @@ impl SyncStats {
 }
 
 pub struct Rsyncer {
-    source: PathBuf,
-    destination: PathBuf,
     filesystem_type: FileSystemType,
     progress_info: Box<ProgressInfo + Send>,
 }
 
 impl Rsyncer {
     pub fn new(
-        source: &Path,
-        destination: &Path,
         filesystem_type: FileSystemType,
         progress_info: Box<ProgressInfo + Send>,
     ) -> Rsyncer {
         Rsyncer {
-            source: source.to_path_buf(),
-            destination: destination.to_path_buf(),
             filesystem_type,
             progress_info,
         }
     }
 
-    pub fn create_contexts(
-        val: FileSystemInitValues,
-        (src_ip, dest_ip): (&str, &str),
-        (src_share, dest_share): (&str, &str),
-        level: u32,
-    ) -> ForkliftResult<(
-        NetworkContext,
-        NetworkContext,
-        NetworkContext,
-        NetworkContext,
-    )> {
-        let (mut src_walk_context, mut dest_walk_context) = match val {
-            FileSystemInitValues::Samba(wg, un, pw) => {
-                let ctx = create_smb_context(&wg, &un, &pw, level)?;
-                let dest_ctx = ctx.clone();
-                (ctx, dest_ctx)
-            }
-            FileSystemInitValues::Nfs => {
-                let src_ctx = create_nfs_context(src_ip, src_share, level)?;
-                let dest_ctx = create_nfs_context(dest_ip, dest_share, level)?;
-                (src_ctx, dest_ctx)
-            }
-        };
-        let (mut src_sync_context, mut dest_sync_context) =
-            (src_walk_context.clone(), dest_walk_context.clone());
-        Ok((
-            src_walk_context,
-            dest_walk_context,
-            src_sync_context,
-            dest_sync_context,
-        ))
-    }
-
-    // one Filesystem InitValues or 4 mut NetworkContexts?????
-    //Note: technically NFS needs 2, SMB 1 Context, and clone them (4 times for Smb, once each for nfs)
-    // DOES NFS HAVE SAME UID GID on either side????
     pub fn sync(
         self,
-        val: FileSystemInitValues,
         (src_ip, dest_ip): (&str, &str),
         (src_share, dest_share): (&str, &str),
         (level, num_threads): (u32, u32),
+        (workgroup, username, password): (String, String, String),
         nodelist: Arc<Mutex<RendezvousNodes<SocketNode, DefaultNodeHasher>>>,
         my_node: SocketNode,
     ) -> ForkliftResult<()> {
-        let (walker_output, rsync_input) = channel::unbounded::<Option<Entry>>();
         let (stat_output, progress_input) = channel::unbounded::<ProgressMessage>();
         let progress_output = stat_output.clone();
 
-        //create contexts
-        let (mut src_walk_context, mut dest_walk_context) = match val {
-            FileSystemInitValues::Samba(wg, un, pw) => {
-                let ctx = create_smb_context(&wg, &un, &pw, level)?;
-                let dest_ctx = ctx.clone();
-                (ctx, dest_ctx)
-            }
-            FileSystemInitValues::Nfs => {
-                let src_ctx = create_nfs_context(src_ip, src_share, level)?;
-                let dest_ctx = create_nfs_context(dest_ip, dest_share, level)?;
-                (src_ctx, dest_ctx)
-            }
-        };
-        let (mut src_sync_context, mut dest_sync_context) =
-            (src_walk_context.clone(), dest_walk_context.clone());
-        /*//create src + dest paths
-        let src_path = format!("smb://{}/{}", src_ip, src_share);
-        let dest_path = format!("smb://{}/{}", dest_ip, dest_share);
-        let (source_path, dest_path) = match self.filesystem_type {
-            FileSystemType::Samba => (Path::new(&src_path), Path::new(&dest_path)),
+        let mut send_handles: Vec<Sender<Option<Entry>>> = Vec::new();
+
+        let mut syncers: Vec<RsyncWorker> = Vec::new();
+        let p = format!("smb://{}/{}", src_ip, src_share);
+        let d = format!("smb://{}/{}", dest_ip, dest_share);
+        let (src_path, dest_path) = match self.filesystem_type {
+            FileSystemType::Samba => (Path::new(&p), Path::new(&d)),
             FileSystemType::Nfs => (Path::new("/"), Path::new("/")),
-        };*/
+        };
+
+        let (send_prog, rec_prog) = channel::unbounded::<ProgressMessage>();
+        let sync_progress = send_prog.clone();
+        for _ in 0..num_threads {
+            let (send_e, rec_e) = channel::unbounded();
+            send_handles.push(send_e);
+            let sync_progress = send_prog.clone();
+            syncers.push(RsyncWorker::new(src_path, dest_path, rec_e, sync_progress));
+        }
+        let mut contexts: Vec<(NetworkContext, NetworkContext)> = Vec::new();
+        let mut sync_contexts: Vec<(NetworkContext, NetworkContext)> = Vec::new();
+
+        let s = init_samba(workgroup, username, password, level)?;
+        for _ in 0..num_threads {
+            match self.filesystem_type {
+                FileSystemType::Samba => {
+                    let (sctx, dctx) = (
+                        NetworkContext::Samba(Box::new(s.clone())),
+                        NetworkContext::Samba(Box::new(s.clone())),
+                    );
+                    contexts.push((sctx, dctx));
+                    let (sctx, dctx) = (
+                        NetworkContext::Samba(Box::new(s.clone())),
+                        NetworkContext::Samba(Box::new(s.clone())),
+                    );
+                    sync_contexts.push((sctx, dctx));
+                }
+                FileSystemType::Nfs => {
+                    let (sctx, dctx) = (
+                        create_nfs_context(src_ip, src_share, 0)?,
+                        create_nfs_context(dest_ip, dest_share, 0)?,
+                    );
+                    contexts.push((sctx, dctx));
+                    let (sctx, dctx) = (
+                        create_nfs_context(src_ip, src_share, 0)?,
+                        create_nfs_context(dest_ip, dest_share, 0)?,
+                    );
+                    sync_contexts.push((sctx, dctx));
+                }
+            }
+        }
+        let walk_worker = WalkWorker::new(src_path, send_handles, send_prog, nodelist, my_node);
 
         let pool = rayon::ThreadPoolBuilder::new()
             .num_threads(num_threads as usize)
+            .breadth_first()
             .build()
             .unwrap();
 
-        //init walkers
-        let src_path = self.source;
-        let walk_worker = WalkWorker::new(&src_path, walker_output, stat_output, nodelist, my_node);
-        let rsync_worker =
-            RsyncWorker::new(&src_path, &self.destination, rsync_input, progress_output);
-        let progress_worker = ProgressWorker::new(progress_input, self.progress_info);
+        if num_threads == 1 {
+            let (mut fs, mut destfs) = contexts[0].clone();
+            walk_worker.s_walk(src_path, &mut fs, &mut destfs)?;
+            walk_worker.stop();
+        }
 
-        /*let walk_handle = thread::spawn(move || {
-            walk_worker.s_walk(&src_path, &mut src_walk_context, &mut dest_walk_context);
-        });*/
-        let dest_path = self.destination;
         pool.install(|| {
-            walk_worker.t_walk(
-                &src_path,
-                &dest_path,
-                &mut src_walk_context,
-                &mut dest_walk_context,
-            )
-        })?;
-        let sync_handle = thread::spawn(move || {
-            rsync_worker.start(&mut src_sync_context, &mut dest_sync_context);
-        });
-        let progress_handle = thread::spawn(move || {
-            progress_worker.start();
-        });
+            if num_threads > 1 {
+                match walk_worker.t_walk(dest_path, src_path, &mut contexts, &pool) {
+                    Ok(_) => {}
+                    Err(e) => return Err(e),
+                }
+                walk_worker.stop();
+            }
 
-        //let walk_outcome = walk_handle.join();
-        let sync_outcome = sync_handle.join();
-        let progress_outcome = progress_handle.join();
+            rayon::scope(|spawner| {
+                for syncer in syncers {
+                    spawner.spawn(|_| {
+                        let input = syncer.input.clone();
+                        match syncer.start(&mut sync_contexts.clone(), &pool) {
+                            Ok(_) => {
+                                debug!(
+                                    "Syncer Stopped, Thread {:?}, num left {:?}",
+                                    pool.current_thread_index(),
+                                    input.len()
+                                );
+                            }
+                            Err(e) => error!("Error: {:?}", e),
+                        };
+                    });
+                }
+            });
+            Ok(())
+        })?;
+
         Ok(())
     }
 }

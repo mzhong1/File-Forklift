@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 
 use crossbeam::channel::Receiver;
 use crossbeam::channel::Sender;
+use log::{debug, error, trace};
 use rayon::*;
 
 use crate::error::*;
@@ -56,7 +57,7 @@ impl RsyncWorker {
                 None => break,
             };
             let sync_outcome = self.sync(&e, &mut src, &mut dest)?;
-            println!(
+            debug!(
                 "Sync Thread {:?} Outcome: {:?} Num left {:?}",
                 id,
                 sync_outcome,
@@ -66,10 +67,10 @@ impl RsyncWorker {
             match self.output.send(progress) {
                 Ok(_) => {}
                 Err(e) => {
-                    /*return Err(ForkliftError::FSError(format!(
+                    return Err(ForkliftError::FSError(format!(
                         "Error: {:?}, unable to send progress",
                         e
-                    )));*/
+                    )));
                 }
             };
             trace!("rec len {:?}", self.input.len());
@@ -95,14 +96,14 @@ impl RsyncWorker {
             &mut dest_context,
         )?;
         let dest_entry = Entry::new(&dest_path, &dest_context);
-        let mut outcome = sync_entry(&src_entry, src_context, &dest_entry, dest_context)?;
+        let mut outcome = sync_entry(&src_entry, &dest_entry, src_context, dest_context)?;
         let dir = match src_entry.is_dir() {
             Some(d) => d,
             None => true,
         };
         if !dir {
             let temp_outcome =
-                copy_permissions(&src_entry, src_context, &dest_entry, dest_context)?;
+                copy_permissions(&src_entry, &dest_entry, src_context, dest_context)?;
             let c = outcome.clone();
             outcome = match (outcome, temp_outcome) {
                 (SyncOutcome::UpToDate, SyncOutcome::PermissionsUpdated) => {

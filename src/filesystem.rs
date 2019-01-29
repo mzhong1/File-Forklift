@@ -1,11 +1,13 @@
 use crate::error::*;
+
+use ::smbc::*;
 use chrono::*;
 use libnfs::*;
+use log::{debug, error, trace};
 use nix::fcntl::OFlag;
 use nix::sys::stat::Mode;
 use rand::*;
 use rayon::*;
-use smbc::*;
 
 use std::ffi::CString;
 use std::path::Path;
@@ -25,6 +27,18 @@ pub fn create_cstring(input: &str) -> CString {
     }
 }
 
+/// initialize the Samba contexts
+pub fn init_samba(wg: String, un: String, pw: String, level: u32) -> ForkliftResult<Smbc> {
+    Smbc::set_data(wg, un, pw);
+    match Smbc::new_with_auth(level) {
+        Ok(e) => Ok(e),
+        Err(e) => {
+            error!("ERROR: {:?}", e);
+            Err(ForkliftError::SmbcError(e))
+        }
+    }
+}
+
 /// return the index of the current thread in the pool,
 /// otherwise return a random number
 pub fn get_index_or_rand(pool: &ThreadPool) -> usize {
@@ -32,7 +46,7 @@ pub fn get_index_or_rand(pool: &ThreadPool) -> usize {
         Some(i) => i,
         None => {
             error!("thread is not part of the current pool");
-            //default to randome number
+            //default to random number
             random()
         }
     }
@@ -56,7 +70,7 @@ pub enum FileSystemType {
 #[derive(Clone)]
 /// a generic wrapper for filesystem contexts
 pub enum NetworkContext {
-    Samba(Smbc),
+    Samba(Box<Smbc>),
     Nfs(Nfs),
 }
 

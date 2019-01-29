@@ -32,7 +32,7 @@ pub enum ForkliftError {
 }
 
 impl fmt::Display for ForkliftError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self {
             ForkliftError::InvalidConfigError => f.write_str("InvalidConfigError"),
             ForkliftError::IpLocalError => f.write_str("IpLocalError"),
@@ -62,7 +62,7 @@ impl err for ForkliftError {
         }
     }
 
-    fn cause(&self) -> Option<&dyn err> {
+    fn cause(&self) -> Option<&err> {
         match *self {
             ForkliftError::IoError(ref e) => e.cause(),
             ForkliftError::SystemTimeError(ref e) => e.cause(),

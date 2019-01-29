@@ -5,8 +5,9 @@ use termcolor::{Buffer, BufferWriter, Color, ColorChoice, ColorSpec, WriteColor}
 
 use crate::progress_message::*;
 use crate::rsync::*;
+use log::{debug, error};
 
-/// Note: Credit to these functiosn goes to dmerejkowsky's rusync
+/// Note: Credit to these functions goes to dmerejkowsky's rusync
 
 pub struct ConsoleProgressOutput {
     writer: BufferWriter,
@@ -42,11 +43,11 @@ impl ProgressInfo for ConsoleProgressOutput {
         handle_reset_color(&mut buffer);
         handle_write(&mut buffer, " Syncing from ");
         handle_set_color(&mut buffer, &self.whitebold);
-        handle_write(&mut buffer, &format!("{}", source));
+        handle_write(&mut buffer, source);
         handle_reset_color(&mut buffer);
         handle_write(&mut buffer, " to ");
         handle_set_color(&mut buffer, &self.whitebold);
-        handle_write(&mut buffer, &format!("{}", destination));
+        handle_write(&mut buffer, destination);
         handle_reset_color(&mut buffer);
         handle_write(&mut buffer, " ...\n");
         handle_print(&self.writer, &mut buffer);
@@ -113,7 +114,7 @@ fn get_terminal_width() -> usize {
 fn erase_line() {
     let line_width = get_terminal_width();
     let line = vec![32 as u8; line_width as usize];
-    print!("{}\r", String::from_utf8(line).unwrap());
+    print!("{}\r", String::from_utf8_lossy(&line));
 }
 
 fn human_seconds(s: usize) -> String {

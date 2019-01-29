@@ -6,6 +6,7 @@ use crate::progress_message::ProgressMessage;
 use crate::socket_node::*;
 
 use crossbeam::channel::Sender;
+use log::{debug, error, trace};
 use rayon::*;
 use rendezvous_hash::{DefaultNodeHasher, RendezvousNodes};
 use std::path::{Path, PathBuf};
@@ -39,8 +40,8 @@ impl WalkWorker {
     pub fn stop(&self) {
         for s in self.entry_outputs.iter() {
             // Stop all the senders
-            if let Err(_) = s.send(None) {
-                debug!("Unable to stop");
+            if s.send(None).is_err() {
+                error!("Unable to stop");
             }
         }
     }
@@ -119,7 +120,8 @@ impl WalkWorker {
 
                 if file_path != this && file_path != parent {
                     let newpath = path.join(&file_path);
-                    let meta = self.process_file(&newpath, &mut src_context, self.nodes.clone())?;
+                    let meta =
+                        self.process_file(&newpath, &mut src_context, &self.nodes.clone())?;
                     if let Some(meta) = meta {
                         debug!("Sent: {:?}", &file_path);
                         num_files += 1;
@@ -187,7 +189,7 @@ impl WalkWorker {
             if file_path != this && file_path != parent {
                 let newpath = path.join(&file_path);
                 //file exists?
-                let meta = self.process_file(&newpath, src_context, self.nodes.clone())?;
+                let meta = self.process_file(&newpath, src_context, &self.nodes.clone())?;
                 if let Some(meta) = meta {
                     *num_files += 1;
                     *total_size += meta.size() as u64;
@@ -307,7 +309,7 @@ impl WalkWorker {
         &self,
         entry: &Path,
         src_context: &mut NetworkContext,
-        nodes: Arc<Mutex<RendezvousNodes<SocketNode, DefaultNodeHasher>>>,
+        nodes: &Arc<Mutex<RendezvousNodes<SocketNode, DefaultNodeHasher>>>,
     ) -> ForkliftResult<Option<Stat>> {
         let n = match nodes.lock() {
             Ok(e) => {
@@ -334,8 +336,8 @@ impl WalkWorker {
             };
             //Note, send only returns an error should the channel disconnect ->
             //Should we attempt to reconnect the channel?
-            self.do_work(Some(src_entry.clone()));
-            return Ok(Some(metadata.clone()));
+            self.do_work(Some(src_entry.clone()))?;
+            return Ok(Some(metadata));
         }
         Ok(None)
     }
@@ -357,42 +359,34 @@ fn remove_extra(path: &Path, dest_context: &mut NetworkContext) -> ForkliftResul
 
 fn remove_dir(path: &Path, dest_context: &mut NetworkContext) -> ForkliftResult<()> {
     let (this, parent) = (Path::new("."), Path::new(".."));
-    let mut stack: Vec<PathBuf> = vec![path.clone().to_path_buf()];
-    let mut remove_stack: Vec<PathBuf> = vec![path.clone().to_path_buf()];
-    loop {
-        match stack.pop() {
-            Some(p) => {
-                let dir = dest_context.opendir(&p)?;
-                for entrytype in dir {
-                    let entry = match entrytype {
-                        Ok(e) => e,
-                        Err(e) => {
-                            return Err(e);
-                        }
-                    };
-                    let file_path = entry.path();
-                    if file_path != this && file_path != parent {
-                        let newpath = p.join(&file_path);
-                        debug!("remove: {:?}", &newpath);
-                        match entry.filetype() {
-                            GenericFileType::Directory => {
-                                stack.push(newpath.clone());
-                                remove_stack.push(newpath);
-                            }
-                            GenericFileType::File => {
-                                remove_extra(&newpath, dest_context)?;
-                            }
-                            GenericFileType::Link => {
-                                remove_extra(&newpath, dest_context)?;
-                            }
-                            GenericFileType::Other => {}
-                        }
-                    }
+    let mut stack: Vec<PathBuf> = vec![(*path).to_path_buf()];
+    let mut remove_stack: Vec<PathBuf> = vec![(*path).to_path_buf()];
+    while let Some(p) = stack.pop() {
+        let dir = dest_context.opendir(&p)?;
+        for entrytype in dir {
+            let entry = match entrytype {
+                Ok(e) => e,
+                Err(e) => {
+                    return Err(e);
                 }
-                // check through dest files
-            }
-            None => {
-                break;
+            };
+            let file_path = entry.path();
+            if file_path != this && file_path != parent {
+                let newpath = p.join(&file_path);
+                debug!("remove: {:?}", &newpath);
+                match entry.filetype() {
+                    GenericFileType::Directory => {
+                        stack.push(newpath.clone());
+                        remove_stack.push(newpath);
+                    }
+                    GenericFileType::File => {
+                        remove_extra(&newpath, dest_context)?;
+                    }
+                    GenericFileType::Link => {
+                        remove_extra(&newpath, dest_context)?;
+                    }
+                    GenericFileType::Other => {}
+                }
             }
         }
     }
