@@ -1,22 +1,15 @@
-extern crate digest;
-extern crate meowhash;
-extern crate nix;
-extern crate nom;
-extern crate pathdiff;
-extern crate smbc;
-
-use self::digest::Digest;
-use self::meowhash::*;
-use self::nom::types::CompleteByteSlice;
+use digest::Digest;
+use meowhash::*;
 use nix::fcntl::OFlag;
 use nix::sys::stat::Mode;
+use nom::types::CompleteByteSlice;
 use pathdiff::*;
 
 use crate::error::{ForkliftError, ForkliftResult};
 use crate::filesystem::*;
 use crate::filesystem_entry::Entry;
+use crate::smbc::*;
 use libnfs::*;
-use smbc::*;
 use std::collections::hash_map::Entry as E;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -25,7 +18,13 @@ use std::sync::Mutex;
 const BUFF_SIZE: u64 = 1024 * 1000;
 
 lazy_static! {
-    pub static ref NAME_MAP: Mutex<HashMap<String, Sid>> = Mutex::new(HashMap::new());
+    pub static ref NAME_MAP: Mutex<HashMap<String, Sid>> = {
+        let mut map = HashMap::new();
+        map.insert("\\Everyone".to_string(), Sid(vec![1, 0]));
+        map.insert("\\Creator Owner".to_string(), Sid(vec![3, 0]));
+        map.insert("\\Creator Group".to_string(), Sid(vec![3, 1]));
+        Mutex::new(map)
+    };
 }
 
 #[derive(PartialEq, Debug, Clone)]
@@ -40,6 +39,22 @@ pub enum SyncOutcome {
     DirectoryUpdated,
     ChecksumUpdated,
 }
+
+/*pub fn get_acl_uid(id: &str) -> String {
+    match id.find("Unix Group\\") {
+        Some(i) => id.to_string(),
+        None => match id.find("\\") {
+            Some(i) => {
+                let index = i + 1;
+                match id.get(index..) {
+                    Some(e) => e.to_string(),
+                    None => id.to_string(),
+                }
+            }
+            None => id.to_string(),
+        },
+    }
+}*/
 
 ///
 /// checks if a path is valid
@@ -93,7 +108,7 @@ pub fn set_xattr(
 ) -> ForkliftResult<()> {
     match fs.setxattr(path, attr, val, XAttrFlags::SMBC_XATTR_FLAG_CREATE) {
         Ok(_) => {
-            debug!("{}", success);
+            trace!("set success! {}", success);
             Ok(())
         }
         Err(e) => {
@@ -175,7 +190,7 @@ pub fn make_dir(
                 e, dest_path, exists
             );
             error!("{}", err);
-            return Err(ForkliftError::FSError(err));
+            return Ok(SyncOutcome::UpToDate);
         }
     }
     let (src_entry, dest_entry) = (Entry::new(&src_path, fs), Entry::new(&dest_path, destfs));
@@ -312,6 +327,9 @@ pub fn has_different_size(src: &Entry, dest: &Entry) -> ForkliftResult<bool> {
 ///
 pub fn is_more_recent(src: &Entry, dest: &Entry) -> ForkliftResult<bool> {
     match (src.metadata(), dest.metadata()) {
+        (Some(src_stat), Some(dest_stat)) => {
+            Ok(src_stat.mtime().num_microseconds() > dest_stat.mtime().num_microseconds())
+        }
         (None, _) => {
             let err = format!("Source File {:?} does not exist", src.path());
             error!("{}", err);
@@ -320,9 +338,6 @@ pub fn is_more_recent(src: &Entry, dest: &Entry) -> ForkliftResult<bool> {
         (_, None) => {
             trace!("Dest File does not exist");
             Ok(true)
-        }
-        (Some(src_stat), Some(dest_stat)) => {
-            Ok(src_stat.mtime().num_microseconds() > dest_stat.mtime().num_microseconds())
         }
     }
 }
@@ -589,7 +604,7 @@ fn open_file(
     flags: OFlag,
     error: &str,
 ) -> ForkliftResult<FileType> {
-    match context.open(path, flags, Mode::S_IRWXU) {
+    match context.open(path, flags, Mode::S_IRWXU | Mode::S_IRWXG | Mode::S_IRWXO) {
         Ok(f) => Ok(f),
         Err(e) => {
             let err = format!("Error {}, {}", e, error);
@@ -644,7 +659,7 @@ fn write_file(path: &Path, file: &FileType, buffer: &[u8], offset: u64) -> Forkl
 ///
 /// @return             the sync outcome File Copied or an error
 ///
-pub fn copy_entry(
+fn copy_entry(
     src: &Entry,
     src_context: &mut NetworkContext,
     dest: &Entry,
@@ -656,16 +671,20 @@ pub fn copy_entry(
         let err = format!("Source file {:?} should exist!", src_path);
         error!("{}", err);
         return Err(ForkliftError::FSError(err));
-    }
-    let err = format!("Could not open {:?} for reading", src_path);
-    let src_file = open_file(src_path, src_context, OFlag::O_RDONLY, &err)?;
-    let flags = OFlag::O_RDWR | OFlag::O_CREAT;
-    let dest_file = match dest_context.create(&dest_path, flags, Mode::S_IRWXU) {
+    };
+    let err = format!("Could not open {:?} for reading", dest_path);
+    let src_file = open_file(src_path, src_context, OFlag::empty(), &err)?;
+    let flags = OFlag::O_CREAT;
+    let dest_file = match dest_context.create(
+        &dest_path,
+        flags,
+        Mode::S_IRWXU | Mode::S_IRWXO | Mode::S_IRWXG,
+    ) {
         Ok(f) => f,
         Err(e) => {
-            error!("Error {:?}", e);
+            trace!("Error {:?}", e);
             let err = format!("Could not open {:?} for writing", dest_path);
-            error!("{}", err);
+            //error!("{}", err);
             return Err(ForkliftError::FSError(err));
         }
     };
@@ -712,11 +731,11 @@ pub fn checksum_copy(
         let err = format!("Source file {:?} should exist", src_path);
         error!("{}", err);
         return Err(ForkliftError::FSError(err));
-    }
+    };
     // open src and dest files
-    let err = format!("Could not open {:?} for reading", src_path);
+    let err = format!("Could not open {:?} for reading", dest_path);
     let src_file = open_file(src_path, src_context, OFlag::O_RDONLY, &err)?;
-    let flags = OFlag::O_RDWR | OFlag::O_CREAT;
+    let flags = OFlag::O_CREAT;
     let dest_file = open_file(dest_path, dest_context, flags, &err)?;
 
     //loop until end, count the number of times we needed to update the file
@@ -820,6 +839,7 @@ pub fn sync_entry(
                 debug!("Is different!!! size {}  recent {}", size_dif, recent);
                 copy_entry(src, src_context, dest, dest_context)
             } else {
+                debug!("not diff {} {}", size_dif, recent);
                 checksum_copy(src, src_context, dest, dest_context)
             }
         }
@@ -850,7 +870,7 @@ fn check_acl_sid_remove(check_sid: &Sid, dest_acls: &mut Vec<SmbcAclValue>) -> O
             mask,
         )) = dest_acl
         {
-            debug!("Sid to check {}, dest sid {}", *check_sid, &dest_sid);
+            trace!("Sid to check {}, dest sid {}", *check_sid, &dest_sid);
             if check_sid == dest_sid {
                 let ret = ACE::Numeric(
                     SidType::Numeric(Some(dest_sid.clone())),
@@ -941,7 +961,12 @@ fn get_mapped_sid(
         if let SmbcAclValue::AclPlus(ACE::Named(SidType::Named(Some(dest_sid)), _, _, _)) = ace {
             debug!("src sid {} dest_sid {}", &sid, &dest_sid);
             if sid == dest_sid {
-                trace!("equals src sid {} dest_sid {}", &sid, &dest_sid);
+                //get_acl_uid(sid) == get_acl_uid(dest_sid) {
+                trace!(
+                    "equals src sid {} dest_sid {}",
+                    sid,      //get_acl_uid(sid),
+                    dest_sid  //get_acl_uid(dest_sid)
+                );
                 let dest_acls = get_acl_list(dest_ctx, dest_path, false)?;
                 let send_ace = &dest_acls[count];
                 if let SmbcAclValue::Acl(ACE::Numeric(SidType::Numeric(Some(send)), _, _, _)) =
@@ -971,8 +996,14 @@ fn get_mapped_sid(
 ///                     functions fail.
 ///
 fn map_temp_acl(sid: &str, dest_ctx: &Smbc, dest_path: &Path) -> ForkliftResult<Sid> {
-    let temp_ace = ACE::Named(
+    /*let ace = ACE::Named(
         SidType::Named(Some(sid.to_string())),
+        AceAtype::ALLOWED,
+        AceFlag::NONE,
+        "FULL".to_string(),
+    );*/
+    let temp_ace = ACE::Named(
+        SidType::Named(Some(sid.to_string())), //SidType::Named(Some(get_acl_uid(sid))),
         AceAtype::ALLOWED,
         AceFlag::NONE,
         "FULL".to_string(),
@@ -1032,9 +1063,12 @@ fn replace_acl(
         dest_path,
         &SmbcXAttr::AclAttr(SmbcAclAttr::Acl(old_acl.clone())),
     ) {
-        Ok(_) => debug!("Removed old acl {}", old_acl),
+        Ok(_) => trace!("Removed old acl {}", old_acl),
         Err(e) => {
-            let err = format!("Error {}, failed to remove the old acl {}", e, old_acl);
+            let err = format!(
+                "Error {}, failed to remove the old acl {} from {:?}",
+                e, old_acl, dest_path
+            );
             error!("{}", err);
             return Err(ForkliftError::FSError(err));
         }
@@ -1042,7 +1076,7 @@ fn replace_acl(
     //set new acl
     let xattr = SmbcXAttr::AclAttr(SmbcAclAttr::AclNone);
     let val = SmbcXAttrValue::Ace(new_acl.clone());
-    let err = format!("failed to set the new acl {}", new_acl);
+    let err = format!("failed to set the new acl {} path {:?}", new_acl, dest_path);
     let suc = format!("Set new acl {}", new_acl);
     set_xattr(dest_path, dest_ctx, &xattr, &val, &err, &suc)?;
     Ok(())
@@ -1098,7 +1132,7 @@ fn copy_if_diff(
             ACE::Numeric(SidType::Numeric(Some(src.0)), src.1, src.2, src.3),
             ACE::Numeric(SidType::Numeric(Some(dest.0)), dest.1, dest.2, dest.3),
         );
-        debug!("New {}, Old {}", new_acl, old_acl);
+        trace!("New {}, Old {}", new_acl, old_acl);
         replace_acl(&new_acl, &old_acl, dest_ctx, dest_path)?;
         return Ok(true);
     }
@@ -1167,6 +1201,11 @@ pub fn map_names_and_copy(
             ))
         }
     };
+    trace!(
+        "ACLS:\nSRC: {:?}\n\nDEST {:?}\n",
+        &src_acls_plus,
+        &dest_acls
+    );
     let (mut copied, mut count) = (false, 0);
     let mut creator_reached = false;
     for src_acl in src_acls_plus {
@@ -1184,7 +1223,8 @@ pub fn map_names_and_copy(
                     E::Occupied(o) => o.into_mut(),
                     E::Vacant(v) => v.insert(map_name(&sid, dest_ctx, dest_path)?),
                 };
-                //if reached "CREATOR" sids, ignore
+                trace!("Sid: {}, mapped: {}", sid, mapped);
+                //if reached "CREATOR" sids, ignor
                 if !creator_reached {
                     copied = copy_acl(
                         (mapped.clone(), atype, aflags, mask),
@@ -1202,28 +1242,25 @@ pub fn map_names_and_copy(
         }
         count += 1;
     }
-    //get creator owner/group mapping...
-    let own = "\\Creator Owner".to_string();
-    let c_owner = match map.entry(own.clone()) {
-        E::Occupied(o) => o.into_mut(),
-        E::Vacant(v) => v.insert(map_name(&own, dest_ctx, dest_path)?),
-    };
     for dest_acl in dest_acls.clone() {
         match dest_acl {
             SmbcAclValue::Acl(ACE::Numeric(SidType::Numeric(Some(dest_sid)), a, f, m)) => {
-                if dest_sid == *c_owner {
-                    break;
-                }
-                let ace = ACE::Numeric(SidType::Numeric(Some(dest_sid)), a, f, m);
-                match dest_ctx.removexattr(
-                    dest_path,
-                    &SmbcXAttr::AclAttr(SmbcAclAttr::Acl(ace.clone())),
-                ) {
-                    Ok(_) => debug!("Removed extra acl {}", ace),
-                    Err(e) => {
-                        let err = format!("Error {}, failed to remove the old acl {}", e, ace);
-                        error!("{}", err);
-                        return Err(ForkliftError::FSError(err));
+                //if not \\CREATOR Owner or Creator Group
+                if !(dest_sid == Sid(vec![3, 0]) || dest_sid == Sid(vec![3, 1])) {
+                    let ace = ACE::Numeric(SidType::Numeric(Some(dest_sid)), a, f, m);
+                    match dest_ctx.removexattr(
+                        dest_path,
+                        &SmbcXAttr::AclAttr(SmbcAclAttr::Acl(ace.clone())),
+                    ) {
+                        Ok(_) => debug!("Removed extra acl {}", ace),
+                        Err(e) => {
+                            let err = format!(
+                                "Error {}, failed to remove the old acl {} from {:?}",
+                                e, ace, dest_path
+                            );
+                            error!("{}", err);
+                            return Err(ForkliftError::FSError(err));
+                        }
                     }
                 }
             }
@@ -1234,7 +1271,6 @@ pub fn map_names_and_copy(
             }
         }
     }
-    trace!("{:?}", *map);
     Ok(copied || !dest_acls.is_empty())
 }
 
@@ -1261,6 +1297,7 @@ pub fn get_acl_list(fs: &Smbc, path: &Path, plus: bool) -> ForkliftResult<Vec<Sm
             get_xattr(path, fs, &acl_xattr, &err, &suc)?
         }
     };
+
     acls.pop();
     let acl_list = match xattr_parser(CompleteByteSlice(&acls)) {
         Ok((_, acl_list)) => acl_list,
@@ -1305,7 +1342,7 @@ fn change_stat_mode(context: &NetworkContext, path: &Path, mode: u32) -> Forklif
             Ok(())
         }
         Err(e) => {
-            let err = format!("Error {}, chmod failed", e);
+            let err = format!("Error {}, mode {:?}", e, Mode::from_bits_truncate(mode));
             error!("{}", err);
             Err(ForkliftError::FSError(err))
         }
