@@ -1,6 +1,6 @@
-extern crate api;
-extern crate clap;
-extern crate crossbeam;
+use api;
+
+use crossbeam;
 
 use self::api::service_generated::*;
 use crate::error::ForkliftResult;
@@ -88,7 +88,7 @@ impl Cluster {
     pub fn send_getlist(
         &mut self,
         full_address: &SocketAddr,
-        request: &PollRequest,
+        request: &PollRequest<'_>,
     ) -> ForkliftResult<()> {
         let beat = self.pulse.beat();
         if request.get_fds()[0].can_write() && beat {
@@ -194,7 +194,7 @@ impl Cluster {
      * ENSURES: returns Ok(()) if successfully sending a heartbeat to connected nodes and ticking down,
      * otherwise return Err
      */
-    pub fn send_and_tickdown(&mut self, full_address: &SocketAddr, request: &PollRequest) {
+    pub fn send_and_tickdown(&mut self, full_address: &SocketAddr, request: &PollRequest<'_>) {
         let (valid, err) = self.is_valid_cluster();
         if !valid {
             error!("Cluster invalid! {}", err);
@@ -304,7 +304,7 @@ impl Cluster {
      */
     pub fn read_and_heartbeat(
         &mut self,
-        request: &PollRequest,
+        request: &PollRequest<'_>,
         has_nodelist: &mut bool,
         full_address: &SocketAddr,
     ) {

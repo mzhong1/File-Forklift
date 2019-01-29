@@ -1,4 +1,4 @@
-extern crate rendezvous_hash;
+
 
 use crate::error::{ForkliftError, ForkliftResult};
 use crate::utils;
@@ -275,7 +275,7 @@ impl NodeMap {
         for node_ip in node_names {
             if node_ip != full_address {
                 debug!("node ip addresses and port: {:?}", node_ip);
-                let mut temp_node = Node::new(*node_ip, lifetime);
+                let temp_node = Node::new(*node_ip, lifetime);
                 debug!("Node successfully created : {:?}", &temp_node);
                 nodes.node_map.insert(node_ip.to_string(), temp_node);
             }

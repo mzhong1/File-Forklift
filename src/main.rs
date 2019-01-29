@@ -2,17 +2,17 @@
 extern crate log;
 #[macro_use]
 extern crate clap;
-extern crate api;
-extern crate crossbeam;
-extern crate dirs;
+
+use crossbeam;
+use dirs;
 #[macro_use]
 extern crate lazy_static;
-extern crate libnfs;
-extern crate nanomsg;
-extern crate nix;
-extern crate rendezvous_hash;
-extern crate simplelog;
-extern crate smbc;
+
+
+
+
+use simplelog;
+
 
 use clap::{App, Arg};
 use crossbeam::channel;
@@ -73,7 +73,7 @@ fn init_router(full_address: &SocketAddr) -> ForkliftResult<Socket> {
     Ok(router)
 }
 
-fn parse_matches(matches: &clap::ArgMatches) -> (Vec<String>, PathBuf, bool) {
+fn parse_matches(matches: &clap::ArgMatches<'_>) -> (Vec<String>, PathBuf, bool) {
     let mut has_nodelist = false;
     let joined = match matches.values_of("join") {
         None => vec![],
@@ -94,7 +94,7 @@ fn parse_matches(matches: &clap::ArgMatches) -> (Vec<String>, PathBuf, bool) {
 }
 
 fn heartbeat(
-    matches: &clap::ArgMatches,
+    matches: &clap::ArgMatches<'_>,
     s: crossbeam::Sender<ChangeList>,
 ) -> std::thread::JoinHandle<ForkliftResult<()>> {
     trace!("Attempting to get local ip address");
@@ -144,7 +144,7 @@ fn init_logs(f: &Path, level: simplelog::LevelFilter) -> ForkliftResult<()> {
     if !f.exists() {
         File::create(f)?;
     }
-    let mut loggers: Vec<Box<SharedLogger>> = vec![];
+    let mut loggers: Vec<Box<dyn SharedLogger>> = vec![];
     if let Some(term_logger) = TermLogger::new(level, Config::default()) {
         loggers.push(term_logger);
     }

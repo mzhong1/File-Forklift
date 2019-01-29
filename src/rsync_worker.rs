@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 
 use crossbeam::channel::Receiver;
 use crossbeam::channel::Sender;
+use rayon::*;
 
 use crate::error::*;
 use crate::filesystem::*;
@@ -9,8 +10,9 @@ use crate::filesystem_entry::Entry;
 use crate::filesystem_ops::*;
 use crate::progress_message::ProgressMessage;
 
+#[derive(Clone)]
 pub struct RsyncWorker {
-    input: Receiver<Option<Entry>>,
+    pub input: Receiver<Option<Entry>>,
     output: Sender<ProgressMessage>,
     source: PathBuf,
     destination: PathBuf,
@@ -33,29 +35,44 @@ impl RsyncWorker {
 
     pub fn start(
         self,
-        src_context: &mut NetworkContext,
-        dest_context: &mut NetworkContext,
+        contexts: &mut Vec<(NetworkContext, NetworkContext)>,
+        pool: &ThreadPool,
     ) -> ForkliftResult<()> {
+        let id = get_index_or_rand(pool);
+        let index = id % contexts.len();
+        let (mut src, mut dest) = match contexts.get(index) {
+            Some((s, d)) => (s.clone(), d.clone()),
+            None => {
+                error!("unable to retrieve contexts");
+                return Err(ForkliftError::FSError(
+                    "Unable to retrieve contexts".to_string(),
+                ));
+            }
+        };
+
         for entry in self.input.iter() {
             let e = match entry {
                 Some(e) => e,
-                None => {
-                    break;
-                }
+                None => break,
             };
-            let sync_outcome = self.sync(&e, src_context, dest_context)?;
-            println!("Outcome: {:?}", sync_outcome);
+            let sync_outcome = self.sync(&e, &mut src, &mut dest)?;
+            println!(
+                "Sync Thread {:?} Outcome: {:?} Num left {:?}",
+                id,
+                sync_outcome,
+                self.input.len(),
+            );
             let progress = ProgressMessage::DoneSyncing(sync_outcome);
             match self.output.send(progress) {
                 Ok(_) => {}
                 Err(e) => {
-                    return Err(ForkliftError::FSError(format!(
+                    /*return Err(ForkliftError::FSError(format!(
                         "Error: {:?}, unable to send progress",
                         e
-                    )));
+                    )));*/
                 }
             };
-            println!("rec len {:?}", self.input.len());
+            trace!("rec len {:?}", self.input.len());
         }
         Ok(())
     }
@@ -68,16 +85,22 @@ impl RsyncWorker {
     ) -> ForkliftResult<SyncOutcome> {
         let rel_path = get_rel_path(&src_entry.path(), &self.source)?;
         let dest_path = &self.destination.join(&rel_path);
+        let mut src_context = src_context;
+        let mut dest_context = dest_context;
         make_dir_all(
             &dest_path,
             &src_entry.path(),
             &self.destination,
-            src_context,
-            dest_context,
+            &mut src_context,
+            &mut dest_context,
         )?;
         let dest_entry = Entry::new(&dest_path, &dest_context);
         let mut outcome = sync_entry(&src_entry, src_context, &dest_entry, dest_context)?;
-        if !src_entry.is_dir().unwrap() {
+        let dir = match src_entry.is_dir() {
+            Some(d) => d,
+            None => true,
+        };
+        if !dir {
             let temp_outcome =
                 copy_permissions(&src_entry, src_context, &dest_entry, dest_context)?;
             let c = outcome.clone();

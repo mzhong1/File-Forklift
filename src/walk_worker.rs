@@ -6,12 +6,13 @@ use crate::progress_message::ProgressMessage;
 use crate::socket_node::*;
 
 use crossbeam::channel::Sender;
+use rayon::*;
 use rendezvous_hash::{DefaultNodeHasher, RendezvousNodes};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 pub struct WalkWorker {
-    entry_output: Sender<Option<Entry>>,
+    entry_outputs: Vec<Sender<Option<Entry>>>,
     progress_output: Sender<ProgressMessage>,
     source: PathBuf,
     nodes: Arc<Mutex<RendezvousNodes<SocketNode, DefaultNodeHasher>>>,
@@ -21,13 +22,13 @@ pub struct WalkWorker {
 impl WalkWorker {
     pub fn new(
         source: &Path,
-        entry_output: Sender<Option<Entry>>,
+        entry_outputs: Vec<Sender<Option<Entry>>>,
         progress_output: Sender<ProgressMessage>,
         nodes: Arc<Mutex<RendezvousNodes<SocketNode, DefaultNodeHasher>>>,
         node: SocketNode,
     ) -> WalkWorker {
         WalkWorker {
-            entry_output,
+            entry_outputs,
             progress_output,
             source: source.to_path_buf(),
             nodes,
@@ -35,21 +36,77 @@ impl WalkWorker {
         }
     }
 
+    pub fn stop(&self) {
+        for s in self.entry_outputs.iter() {
+            // Stop all the senders
+            if let Err(_) = s.send(None) {
+                debug!("Unable to stop");
+            }
+        }
+    }
+
+    // grab a sender handler and send in the path
+    // Find the sender with the smallest length of channel
+    // Send the path over to that to be sync'd
+    // Assuming they are all unbounded
+    pub fn do_work(&self, entry: Option<Entry>) -> ForkliftResult<()> {
+        let sender = match self.entry_outputs.get(0) {
+            Some(s) => s,
+            None => {
+                return Err(ForkliftError::FSError("Empty channel vector!".to_string()));
+            }
+        };
+        let mut min = sender.len();
+        let mut index = 0;
+        for (i, sender) in self.entry_outputs.iter().enumerate() {
+            if sender.len() < min {
+                min = sender.len();
+                index = i;
+            }
+        }
+        let sender = match self.entry_outputs.get(index) {
+            Some(s) => s,
+            None => {
+                return Err(ForkliftError::FSError("Empty channel vector!".to_string()));
+            }
+        };
+        if let Err(_e) = sender.send(entry) {
+            error!("Unable to send Entry");
+            return Err(ForkliftError::FSError("Unable to send entry".to_string()));
+        };
+        Ok(())
+    }
+
     pub fn t_walk(
         &self,
         root_path: &Path,
         path: &Path,
-        src_context: &mut NetworkContext,
-        dest_context: &mut NetworkContext,
+        contexts: &mut Vec<(NetworkContext, NetworkContext)>,
+        pool: &ThreadPool,
     ) -> ForkliftResult<()> {
         rayon::scope(|spawner| {
+            let id = get_index_or_rand(pool);
+            trace!("{:?}", id);
+            let index = id % contexts.len();
+
+            let (mut src_context, mut dest_context) = match contexts.get(index) {
+                Some((s, d)) => (s.clone(), d.clone()),
+                None => {
+                    error!("unable to retrieve contexts");
+                    return Err(ForkliftError::FSError(
+                        "Unable to retrieve contexts".to_string(),
+                    ));
+                }
+            };
+
             let (mut num_files, mut total_size) = (0, 0);
             let (this, parent) = (Path::new("."), Path::new(".."));
             let check: bool;
             let mut check_paths: Vec<PathBuf> = vec![];
             let check_path = self.get_check_path(&path, root_path)?;
-            check = exist(&check_path, dest_context);
+            check = exist(&check_path, &mut dest_context);
             let dir = src_context.opendir(&path)?;
+
             for entrytype in dir {
                 let entry = match entrytype {
                     Ok(f) => f,
@@ -59,32 +116,37 @@ impl WalkWorker {
                     }
                 };
                 let file_path = entry.path();
+
                 if file_path != this && file_path != parent {
                     let newpath = path.join(&file_path);
-                    let meta = self.process_file(&newpath, src_context, self.nodes.clone())?;
+                    let meta = self.process_file(&newpath, &mut src_context, self.nodes.clone())?;
                     if let Some(meta) = meta {
                         debug!("Sent: {:?}", &file_path);
                         num_files += 1;
                         total_size += meta.size() as usize;
                         //why is this not a forkliftResult? because threading sucks
-                        self.progress_output
-                            .send(ProgressMessage::Todo {
-                                num_files,
-                                total_size: total_size as usize,
-                            })
-                            .unwrap();
+                        if let Err(e) = self.progress_output.send(ProgressMessage::Todo {
+                            num_files,
+                            total_size: total_size as usize,
+                        }) {
+                            error!("Error {:?} unable to send progress", e);
+                            return Err(ForkliftError::FSError(
+                                "unable to send progress".to_string(),
+                            ));
+                        }
                     }
                     match entry.filetype() {
                         GenericFileType::Directory => {
                             debug!("dir: {:?}", &newpath);
-                            let rec_ctx = src_context.clone();
-                            let drec_ctx = dest_context.clone();
+                            let loop_contexts = contexts.clone();
                             spawner.spawn(|_| {
-                                let mut rec_ctx = rec_ctx;
-                                let mut drec_ctx = drec_ctx;
+                                let mut contexts = loop_contexts;
                                 let newpath = newpath;
-                                self.t_walk(&root_path, &newpath, &mut rec_ctx, &mut drec_ctx)
-                                    .unwrap()
+                                if let Err(_e) =
+                                    self.t_walk(&root_path, &newpath, &mut contexts, &pool)
+                                {
+                                    error!("Unable to recursively call");
+                                }
                             });
                         }
                         GenericFileType::File => {
@@ -104,12 +166,11 @@ impl WalkWorker {
             // check through dest files
             self.check_and_remove(
                 (check, &mut check_paths),
-                (root_path, &path, dest_context),
+                (root_path, &path, &mut dest_context),
                 (this, parent),
             )?;
             Ok(())
         })?;
-        self.entry_output.send(None);
         Ok(())
     }
 
@@ -196,15 +257,7 @@ impl WalkWorker {
                     )?;
                 }
                 None => {
-                    match self.entry_output.send(None) {
-                        Ok(_) => {}
-                        Err(e) => {
-                            return Err(ForkliftError::FSError(format!(
-                                "Error: {:?}, unable to send end processing signal",
-                                e
-                            )));
-                        }
-                    };
+                    debug!("Total number of files sent {:?}", num_files);
                     break;
                 }
             }
@@ -281,15 +334,7 @@ impl WalkWorker {
             };
             //Note, send only returns an error should the channel disconnect ->
             //Should we attempt to reconnect the channel?
-            match self.entry_output.send(Some(src_entry.clone())) {
-                Ok(_) => {}
-                Err(e) => {
-                    return Err(ForkliftError::FSError(format!(
-                        "Error: {:?}, unable to send entry for procesing",
-                        e
-                    )));
-                }
-            };
+            self.do_work(Some(src_entry.clone()));
             return Ok(Some(metadata.clone()));
         }
         Ok(None)

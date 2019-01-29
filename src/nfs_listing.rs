@@ -1,8 +1,8 @@
-extern crate crossbeam;
-extern crate libnfs;
-extern crate nix;
-extern crate rayon;
-extern crate spmc;
+use crossbeam;
+use libnfs;
+
+use rayon;
+
 
 use self::libnfs::*;
 use self::rayon::ThreadPoolBuilder;
@@ -133,7 +133,7 @@ fn thread_exp2(nodes: Vec<String>) {
     rayon::scope(|spawner| {
         for file in nodes {
             println!("{:?}", file);
-            let mut vec = thread_dir_loop(
+            let vec = thread_dir_loop(
                 create_nfs(1001, 1001, 9, "192.168.122.89", "/squish")
                     .unwrap()
                     .opendir(Path::new(&file))

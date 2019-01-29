@@ -1,5 +1,5 @@
-extern crate api;
-extern crate flatbuffers;
+use api;
+use flatbuffers;
 
 use self::api::service_generated::*;
 

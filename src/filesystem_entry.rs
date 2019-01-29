@@ -1,4 +1,4 @@
-extern crate nix;
+use nix;
 
 use crate::filesystem::*;
 use nix::sys::stat::SFlag;

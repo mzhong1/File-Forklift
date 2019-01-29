@@ -1,5 +1,5 @@
-extern crate log;
-extern crate nix;
+
+use nix;
 
 use self::nix::ifaddrs::getifaddrs;
 use crate::error::{ForkliftError, ForkliftResult};
