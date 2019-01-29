@@ -2,7 +2,7 @@
 name = "filesystem_forklift"
 version = "0.1.0"
 authors = ["mzhong215"]
-
+edition = "2018"
 [workspace]
 
 [dependencies]
