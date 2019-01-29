@@ -1,53 +1,18 @@
+extern crate chrono;
+extern crate libnfs;
+extern crate nix;
+extern crate smbc;
+
+use self::chrono::*;
+use self::libnfs::*;
+use self::nix::fcntl::OFlag;
+use self::nix::sys::stat::Mode;
 use crate::error::*;
-use crate::smbc::*;
-use chrono::*;
-use libnfs::*;
-use nix::fcntl::OFlag;
-use nix::sys::stat::Mode;
-use rand::*;
-use rayon::*;
+use smbc::*;
 
-use std::ffi::CString;
-use std::path::Path;
-
-pub fn create_cstring(input: &str) -> CString {
-    //Note, new only returns Err if the input str contains a '/0' character
-    match CString::new(input) {
-        Ok(s) => s,
-        Err(e) => {
-            let pos = e.nul_position();
-            let mut v = e.into_vec();
-            unsafe {
-                v.set_len(pos);
-                CString::from_vec_unchecked(v)
-            }
-        }
-    }
-}
-
-/// return the index of the current thread in the pool,
-/// otherwise return a random number
-pub fn get_index_or_rand(pool: &ThreadPool) -> usize {
-    match pool.current_thread_index() {
-        Some(i) => i,
-        None => {
-            error!("thread is not part of the current pool");
-            //default to randome number
-            random()
-        }
-    }
-}
-
-/// create a new nfs Network context
-pub fn create_nfs_context(ip: &str, share: &str, level: u32) -> ForkliftResult<NetworkContext> {
-    let nfs = Nfs::new()?;
-    nfs.mount(ip, share)?;
-    nfs.set_debug(level as i32)?;
-    Ok(NetworkContext::Nfs(nfs))
-}
+use std::path::{Path, PathBuf};
 
 #[derive(Clone)]
-/// an enum to represent the filesystem type
 pub enum FileSystemType {
     Samba,
     Nfs,
@@ -135,7 +100,7 @@ impl FileSystem for NetworkContext {
                 nfs.mkdir(path)?;
             }
             NetworkContext::Samba(smbc) => {
-                smbc.mkdir(path, Mode::S_IRWXU | Mode::S_IRWXO | Mode::S_IRWXG)?;
+                smbc.mkdir(path, Mode::S_IRWXU)?;
             }
         }
         Ok(())
@@ -314,7 +279,6 @@ pub trait File {
 }
 
 #[derive(Clone)]
-/// a generic enum to represent to different filetypes not specific to a filesystem
 pub enum GenericFileType {
     Directory,
     File,
@@ -323,14 +287,12 @@ pub enum GenericFileType {
 }
 
 #[derive(Clone)]
-/// a generic enum to hold the DirEntry of a filesystem
 pub enum DirEntryType {
     Samba(SmbcDirEntry),
     Nfs(DirEntry),
 }
 
 impl DirEntryType {
-    /// get the associated path of the directory entry
     pub fn path(&self) -> &Path {
         match self {
             DirEntryType::Samba(smbentry) => smbentry.path.as_path(),
@@ -338,7 +300,6 @@ impl DirEntryType {
         }
     }
 
-    /// get the general filetype of the directory entry
     pub fn filetype(&self) -> GenericFileType {
         match self {
             DirEntryType::Samba(smbentry) => match smbentry.s_type {
@@ -392,7 +353,6 @@ pub struct Timespec {
 }
 
 impl Timespec {
-    /// create a new Timespec
     pub fn new(sec: i64, nsec: i64) -> Self {
         Timespec {
             tv_sec: sec,
@@ -400,17 +360,14 @@ impl Timespec {
         }
     }
 
-    /// get the number of hours represented in this object
     pub fn num_hours(&self) -> i64 {
         self.num_seconds() / 3600
     }
 
-    /// get the number of minutes represented in this object
     pub fn num_minutes(&self) -> i64 {
         self.num_seconds() / 60
     }
 
-    /// get the number of seconds represented in this object
     pub fn num_seconds(&self) -> i64 {
         if self.tv_sec < 0 && self.tv_nsec > 0 {
             self.tv_sec + 1
@@ -419,19 +376,16 @@ impl Timespec {
         }
     }
 
-    /// get the number of milliseconds represented in this object
     pub fn num_milliseconds(&self) -> i64 {
         self.num_microseconds() / 1000
     }
 
-    /// get the number of microseconds represented in this object
     pub fn num_microseconds(&self) -> i64 {
         let secs = self.num_seconds() * 1_000_000;
         let usecs = self.micros_mod_sec();
         secs + usecs
     }
 
-    /// a helper function for getting the number of microseconds represented
     fn micros_mod_sec(&self) -> i64 {
         if self.tv_sec < 0 && self.tv_nsec > 0 {
             self.tv_sec - 1_000_000
