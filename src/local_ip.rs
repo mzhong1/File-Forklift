@@ -1,9 +1,9 @@
-
 use nix;
 
 use self::nix::ifaddrs::getifaddrs;
 use crate::error::{ForkliftError, ForkliftResult};
 
+use log::{debug, error, trace};
 use std::fs::File;
 use std::io::{BufRead, BufReader, Result};
 use std::net::{SocketAddr, SocketAddrV4, SocketAddrV6};

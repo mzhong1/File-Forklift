@@ -1,8 +1,7 @@
 use crossbeam;
 use libnfs;
-
+use log::{debug, error, trace};
 use rayon;
-
 
 use self::libnfs::*;
 use self::rayon::ThreadPoolBuilder;

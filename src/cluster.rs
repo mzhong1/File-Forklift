@@ -1,6 +1,7 @@
 use api;
 
 use crossbeam;
+use log::{debug, error, trace};
 
 use self::api::service_generated::*;
 use crate::error::ForkliftResult;

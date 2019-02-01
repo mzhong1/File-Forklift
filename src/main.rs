@@ -1,18 +1,10 @@
-#[macro_use]
-extern crate log;
-#[macro_use]
-extern crate clap;
+use clap::*;
+use log::*;
 
 use crossbeam;
 use dirs;
-#[macro_use]
-extern crate lazy_static;
-
-
-
 
 use simplelog;
-
 
 use clap::{App, Arg};
 use crossbeam::channel;

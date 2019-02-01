@@ -6,7 +6,7 @@ use libnfs::*;
 use log::{debug, error, trace};
 use nix::fcntl::OFlag;
 use nix::sys::stat::Mode;
-use rand::*;
+use rand::prelude::*;
 use rayon::*;
 
 use std::ffi::CString;
@@ -47,7 +47,7 @@ pub fn get_index_or_rand(pool: &ThreadPool) -> usize {
         None => {
             error!("thread is not part of the current pool");
             //default to random number
-            random()
+            rand::random()
         }
     }
 }

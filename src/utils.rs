@@ -1,4 +1,5 @@
 use crate::error::ForkliftResult;
+use log::{debug, error, trace};
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::Path;
@@ -38,7 +39,8 @@ pub fn read_file_lines(filename: &Path) -> ForkliftResult<Vec<String>> {
         .map(|l| {
             trace!("Parsing line '{:?}' from file to string", l);
             l.expect("Could not parse line from file to string")
-        }).collect::<Vec<String>>();
+        })
+        .collect::<Vec<String>>();
     debug!(
         "Parsing file to address string list ok! String list: {:?}",
         node_list
