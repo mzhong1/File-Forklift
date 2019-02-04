@@ -1,7 +1,6 @@
 use crate::error::*;
 use crate::filesystem::FileSystemType;
 
-//use serde_aux::container_attributes::*;
 use serde_derive::*;
 use std::net::SocketAddr;
 
@@ -12,7 +11,6 @@ pub struct Input {
     pub dest_server: String,
     pub src_share: String,
     pub dest_share: String,
-    //#[serde(deserialize_with = "deserialize_struct_case_insensitive")]
     pub system: FileSystemType,
 }
 
