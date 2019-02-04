@@ -1,12 +1,12 @@
-extern crate rendezvous_hash;
+use log::{debug, error, trace};
 
 use crate::error::{ForkliftError, ForkliftResult};
+use crate::utils;
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
-use crate::utils;
 
 #[derive(Debug, Clone, Eq)]
 pub struct Node {
@@ -44,11 +44,11 @@ impl Node {
             self.name,
             self.liveness
         );
-        let prevl = self.liveness;
+        let prev_liveness = self.liveness;
         self.liveness = self.lifetime as i64;
         self.has_heartbeat = true;
         debug!("Heartbeat Node {}, liveness {}", self.name, self.liveness);
-        prevl <= 0
+        prev_liveness <= 0
     }
     /**
      * ENSURES: return true if the node "died" in this call to tickdown
@@ -59,13 +59,13 @@ impl Node {
             self.name,
             self.liveness
         );
-        let prevl = self.liveness;
+        let prev_liveness = self.liveness;
         if self.liveness > 0 {
             self.liveness -= 1;
         }
         self.has_heartbeat = false;
         debug!("Tickdown Node {}, liveness {}", self.name, self.liveness);
-        prevl == 1
+        prev_liveness == 1
     }
 }
 impl Hash for Node {
@@ -269,13 +269,13 @@ impl NodeMap {
             error!("Lifetime is trivial (less than or equal to zero)!");
             panic!("Lifetime is trivial (less than or equal to zero)!");
         }
-        debug!{"Initialize hashmap of nodes with lifetime {} from socket list {:?} not including {}", lifetime, node_names, full_address};
+        debug! {"Initialize hashmap of nodes with lifetime {} from socket list {:?} not including {}", lifetime, node_names, full_address};
         let mut nodes = NodeMap::new();
         nodes.node_map = HashMap::new();
         for node_ip in node_names {
             if node_ip != full_address {
                 debug!("node ip addresses and port: {:?}", node_ip);
-                let mut temp_node = Node::new(*node_ip, lifetime);
+                let temp_node = Node::new(*node_ip, lifetime);
                 debug!("Node successfully created : {:?}", &temp_node);
                 nodes.node_map.insert(node_ip.to_string(), temp_node);
             }

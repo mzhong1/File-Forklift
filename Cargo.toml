@@ -2,7 +2,7 @@
 name = "filesystem_forklift"
 version = "0.1.0"
 authors = ["mzhong215"]
-
+edition = "2018"
 [workspace]
 
 [dependencies]
@@ -14,16 +14,16 @@ simplelog = "0.5.2"
 clap = "2.32.0"
 dirs = "1.0.4"
 nanomsg = "0.7.2"
-hex = "0.3.2"
+#hex = "0.3.2"
 nix = "0.11.0"
-libnfs = {git = "https://github.com/cholcombe973/libnfs.git", branch = "async"}
-crossbeam = "0.4"
-rayon = "1.0.2"
-spmc = "0.2.2"
+libnfs = {git = "https://github.com/cholcombe973/libnfs.git", branch = "mutexthread"}
+crossbeam = "0.7.1"
+rayon = "1.0.3"
+rand = "0.6.5"
 chrono = "0.4.6"
-smbc = {git = "ssh://git@github.comcast.com/SDS/smbc.git"}
+smbc = {git = "ssh://git@github.comcast.com/SDS/smbc.git", branch = "mutexthread"}
 smbclient-sys = {git = "ssh://git@github.comcast.com/SDS/smbclient-sys.git"}
 meowhash = "0.1.2"
 digest = "0.8.0"
-nom = "4.1.1"
+nom = "4.2.0"
 lazy_static = "1.2.0"

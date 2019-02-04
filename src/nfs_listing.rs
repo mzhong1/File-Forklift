@@ -1,8 +1,7 @@
-extern crate crossbeam;
-extern crate libnfs;
-extern crate nix;
-extern crate rayon;
-extern crate spmc;
+use crossbeam;
+use libnfs;
+use log::{debug, error, trace};
+use rayon;
 
 use self::libnfs::*;
 use self::rayon::ThreadPoolBuilder;
@@ -133,7 +132,7 @@ fn thread_exp2(nodes: Vec<String>) {
     rayon::scope(|spawner| {
         for file in nodes {
             println!("{:?}", file);
-            let mut vec = thread_dir_loop(
+            let vec = thread_dir_loop(
                 create_nfs(1001, 1001, 9, "192.168.122.89", "/squish")
                     .unwrap()
                     .opendir(Path::new(&file))
@@ -244,7 +243,7 @@ fn linear_thread_lister(uid: i32, gid: i32, _ip: &str, _root: &str, num_threads:
             rayon::scope(|s| {
                 s.spawn(|_s| {
                     match rx.recv() {
-                        Some(m) => {
+                        Ok(m) => {
                             let mut nfs = Nfs::new().unwrap();
                             nfs.set_uid(uid).unwrap();
                             nfs.set_gid(gid).unwrap();
@@ -260,7 +259,7 @@ fn linear_thread_lister(uid: i32, gid: i32, _ip: &str, _root: &str, num_threads:
                                 }
                             }
                         }
-                        None => processing_done = true,
+                        Err(_) => processing_done = true,
                     };
                 });
             });

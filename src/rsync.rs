@@ -1,5 +1,20 @@
 //SyncStats
+use crate::error::ForkliftResult;
+use crate::filesystem::*;
+use crate::filesystem_entry::Entry;
 use crate::filesystem_ops::SyncOutcome;
+use crate::progress_message::*;
+use crate::progress_worker::*;
+use crate::rsync_worker::*;
+use crate::socket_node::*;
+use crate::walk_worker::*;
+
+use crossbeam::channel;
+use crossbeam::channel::{Receiver, Sender};
+use log::{debug, error, trace};
+use rendezvous_hash::{DefaultNodeHasher, RendezvousNodes};
+use std::path::Path;
+use std::sync::{Arc, Mutex};
 
 #[derive(Default, Debug, Clone)]
 pub struct SyncStats {
@@ -19,6 +34,8 @@ pub struct SyncStats {
     pub symlink_created: u64,
     /// number of symlinks updated in dest
     pub symlink_updated: u64,
+    /// number of symlinks skipped in dest
+    pub symlink_skipped: u64,
     /// number of files for which the permissions were updated
     pub permissions_update: u64,
     /// the number of files where dest file contents were updated
@@ -39,6 +56,7 @@ impl SyncStats {
             copied: 0,
             symlink_created: 0,
             symlink_updated: 0,
+            symlink_skipped: 0,
             permissions_update: 0,
             checksum_updated: 0,
             directory_created: 0,
@@ -52,10 +70,136 @@ impl SyncStats {
             SyncOutcome::UpToDate => self.up_to_date += 1,
             SyncOutcome::SymlinkUpdated => self.symlink_updated += 1,
             SyncOutcome::SymlinkCreated => self.symlink_created += 1,
+            SyncOutcome::SymlinkSkipped => self.symlink_skipped += 1,
             SyncOutcome::PermissionsUpdated => self.permissions_update += 1,
             SyncOutcome::ChecksumUpdated => self.checksum_updated += 1,
             SyncOutcome::DirectoryUpdated => self.directory_updated += 1,
             SyncOutcome::DirectoryCreated => self.directory_created += 1,
         }
+    }
+}
+
+pub struct Rsyncer {
+    filesystem_type: FileSystemType,
+    progress_info: Box<ProgressInfo + Send>,
+}
+
+impl Rsyncer {
+    pub fn new(
+        filesystem_type: FileSystemType,
+        progress_info: Box<ProgressInfo + Send>,
+    ) -> Rsyncer {
+        Rsyncer {
+            filesystem_type,
+            progress_info,
+        }
+    }
+
+    pub fn sync(
+        self,
+        (src_ip, dest_ip): (&str, &str),
+        (src_share, dest_share): (&str, &str),
+        (level, num_threads): (u32, u32),
+        (workgroup, username, password): (String, String, String),
+        nodelist: Arc<Mutex<RendezvousNodes<SocketNode, DefaultNodeHasher>>>,
+        my_node: SocketNode,
+    ) -> ForkliftResult<()> {
+        let (stat_output, progress_input) = channel::unbounded::<ProgressMessage>();
+        let progress_output = stat_output.clone();
+
+        let mut send_handles: Vec<Sender<Option<Entry>>> = Vec::new();
+
+        let mut syncers: Vec<RsyncWorker> = Vec::new();
+        let p = format!("smb://{}/{}", src_ip, src_share);
+        let d = format!("smb://{}/{}", dest_ip, dest_share);
+        let (src_path, dest_path) = match self.filesystem_type {
+            FileSystemType::Samba => (Path::new(&p), Path::new(&d)),
+            FileSystemType::Nfs => (Path::new("/"), Path::new("/")),
+        };
+
+        let (send_prog, rec_prog) = channel::unbounded::<ProgressMessage>();
+        let sync_progress = send_prog.clone();
+        for _ in 0..num_threads {
+            let (send_e, rec_e) = channel::unbounded();
+            send_handles.push(send_e);
+            let sync_progress = send_prog.clone();
+            syncers.push(RsyncWorker::new(src_path, dest_path, rec_e, sync_progress));
+        }
+        let mut contexts: Vec<(NetworkContext, NetworkContext)> = Vec::new();
+        let mut sync_contexts: Vec<(NetworkContext, NetworkContext)> = Vec::new();
+
+        let s = init_samba(workgroup, username, password, level)?;
+        for _ in 0..num_threads {
+            match self.filesystem_type {
+                FileSystemType::Samba => {
+                    let (sctx, dctx) = (
+                        NetworkContext::Samba(Box::new(s.clone())),
+                        NetworkContext::Samba(Box::new(s.clone())),
+                    );
+                    contexts.push((sctx, dctx));
+                    let (sctx, dctx) = (
+                        NetworkContext::Samba(Box::new(s.clone())),
+                        NetworkContext::Samba(Box::new(s.clone())),
+                    );
+                    sync_contexts.push((sctx, dctx));
+                }
+                FileSystemType::Nfs => {
+                    let (sctx, dctx) = (
+                        create_nfs_context(src_ip, src_share, 0)?,
+                        create_nfs_context(dest_ip, dest_share, 0)?,
+                    );
+                    contexts.push((sctx, dctx));
+                    let (sctx, dctx) = (
+                        create_nfs_context(src_ip, src_share, 0)?,
+                        create_nfs_context(dest_ip, dest_share, 0)?,
+                    );
+                    sync_contexts.push((sctx, dctx));
+                }
+            }
+        }
+        let walk_worker = WalkWorker::new(src_path, send_handles, send_prog, nodelist, my_node);
+
+        let pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(num_threads as usize)
+            .breadth_first()
+            .build()
+            .unwrap();
+
+        if num_threads == 1 {
+            let (mut fs, mut destfs) = contexts[0].clone();
+            walk_worker.s_walk(src_path, &mut fs, &mut destfs)?;
+            walk_worker.stop();
+        }
+
+        pool.install(|| {
+            if num_threads > 1 {
+                match walk_worker.t_walk(dest_path, src_path, &mut contexts, &pool) {
+                    Ok(_) => {}
+                    Err(e) => return Err(e),
+                }
+                walk_worker.stop();
+            }
+
+            rayon::scope(|spawner| {
+                for syncer in syncers {
+                    spawner.spawn(|_| {
+                        let input = syncer.input.clone();
+                        match syncer.start(&mut sync_contexts.clone(), &pool) {
+                            Ok(_) => {
+                                debug!(
+                                    "Syncer Stopped, Thread {:?}, num left {:?}",
+                                    pool.current_thread_index(),
+                                    input.len()
+                                );
+                            }
+                            Err(e) => error!("Error: {:?}", e),
+                        };
+                    });
+                }
+            });
+            Ok(())
+        })?;
+
+        Ok(())
     }
 }

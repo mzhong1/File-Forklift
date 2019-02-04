@@ -1,21 +1,76 @@
-extern crate chrono;
-extern crate libnfs;
-extern crate nix;
-extern crate smbc;
+use crate::error::*;
 
-use self::chrono::*;
-use self::libnfs::*;
-use self::nix::fcntl::OFlag;
-use self::nix::sys::stat::Mode;
-use crate::error::ForkliftResult;
-use smbc::*;
+use ::smbc::*;
+use chrono::*;
+use libnfs::*;
+use log::{debug, error, trace};
+use nix::fcntl::OFlag;
+use nix::sys::stat::Mode;
+use rand::prelude::*;
+use rayon::*;
 
+use std::ffi::CString;
 use std::path::Path;
+
+pub fn create_cstring(input: &str) -> CString {
+    //Note, new only returns Err if the input str contains a '/0' character
+    match CString::new(input) {
+        Ok(s) => s,
+        Err(e) => {
+            let pos = e.nul_position();
+            let mut v = e.into_vec();
+            unsafe {
+                v.set_len(pos);
+                CString::from_vec_unchecked(v)
+            }
+        }
+    }
+}
+
+/// initialize the Samba contexts
+pub fn init_samba(wg: String, un: String, pw: String, level: u32) -> ForkliftResult<Smbc> {
+    Smbc::set_data(wg, un, pw);
+    match Smbc::new_with_auth(level) {
+        Ok(e) => Ok(e),
+        Err(e) => {
+            error!("ERROR: {:?}", e);
+            Err(ForkliftError::SmbcError(e))
+        }
+    }
+}
+
+/// return the index of the current thread in the pool,
+/// otherwise return a random number
+pub fn get_index_or_rand(pool: &ThreadPool) -> usize {
+    match pool.current_thread_index() {
+        Some(i) => i,
+        None => {
+            error!("thread is not part of the current pool");
+            //default to random number
+            rand::random()
+        }
+    }
+}
+
+/// create a new nfs Network context
+pub fn create_nfs_context(ip: &str, share: &str, level: u32) -> ForkliftResult<NetworkContext> {
+    let nfs = Nfs::new()?;
+    nfs.mount(ip, share)?;
+    nfs.set_debug(level as i32)?;
+    Ok(NetworkContext::Nfs(nfs))
+}
+
+#[derive(Clone)]
+/// an enum to represent the filesystem type
+pub enum FileSystemType {
+    Samba,
+    Nfs,
+}
 
 #[derive(Clone)]
 /// a generic wrapper for filesystem contexts
 pub enum NetworkContext {
-    Samba(Smbc),
+    Samba(Box<Smbc>),
     Nfs(Nfs),
 }
 
@@ -94,7 +149,7 @@ impl FileSystem for NetworkContext {
                 nfs.mkdir(path)?;
             }
             NetworkContext::Samba(smbc) => {
-                smbc.mkdir(path, Mode::S_IRWXU)?;
+                smbc.mkdir(path, Mode::S_IRWXU | Mode::S_IRWXO | Mode::S_IRWXG)?;
             }
         }
         Ok(())
@@ -139,6 +194,19 @@ impl FileSystem for NetworkContext {
         }
         Ok(())
     }
+
+    fn rmdir(&self, path: &Path) -> ForkliftResult<()> {
+        match self {
+            NetworkContext::Nfs(nfs) => {
+                nfs.rmdir(path)?;
+            }
+            NetworkContext::Samba(smbc) => {
+                smbc.rmdir(path)?;
+            }
+        }
+        Ok(())
+    }
+
     fn unlink(&self, path: &Path) -> ForkliftResult<()> {
         match self {
             NetworkContext::Nfs(nfs) => {
@@ -260,10 +328,73 @@ pub trait File {
 }
 
 #[derive(Clone)]
+/// a generic enum to represent to different filetypes not specific to a filesystem
+pub enum GenericFileType {
+    Directory,
+    File,
+    Link,
+    Other,
+}
+
+#[derive(Clone)]
+/// a generic enum to hold the DirEntry of a filesystem
+pub enum DirEntryType {
+    Samba(SmbcDirEntry),
+    Nfs(DirEntry),
+}
+
+impl DirEntryType {
+    /// get the associated path of the directory entry
+    pub fn path(&self) -> &Path {
+        match self {
+            DirEntryType::Samba(smbentry) => smbentry.path.as_path(),
+            DirEntryType::Nfs(nfsentry) => nfsentry.path.as_path(),
+        }
+    }
+
+    /// get the general filetype of the directory entry
+    pub fn filetype(&self) -> GenericFileType {
+        match self {
+            DirEntryType::Samba(smbentry) => match smbentry.s_type {
+                SmbcType::DIR => GenericFileType::Directory,
+                SmbcType::FILE => GenericFileType::File,
+                SmbcType::LINK => GenericFileType::Link,
+                _ => GenericFileType::Other,
+            },
+            DirEntryType::Nfs(nfsentry) => match nfsentry.d_type {
+                EntryType::Directory => GenericFileType::Directory,
+                EntryType::File => GenericFileType::File,
+                EntryType::Symlink => GenericFileType::Link,
+                _ => GenericFileType::Other,
+            },
+        }
+    }
+}
+
+#[derive(Clone)]
 /// an enum to hold the Directory structs of some generic FileSystem
 pub enum DirectoryType {
     Samba(SmbcDirectory),
     Nfs(NfsDirectory),
+}
+
+/// a generic iterator for DirectoryType
+impl Iterator for DirectoryType {
+    type Item = ForkliftResult<DirEntryType>;
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            DirectoryType::Nfs(dir) => match dir.next() {
+                Some(Ok(entry)) => Some(Ok(DirEntryType::Nfs(entry))),
+                Some(Err(e)) => Some(Err(ForkliftError::IoError(e))),
+                None => None,
+            },
+            DirectoryType::Samba(dir) => match dir.next() {
+                Some(Ok(entry)) => Some(Ok(DirEntryType::Samba(entry))),
+                Some(Err(e)) => Some(Err(ForkliftError::IoError(e))),
+                None => None,
+            },
+        }
+    }
 }
 
 #[derive(Clone, Debug, Copy, PartialEq, PartialOrd)]
@@ -275,6 +406,7 @@ pub struct Timespec {
 }
 
 impl Timespec {
+    /// create a new Timespec
     pub fn new(sec: i64, nsec: i64) -> Self {
         Timespec {
             tv_sec: sec,
@@ -282,14 +414,17 @@ impl Timespec {
         }
     }
 
+    /// get the number of hours represented in this object
     pub fn num_hours(&self) -> i64 {
         self.num_seconds() / 3600
     }
 
+    /// get the number of minutes represented in this object
     pub fn num_minutes(&self) -> i64 {
         self.num_seconds() / 60
     }
 
+    /// get the number of seconds represented in this object
     pub fn num_seconds(&self) -> i64 {
         if self.tv_sec < 0 && self.tv_nsec > 0 {
             self.tv_sec + 1
@@ -298,16 +433,19 @@ impl Timespec {
         }
     }
 
+    /// get the number of milliseconds represented in this object
     pub fn num_milliseconds(&self) -> i64 {
         self.num_microseconds() / 1000
     }
 
+    /// get the number of microseconds represented in this object
     pub fn num_microseconds(&self) -> i64 {
         let secs = self.num_seconds() * 1_000_000;
         let usecs = self.micros_mod_sec();
         secs + usecs
     }
 
+    /// a helper function for getting the number of microseconds represented
     fn micros_mod_sec(&self) -> i64 {
         if self.tv_sec < 0 && self.tv_nsec > 0 {
             self.tv_sec - 1_000_000
@@ -449,6 +587,8 @@ pub trait FileSystem {
     fn opendir(&mut self, path: &Path) -> ForkliftResult<DirectoryType>;
     /// rename a file/directory
     fn rename(&self, oldpath: &Path, newpath: &Path) -> ForkliftResult<()>;
-    /// unlink (remove) a file/directory
+    ///remove a directory
+    fn rmdir(&self, path: &Path) -> ForkliftResult<()>;
+    /// unlink (remove) a file
     fn unlink(&self, path: &Path) -> ForkliftResult<()>;
 }
