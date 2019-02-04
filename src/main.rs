@@ -19,6 +19,7 @@ mod cluster;
 mod error;
 mod filesystem;
 mod filesystem_entry;
+mod input;
 mod local_ip;
 mod message;
 mod nfs_listing;
@@ -160,16 +161,15 @@ fn main() -> ForkliftResult<()> {
         .about("NFS and Samba filesystem migration program")
         .version(crate_version!())
         .arg(
-            Arg::with_name("namelist")
-                .help("The name of the file storing the nodes in the cluster formatted so that each 
-                node's ip:port is on a separate line")
-                .long("namelist")
-                .short("n")
+            Arg::with_name("config")
+                .help("The name of the JSON file storing the cluster configuration for the node")
+                .long_help("The name of the JSON file storing the cluster configurations for the node, formatted in JSON as nodes: [SocketAddresses], src_server: 'name of source server', dest_server: 'name of destination server', src_share: 'name of source share', dest_share: 'name of destination share'")
+                .long("config")
+                .short("c")
                 .takes_value(true)
-                .value_name("NODESOCKETFILE")
+                .value_name("CONFIGFILE")
                 .number_of_values(1)
                 .required(true)
-                .conflicts_with("join"),
         ).arg(
             Arg::with_name("logfile")
                 .default_value("debuglog")
@@ -184,15 +184,13 @@ fn main() -> ForkliftResult<()> {
                 .multiple(true)
                 .help("Sets the level of verbosity"),
         ).arg(
-            Arg::with_name("join")
-                .long("join")
-                .short("j")
-                .takes_value(true)
-                .number_of_values(2)
-                .value_names(&["YOUR IP:PORT", "NODE IP:PORT"])
-                .long_help("Your IP:PORT is your node's socket value in the form ip address:port number, 
-                while NODE IP:PORT is the ip:port of the node you are connecting to in the same format.")
-                .required(false),
+            Arg::with_name("samba")
+                .long("samba")
+                .short("s")
+                .takes_value(false)
+                .help("flag that determines the filesystem type")
+                .required(true)
+                .conflicts_with("nfs"),
         ).get_matches();
     let level = match matches.occurrences_of("v") {
         0 => simplelog::LevelFilter::Info,

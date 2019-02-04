@@ -3,11 +3,12 @@ use crate::error::*;
 use ::smbc::*;
 use chrono::*;
 use libnfs::*;
-use log::{debug, error, trace};
+use log::*;
 use nix::fcntl::OFlag;
 use nix::sys::stat::Mode;
-use rand::prelude::*;
+use rand::*;
 use rayon::*;
+use serde_derive::*;
 
 use std::ffi::CString;
 use std::path::Path;
@@ -47,7 +48,7 @@ pub fn get_index_or_rand(pool: &ThreadPool) -> usize {
         None => {
             error!("thread is not part of the current pool");
             //default to random number
-            rand::random()
+            random()
         }
     }
 }
@@ -60,8 +61,9 @@ pub fn create_nfs_context(ip: &str, share: &str, level: u32) -> ForkliftResult<N
     Ok(NetworkContext::Nfs(nfs))
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 /// an enum to represent the filesystem type
+
 pub enum FileSystemType {
     Samba,
     Nfs,

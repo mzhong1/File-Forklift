@@ -1,5 +1,6 @@
 use crossbeam::channel::RecvError;
 use nanomsg::Error as NanomsgError;
+use serde_json::Error as SerdeJsonError;
 use smbc::Error as SmbcError;
 use std::error::Error as err;
 use std::fmt;
@@ -29,6 +30,7 @@ pub enum ForkliftError {
     InvalidConfigError,
     FSError(String),
     RecvError(RecvError),
+    SerdeJsonError(SerdeJsonError),
 }
 
 impl fmt::Display for ForkliftError {
@@ -59,6 +61,7 @@ impl err for ForkliftError {
             ForkliftError::InvalidConfigError => "Invalid config formatting",
             ForkliftError::FSError(ref d) => &d,
             ForkliftError::RecvError(ref e) => e.description(),
+            ForkliftError::SerdeJsonError(ref e) => e.description(),
         }
     }
 
@@ -78,6 +81,7 @@ impl err for ForkliftError {
             ForkliftError::InvalidConfigError => None,
             ForkliftError::FSError(ref _d) => None,
             ForkliftError::RecvError(ref e) => e.cause(),
+            ForkliftError::SerdeJsonError(ref e) => e.cause(),
         }
     }
 }
@@ -133,5 +137,11 @@ impl From<StringParseError> for ForkliftError {
 impl From<RecvError> for ForkliftError {
     fn from(err: RecvError) -> ForkliftError {
         ForkliftError::RecvError(err)
+    }
+}
+
+impl From<SerdeJsonError> for ForkliftError {
+    fn from(err: SerdeJsonError) -> ForkliftError {
+        ForkliftError::SerdeJsonError(err)
     }
 }
