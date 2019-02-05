@@ -1,12 +1,9 @@
 use log::{debug, error, trace};
 
-use crate::error::{ForkliftError, ForkliftResult};
-use crate::utils;
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::net::SocketAddr;
-use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Eq)]
 pub struct Node {
@@ -102,75 +99,12 @@ impl NodeList {
     pub fn new() -> Self {
         NodeList { node_list: vec![] }
     }
-
-    /*
-        init_node_names: &Path -> ForkliftResult<NodeList>
-        REQUIRES: filename is the path to a properly formatted nonempty File (each line has the ip:port of a node)
-        ENSURES: returns a NodeList of ip:port addresses wrapped in ForkliftResult,
-        or returns a ForkliftError (AddrParseError, since IO errors and file parsing errors
-        will fail the program).
-    */
-    pub fn init_node_names(filename: &Path) -> ForkliftResult<Self> {
-        let node_list = match utils::read_file_lines(filename) {
-            Ok(f) => f,
-            Err(e) => {
-                error!("Filename does not Exist, ERROR: {:?}", e);
-                panic!("Filename does not Exist, ERROR: {:?}", e)
-            }
-        };
-        if node_list.is_empty() {
-            error!("File is empty! {:?}", ForkliftError::InvalidConfigError);
-            panic!("File is empty!");
-        }
-        trace!("Attempting to collect parsed Socket Addresses to vector");
-        let mut node_names: Vec<SocketAddr> = Vec::new();
-        for n in node_list {
-            trace!("parsing address {} to SocketAddress", n);
-            node_names.push(n.parse::<SocketAddr>()?);
-        }
-        debug!(
-            "Parsing file to socket list ok! Node list: {:?}",
-            node_names
-        );
-        Ok(NodeList {
-            node_list: node_names,
-        })
+    /// new_with_list
+    /// create a new nodelist with a initial vector of sockets
+    pub fn new_with_list(node_list: Vec<SocketAddr>) -> Self {
+        NodeList { node_list }
     }
 
-    /**
-     * init_names: Vec<String> * PathBuf -> NodeList
-     * REQUIRES: joined.len() == 2 XOR filename a path to properly formatted input file
-     * ENSURES: returns a NodeList with a populated Vector of SocketAddrs.
-     */
-    pub fn init_names(joined: Vec<String>, filename: &PathBuf) -> Self {
-        let mut names = NodeList::new();
-        if joined.len() == 2 {
-            for name in joined {
-                let socket = match name.parse::<SocketAddr>() {
-                    Ok(t) => t,
-                    Err(e) => {
-                        error!(
-                    "Node Join Error: Unable to parse socket address when adding name to list; should be in the form ip:port:{:?}",
-                    e
-                    );
-                        panic!("Unable to parse the socket address when adding name to list; should be in the form ip:port.  Error was {}", e)
-                    }
-                };
-                names.add_node_to_list(&socket);
-            }
-        } else
-        //We did not flag -j (since -j requires exactly two arguments)
-        {
-            names = match NodeList::init_node_names(filename.as_path()) {
-                Ok(n) => n,
-                Err(e) => {
-                    error!("Unable to parse the input file into a vector of SocketAddr's.  Line format should be ip:port.  Error was {}", e);
-                    panic!("Unable to parse the input file into a vector of SocketAddr's.  Line format should be ip:port.  Error was {}", e)
-                }
-            };
-        }
-        names
-    }
     /*
         get_full_address: &self * &str -> String
         REQUIRES: ip a valid ip address
@@ -316,56 +250,6 @@ fn test_heartbeat() {
     n.heartbeat();
     assert_eq!(n.liveness, 5);
     assert_eq!(n.has_heartbeat, true);
-}
-
-#[test]
-fn test_init_node_names() {
-    let wrong_filename = Path::new("nodes");
-    match NodeList::init_node_names(wrong_filename) //this should "break"
-    {
-        Ok(t) => {println!("{:?}", t); panic!("Should not go to this branch")},
-        Err(e) => println!("Error {}", e),
-    };
-
-    let expected_result = vec![
-        SocketAddr::new(
-            ::std::net::IpAddr::V4(::std::net::Ipv4Addr::new(172, 17, 0, 2)),
-            5671,
-        ),
-        SocketAddr::new(
-            ::std::net::IpAddr::V4(::std::net::Ipv4Addr::new(172, 17, 0, 3)),
-            1234,
-        ),
-        SocketAddr::new(
-            ::std::net::IpAddr::V4(::std::net::Ipv4Addr::new(172, 17, 0, 4)),
-            5555,
-        ),
-        SocketAddr::new(
-            ::std::net::IpAddr::V4(::std::net::Ipv4Addr::new(172, 17, 0, 1)),
-            7654,
-        ),
-    ];
-
-    match NodeList::init_node_names(Path::new("nodes.txt")) {
-        Ok(t) => {
-            println!("Expected: {:?}", expected_result);
-            println!("Vec: {:?}", t);
-            assert_eq!(expected_result, t.node_list)
-        }
-        Err(e) => {
-            println!("Error {}", e);
-            panic!("Should not end up in this branch")
-        }
-    }
-
-    //this should "break"
-    match NodeList::init_node_names(Path::new("notnodes.txt")) {
-        Ok(t) => {
-            println!("{:?}", t);
-            panic!("Should not go to this branch")
-        }
-        Err(e) => println!("Error {}", e),
-    }
 }
 
 #[test]
