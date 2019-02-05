@@ -12,27 +12,12 @@ pub struct Input {
     pub src_share: String,
     pub dest_share: String,
     pub system: FileSystemType,
+    pub debug_level: u32,
+    pub num_threads: u32,
+    pub workgroup: String,
 }
 
 impl Input {
-    pub fn test_new(
-        nodes: Vec<SocketAddr>,
-        src_server: String,
-        dest_server: String,
-        src_share: String,
-        dest_share: String,
-        system: FileSystemType,
-    ) -> Self {
-        Input {
-            nodes,
-            src_server,
-            dest_server,
-            src_share,
-            dest_share,
-            system,
-        }
-    }
-
     pub fn new(input: &str) -> ForkliftResult<Self> {
         let i: Input = serde_json::from_str(input)?;
         Ok(i)

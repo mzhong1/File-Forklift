@@ -1,4 +1,4 @@
-use log::{debug, error, trace};
+use log::*;
 use std::time::{Duration, Instant};
 
 #[derive(Debug, Clone)]

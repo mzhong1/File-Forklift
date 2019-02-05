@@ -1189,7 +1189,7 @@ pub fn map_names_and_copy(
         Err(_) => {
             return Err(ForkliftError::FSError(
                 "Could not get sid name map".to_string(),
-            ))
+            ));
         }
     };
     trace!(
@@ -1227,7 +1227,7 @@ pub fn map_names_and_copy(
             (_, _) => {
                 return Err(ForkliftError::FSError(
                     "input src acls are not formatted correctly!!".to_string(),
-                ))
+                ));
             }
         }
         count += 1;
@@ -1257,7 +1257,7 @@ pub fn map_names_and_copy(
             _ => {
                 return Err(ForkliftError::FSError(
                     "input dest acls are not formatted correctly!".to_string(),
-                ))
+                ));
             }
         }
     }

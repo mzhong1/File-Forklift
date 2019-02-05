@@ -81,13 +81,13 @@ impl SyncStats {
 
 pub struct Rsyncer {
     filesystem_type: FileSystemType,
-    progress_info: Box<ProgressInfo + Send>,
+    progress_info: Box<ProgressInfo + Send + Sync>,
 }
 
 impl Rsyncer {
     pub fn new(
         filesystem_type: FileSystemType,
-        progress_info: Box<ProgressInfo + Send>,
+        progress_info: Box<ProgressInfo + Send + Sync>,
     ) -> Rsyncer {
         Rsyncer {
             filesystem_type,
@@ -104,21 +104,20 @@ impl Rsyncer {
         nodelist: Arc<Mutex<RendezvousNodes<SocketNode, DefaultNodeHasher>>>,
         my_node: SocketNode,
     ) -> ForkliftResult<()> {
-        let (stat_output, progress_input) = channel::unbounded::<ProgressMessage>();
-        let progress_output = stat_output.clone();
+        //let (stat_output, progress_input) = channel::unbounded::<ProgressMessage>();
+        //let progress_output = stat_output.clone();
 
         let mut send_handles: Vec<Sender<Option<Entry>>> = Vec::new();
 
         let mut syncers: Vec<RsyncWorker> = Vec::new();
-        let p = format!("smb://{}/{}", src_ip, src_share);
-        let d = format!("smb://{}/{}", dest_ip, dest_share);
+        let p = format!("smb://{}{}", src_ip, src_share);
+        let d = format!("smb://{}{}", dest_ip, dest_share);
         let (src_path, dest_path) = match self.filesystem_type {
             FileSystemType::Samba => (Path::new(&p), Path::new(&d)),
             FileSystemType::Nfs => (Path::new("/"), Path::new("/")),
         };
 
         let (send_prog, rec_prog) = channel::unbounded::<ProgressMessage>();
-        let sync_progress = send_prog.clone();
         for _ in 0..num_threads {
             let (send_e, rec_e) = channel::unbounded();
             send_handles.push(send_e);
@@ -158,13 +157,17 @@ impl Rsyncer {
             }
         }
         let walk_worker = WalkWorker::new(src_path, send_handles, send_prog, nodelist, my_node);
-
+        let progress_worker = ProgressWorker::new(rec_prog, self.progress_info);
+        rayon::spawn(move || {
+            progress_worker.start();
+        });
         let pool = rayon::ThreadPoolBuilder::new()
             .num_threads(num_threads as usize)
             .breadth_first()
             .build()
             .unwrap();
 
+        println!("Here");
         if num_threads == 1 {
             let (mut fs, mut destfs) = contexts[0].clone();
             walk_worker.s_walk(src_path, &mut fs, &mut destfs)?;

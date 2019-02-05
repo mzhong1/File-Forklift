@@ -12,25 +12,33 @@ use nanomsg::{Protocol, Socket};
 use rendezvous_hash::{DefaultNodeHasher, RendezvousNodes};
 use std::fs::File;
 use std::net::SocketAddr;
-use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::path::Path;
+use std::sync::{Arc, Mutex};
 
 mod cluster;
+mod console_output;
 mod error;
 mod filesystem;
 mod filesystem_entry;
+mod filesystem_ops;
 mod input;
 mod local_ip;
 mod message;
-mod nfs_listing;
 mod node;
+mod progress_message;
+mod progress_worker;
 mod pulse;
+mod rsync;
+mod rsync_worker;
 mod socket_node;
-mod utils;
+mod walk_worker;
 
 use crate::cluster::Cluster;
+use crate::console_output::ConsoleProgressOutput;
 use crate::error::ForkliftResult;
+use crate::input::*;
 use crate::node::*;
+use crate::rsync::*;
 use crate::socket_node::*;
 use simplelog::{CombinedLogger, Config, SharedLogger, TermLogger, WriteLogger};
 
@@ -66,54 +74,21 @@ fn init_router(full_address: &SocketAddr) -> ForkliftResult<Socket> {
     Ok(router)
 }
 
-fn parse_matches(matches: &clap::ArgMatches<'_>) -> (Vec<String>, PathBuf, bool) {
-    let mut has_nodelist = false;
-    let joined = match matches.values_of("join") {
-        None => vec![],
-        Some(t) => t.map(|e| e.to_string()).collect(),
-    };
-
-    let filename = match matches.value_of("namelist") {
+fn parse_matches(matches: &clap::ArgMatches<'_>) -> ForkliftResult<Input> {
+    let path = match matches.value_of("config") {
         None => Path::new(""),
-        Some(t) => {
-            has_nodelist = true;
-            Path::new(t)
-        }
+        Some(t) => Path::new(t),
     };
-    if joined.is_empty() {
-        has_nodelist = true;
-    }
-    (joined, filename.to_path_buf(), has_nodelist)
+    let input = std::fs::read_to_string(path)?;
+    Input::new(&input)
 }
 
 fn heartbeat(
-    matches: &clap::ArgMatches<'_>,
+    node_names: NodeList,
+    joined: &mut bool,
+    full_address: SocketAddr,
     s: crossbeam::Sender<ChangeList>,
-) -> std::thread::JoinHandle<ForkliftResult<()>> {
-    trace!("Attempting to get local ip address");
-    let ip_address = match local_ip::get_ip() {
-        Ok(Some(ip)) => ip.ip(),
-        Ok(None) => {
-            error!("No local ip! ABORT!");
-            panic!("No local ip! ABORT!")
-        }
-        Err(e) => {
-            error!("Error: {}", e);
-            panic!("Error: {}", e)
-        }
-    };
-
-    let (joined, filename, mut has_nodelist) = parse_matches(matches);
-
-    let node_names: NodeList = NodeList::init_names(joined, &filename);
-    let full_address = match node_names.get_full_address(&ip_address.to_string()) {
-        Some(a) => a,
-        None => {
-            error!("ip address {} not in the node_list ", ip_address);
-            panic!("ip address {} not in the node_list ", ip_address)
-        }
-    };
-    debug!("current full address: {:?}", full_address);
+) -> ForkliftResult<()> {
     let mess = ChangeList::new(ChangeType::AddNode, SocketNode::new(full_address));
     s.send(mess);
 
@@ -130,7 +105,7 @@ fn heartbeat(
                                                                                                    //sleep for a bit to let other nodes start up
     cluster.names = node_names;
     cluster.init_connect(&full_address);
-    std::thread::spawn(move || cluster.heartbeat_loop(&full_address, &mut has_nodelist))
+    cluster.heartbeat_loop(&full_address, joined)
 }
 
 fn init_logs(f: &Path, level: simplelog::LevelFilter) -> ForkliftResult<()> {
@@ -171,6 +146,24 @@ fn main() -> ForkliftResult<()> {
                 .number_of_values(1)
                 .required(true)
         ).arg(
+            Arg::with_name("username")
+                .help("The username of the owner of the share")
+                .long("username")
+                .short("u")
+                .takes_value(true)
+                .value_name("USERNAME")
+                .number_of_values(1)
+                .required(true)
+        ).arg(
+            Arg::with_name("password")
+                .help("The password of the owner of the share")
+                .long("password")
+                .short("p")
+                .takes_value(true)
+                .value_name("PASSWORD")
+                .number_of_values(1)
+                .required(true)
+        ).arg(
             Arg::with_name("logfile")
                 .default_value("debuglog")
                 .help("Logs debug statements to file debuglog")
@@ -183,14 +176,6 @@ fn main() -> ForkliftResult<()> {
                 .short("v")
                 .multiple(true)
                 .help("Sets the level of verbosity"),
-        ).arg(
-            Arg::with_name("samba")
-                .long("samba")
-                .short("s")
-                .takes_value(false)
-                .help("flag that determines the filesystem type")
-                .required(true)
-                .conflicts_with("nfs"),
         ).get_matches();
     let level = match matches.occurrences_of("v") {
         0 => simplelog::LevelFilter::Info,
@@ -205,16 +190,81 @@ fn main() -> ForkliftResult<()> {
             panic!("Home Directory not found!")
         }
     };
-    //let path_str = path.to_string_lossy();
+    let username = match matches.value_of("username") {
+        Some(e) => {
+            if e.is_empty() {
+                "guest"
+            } else {
+                e
+            }
+        }
+        None => {
+            error!("username not found");
+            panic!("username not found!")
+        }
+    };
+    let password = match matches.value_of("password") {
+        Some(e) => e,
+        None => {
+            error!("username not found");
+            panic!("username not found!")
+        }
+    };
     init_logs(&path, level)?;
     debug!("Log path: {:?}", logfile);
     info!("Logs made");
-    let (s, r) = channel::unbounded::<ChangeList>();
-    let mut active_nodes = Arc::new(RendezvousNodes::default());
-    let _handle = heartbeat(&matches, s);
 
-    rendezvous(&mut active_nodes, &r);
-    _handle.join().unwrap().unwrap();
+    let (s, r) = channel::unbounded::<ChangeList>();
+    let mut active_nodes = Arc::new(Mutex::new(RendezvousNodes::default()));
+
+    let input = parse_matches(&matches)?;
+    if input.nodes.len() < 1 {
+        panic!(
+            "No input nodes!  Please have at least 1 node in the nodes section of your
+        config file"
+        );
+    }
+    trace!("Attempting to get local ip address");
+    let ip_address = match local_ip::get_ip() {
+        Ok(Some(ip)) => ip.ip(),
+        Ok(None) => {
+            error!("No local ip! ABORT!");
+            panic!("No local ip! ABORT!")
+        }
+        Err(e) => {
+            error!("Error: {}", e);
+            panic!("Error: {}", e)
+        }
+    };
+    let nodes = input.nodes.clone();
+    let node_names: NodeList = NodeList::new_with_list(nodes);
+    let full_address = match node_names.get_full_address(&ip_address.to_string()) {
+        Some(a) => a,
+        None => {
+            error!("ip address {} not in the node_list ", ip_address);
+            panic!("ip address {} not in the node_list ", ip_address)
+        }
+    };
+    debug!("current full address: {:?}", full_address);
+    let mine = SocketNode::new(full_address);
+    let mut joined = input.nodes.len() != 1;
+    let console_info = ConsoleProgressOutput::new();
+    let system = input.system;
+    let syncer = Rsyncer::new(system, Box::new(console_info));
+
+    let stats = syncer.sync(
+        (&input.src_server, &input.dest_server),
+        (&input.src_share, &input.dest_share),
+        (input.debug_level, input.num_threads),
+        (input.workgroup, username.to_string(), password.to_string()),
+        active_nodes.clone(),
+        mine,
+    );
+
+    rayon::join(
+        || heartbeat(node_names, &mut joined, full_address, s),
+        || rendezvous(&mut active_nodes, &r),
+    );
     Ok(())
 }
 
@@ -222,16 +272,16 @@ fn main() -> ForkliftResult<()> {
  * Thread where rendezvous hash is dealt with
  */
 fn rendezvous(
-    active_nodes: &mut Arc<RendezvousNodes<SocketNode, DefaultNodeHasher>>,
+    active_nodes: &mut Arc<Mutex<RendezvousNodes<SocketNode, DefaultNodeHasher>>>,
     r: &crossbeam::Receiver<ChangeList>,
 ) {
     loop {
+        let mut list = active_nodes.lock().unwrap();
         match r.try_recv() {
             Ok(c) => {
                 match c.change_type {
                     ChangeType::AddNode => {
                         debug!("Add Node {:?} to active list!", c.socket_node);
-                        let list = Arc::get_mut(active_nodes).unwrap();
                         list.insert(c.socket_node);
                         debug!(
                             "The current list is {:?}",
@@ -240,7 +290,7 @@ fn rendezvous(
                     }
                     ChangeType::RemNode => {
                         debug!("Remove Node {:?} from active list!", c.socket_node);
-                        let list = Arc::get_mut(active_nodes).unwrap();
+                        //let list = Arc::get_mut(active_nodes).unwrap();
                         list.remove(&c.socket_node);
                         debug!(
                             "The current list is {:?}",

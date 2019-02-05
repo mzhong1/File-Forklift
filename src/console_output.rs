@@ -5,7 +5,7 @@ use termcolor::{Buffer, BufferWriter, Color, ColorChoice, ColorSpec, WriteColor}
 
 use crate::progress_message::*;
 use crate::rsync::*;
-use log::{debug, error};
+use log::*;
 
 /// Note: Credit to these functions goes to dmerejkowsky's rusync
 
