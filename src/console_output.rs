@@ -1,3 +1,4 @@
+use colored::Colorize;
 use std::io;
 use std::io::Write;
 use term_size::*;
@@ -37,7 +38,13 @@ impl ProgressInfo for ConsoleProgressOutput {
     }
 
     fn start(&self, source: &str, destination: &str) {
-        let mut buffer = self.writer.buffer();
+        println!(
+            "{} Syncing from {} to {} …",
+            "::".color("blue"),
+            source.bold(),
+            destination.bold()
+        )
+        /*let mut buffer = self.writer.buffer();
         handle_set_color(&mut buffer, &self.blue);
         handle_write(&mut buffer, "::");
         handle_reset_color(&mut buffer);
@@ -50,7 +57,7 @@ impl ProgressInfo for ConsoleProgressOutput {
         handle_write(&mut buffer, destination);
         handle_reset_color(&mut buffer);
         handle_write(&mut buffer, " ...\n");
-        handle_print(&self.writer, &mut buffer);
+        handle_print(&self.writer, &mut buffer);*/
     }
 
     fn new_file(&self, _name: &str) {}
@@ -76,17 +83,40 @@ impl ProgressInfo for ConsoleProgressOutput {
             filename = current_file
         );
         let file_percent = ((progress.file_done * 100) as usize) / progress.file_size;
-        let write_str = format!(
+        //let write_str = format!(
+        //    "{:>3}% {}/{} {} {:<}\r",
+        //    file_percent, index, num_files, current_file, eta_str
+        //);
+        print!(
             "{:>3}% {}/{} {} {:<}\r",
             file_percent, index, num_files, current_file, eta_str
         );
-        handle_write(&mut buffer, &write_str);
-        handle_print(&self.writer, &mut buffer);
+        //handle_write(&mut buffer, &write_str);
+        //handle_print(&self.writer, &mut buffer);
         let _ = io::stdout().flush();
     }
 
     fn end(&self, stats: &SyncStats) {
-        let mut buffer = self.writer.buffer();
+        println!(
+            "{} Synced {} files ({} up to date)",
+            " ✓".color("green"),
+            stats.num_synced,
+            stats.up_to_date
+        );
+        println!(
+            "{} files copied, {} symlinks created, {} symlinks updated, {} symlinks skipped.",
+            stats.copied, stats.symlink_created, stats.symlink_updated, stats.symlink_skipped
+        );
+        println!(
+            "{} directories created, {} directories updated",
+            stats.directory_created, stats.directory_updated
+        );
+        println!(
+            "{} permissions updated, {} checksum updated",
+            stats.permissions_update, stats.checksum_updated
+        );
+
+        /*let mut buffer = self.writer.buffer();
         handle_set_color(&mut buffer, &self.green);
         handle_write(&mut buffer, " ✓");
         handle_reset_color(&mut buffer);
@@ -99,7 +129,7 @@ impl ProgressInfo for ConsoleProgressOutput {
             "{} files copied, {} symlinks created, {} symlinks updated\n",
             stats.copied, stats.symlink_created, stats.symlink_updated
         );
-        handle_write(&mut buffer, &write_str);
+        handle_write(&mut buffer, &write_str);*/
     }
 }
 

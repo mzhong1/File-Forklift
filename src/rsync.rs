@@ -11,7 +11,7 @@ use crate::walk_worker::*;
 
 use crossbeam::channel;
 use crossbeam::channel::{Receiver, Sender};
-use log::{debug, error, trace};
+use log::*;
 use rendezvous_hash::{DefaultNodeHasher, RendezvousNodes};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
@@ -126,7 +126,6 @@ impl Rsyncer {
         }
         let mut contexts: Vec<(NetworkContext, NetworkContext)> = Vec::new();
         let mut sync_contexts: Vec<(NetworkContext, NetworkContext)> = Vec::new();
-
         let s = init_samba(workgroup, username, password, level)?;
         for _ in 0..num_threads {
             match self.filesystem_type {
