@@ -6,7 +6,7 @@ use crate::progress_message::ProgressMessage;
 use crate::socket_node::*;
 
 use crossbeam::channel::Sender;
-use log::{debug, error, trace};
+use log::*;
 use rayon::*;
 use rendezvous_hash::{DefaultNodeHasher, RendezvousNodes};
 use std::path::{Path, PathBuf};

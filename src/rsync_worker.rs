@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use crossbeam::channel::Receiver;
 use crossbeam::channel::Sender;
-use log::{debug, error, trace};
+use log::*;
 use rayon::*;
 
 use crate::error::*;

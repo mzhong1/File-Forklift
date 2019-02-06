@@ -1,6 +1,6 @@
 use api;
 use flatbuffers;
-use log::trace;
+use log::*;
 
 use self::api::service_generated::*;
 

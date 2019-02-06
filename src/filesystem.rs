@@ -63,6 +63,7 @@ pub fn create_nfs_context(ip: &str, share: &str, level: u32) -> ForkliftResult<N
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 /// an enum to represent the filesystem type
+
 pub enum FileSystemType {
     Samba,
     Nfs,

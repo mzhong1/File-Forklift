@@ -1,15 +1,11 @@
 use clap::*;
-use log::*;
-
-use crossbeam;
-use dirs;
-
-use simplelog;
-
 use clap::{App, Arg};
 use crossbeam::channel;
+use log::*;
 use nanomsg::{Protocol, Socket};
 use rendezvous_hash::{DefaultNodeHasher, RendezvousNodes};
+use simplelog::{CombinedLogger, Config, SharedLogger, TermLogger, WriteLogger};
+
 use std::fs::File;
 use std::net::SocketAddr;
 use std::path::Path;
@@ -40,7 +36,6 @@ use crate::input::*;
 use crate::node::*;
 use crate::rsync::*;
 use crate::socket_node::*;
-use simplelog::{CombinedLogger, Config, SharedLogger, TermLogger, WriteLogger};
 
 #[test]
 fn test_init_router() {
@@ -204,10 +199,16 @@ fn main() -> ForkliftResult<()> {
         }
     };
     let password = match matches.value_of("password") {
-        Some(e) => e,
+        Some(e) => {
+            if e.is_empty() {
+                "\n"
+            } else {
+                e
+            }
+        }
         None => {
-            error!("username not found");
-            panic!("username not found!")
+            error!("password not found");
+            panic!("password not found!")
         }
     };
     init_logs(&path, level)?;

@@ -1,4 +1,4 @@
-use log::{debug, error, trace};
+use log::*;
 
 use std::cmp::Ordering;
 use std::collections::HashMap;

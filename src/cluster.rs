@@ -1,7 +1,8 @@
 use api;
 
-use crossbeam;
-use log::{debug, error, trace};
+use log::*;
+use nanomsg::{Error, PollFd, PollInOut, PollRequest, Socket};
+use std::net::SocketAddr;
 
 use self::api::service_generated::*;
 use crate::error::ForkliftResult;
@@ -9,8 +10,6 @@ use crate::message;
 use crate::node::*;
 use crate::pulse::*;
 use crate::socket_node::*;
-use nanomsg::{Error, PollFd, PollInOut, PollRequest, Socket};
-use std::net::SocketAddr;
 
 pub struct Cluster {
     pub lifetime: u64,
