@@ -391,7 +391,6 @@ dependencies = [
  "serde_json 1.0.38 (registry+https://github.com/rust-lang/crates.io-index)",
  "simplelog 0.5.3 (registry+https://github.com/rust-lang/crates.io-index)",
  "smbc 0.1.0 (git+ssh://git@github.comcast.com/SDS/smbc.git?branch=mutexthread)",
- "smbclient-sys 0.1.0 (git+ssh://git@github.comcast.com/SDS/smbclient-sys.git)",
  "term_size 0.3.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "termcolor 1.0.4 (registry+https://github.com/rust-lang/crates.io-index)",
 ]

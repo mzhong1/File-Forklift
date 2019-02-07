@@ -56,8 +56,8 @@ pub fn get_index_or_rand(pool: &ThreadPool) -> usize {
 /// create a new nfs Network context
 pub fn create_nfs_context(ip: &str, share: &str, level: u32) -> ForkliftResult<NetworkContext> {
     let nfs = Nfs::new()?;
-    nfs.mount(ip, share)?;
     nfs.set_debug(level as i32)?;
+    nfs.mount(ip, share)?;
     Ok(NetworkContext::Nfs(nfs))
 }
 

@@ -20,7 +20,6 @@ impl Entry {
                 Some(stat.mode() & SFlag::S_IFMT.bits() == SFlag::S_IFDIR.bits()),
             ),
             Err(e) => {
-                error!("File {} does not exist! {}", epath.to_string_lossy(), e);
                 debug!("Error {:?}", e);
                 (None, None, None) // note: file DNE
             }

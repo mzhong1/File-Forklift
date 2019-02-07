@@ -336,14 +336,9 @@ pub fn has_different_size(src: &Entry, dest: &Entry) -> ForkliftResult<bool> {
 ///
 pub fn is_more_recent(src: &Entry, dest: &Entry) -> ForkliftResult<bool> {
     match (src.metadata(), dest.metadata()) {
-        (Some(src_stat), Some(dest_stat)) => {
-            src_stat.mtime().print_timeval_secs();
-            dest_stat.mtime().print_timeval_secs();
-            Ok(
-                src_stat.mtime().num_microseconds() > dest_stat.mtime().num_microseconds()
-                    && src_stat.mtime().num_seconds() > dest_stat.mtime().num_seconds(),
-            )
-        }
+        (Some(src_stat), Some(dest_stat)) => Ok(src_stat.mtime().num_microseconds()
+            > dest_stat.mtime().num_microseconds()
+            && src_stat.mtime().num_seconds() > dest_stat.mtime().num_seconds()),
         (None, _) => {
             let err = format!("Source File {:?} does not exist", src.path());
             error!("{}", err);

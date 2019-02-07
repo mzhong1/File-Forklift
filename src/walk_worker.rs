@@ -37,13 +37,17 @@ impl WalkWorker {
         }
     }
 
-    pub fn stop(&self) {
+    pub fn stop(&self) -> ForkliftResult<()> {
         for s in self.entry_outputs.iter() {
             // Stop all the senders
             if s.send(None).is_err() {
                 error!("Unable to stop");
+                return Err(ForkliftError::FSError(
+                    "Error, channel disconnected, unable to stop rsync_worker".to_string(),
+                ));
             }
         }
+        Ok(())
     }
 
     // grab a sender handler and send in the path
@@ -87,7 +91,7 @@ impl WalkWorker {
     ) -> ForkliftResult<()> {
         rayon::scope(|spawner| {
             let id = get_index_or_rand(pool);
-            trace!("{:?}", id);
+            debug!("{:?}", id);
             let index = id % contexts.len();
 
             let (mut src_context, mut dest_context) = match contexts.get(index) {
@@ -314,6 +318,11 @@ impl WalkWorker {
         let n = match nodes.lock() {
             Ok(e) => {
                 let mut list = e;
+                debug!(
+                    "{:?}",
+                    list.calc_candidates(&entry.to_string_lossy())
+                        .collect::<Vec<_>>()
+                );
                 match list.calc_candidates(&entry.to_string_lossy()).nth(0) {
                     Some(p) => p.clone(),
                     None => {

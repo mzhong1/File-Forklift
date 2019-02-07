@@ -1,5 +1,5 @@
 //SyncStats
-use crate::error::ForkliftResult;
+use crate::error::{ForkliftError, ForkliftResult};
 use crate::filesystem::*;
 use crate::filesystem_entry::Entry;
 use crate::filesystem_ops::SyncOutcome;
@@ -10,7 +10,7 @@ use crate::socket_node::*;
 use crate::walk_worker::*;
 
 use crossbeam::channel;
-use crossbeam::channel::{Receiver, Sender};
+use crossbeam::channel::Sender;
 use log::*;
 use rendezvous_hash::{DefaultNodeHasher, RendezvousNodes};
 use std::path::Path;
@@ -82,16 +82,27 @@ impl SyncStats {
 pub struct Rsyncer {
     filesystem_type: FileSystemType,
     progress_info: Box<ProgressInfo + Send + Sync>,
+    end_sync: Sender<EndState>,
+    end_rendezvous: Sender<EndState>,
+}
+
+pub enum EndState {
+    EndProgram,
+    Rerun,
 }
 
 impl Rsyncer {
     pub fn new(
         filesystem_type: FileSystemType,
         progress_info: Box<ProgressInfo + Send + Sync>,
+        end_sync: Sender<EndState>,
+        end_rendezvous: Sender<EndState>,
     ) -> Rsyncer {
         Rsyncer {
             filesystem_type,
             progress_info,
+            end_sync,
+            end_rendezvous,
         }
     }
 
@@ -143,18 +154,20 @@ impl Rsyncer {
                 }
                 FileSystemType::Nfs => {
                     let (sctx, dctx) = (
-                        create_nfs_context(src_ip, src_share, 0)?,
-                        create_nfs_context(dest_ip, dest_share, 0)?,
+                        create_nfs_context(src_ip, src_share, level)?,
+                        create_nfs_context(dest_ip, dest_share, level)?,
                     );
+
                     contexts.push((sctx, dctx));
                     let (sctx, dctx) = (
-                        create_nfs_context(src_ip, src_share, 0)?,
-                        create_nfs_context(dest_ip, dest_share, 0)?,
+                        create_nfs_context(src_ip, src_share, level)?,
+                        create_nfs_context(dest_ip, dest_share, level)?,
                     );
                     sync_contexts.push((sctx, dctx));
                 }
             }
         }
+
         let walk_worker = WalkWorker::new(src_path, send_handles, send_prog, nodelist, my_node);
         let progress_worker = ProgressWorker::new(rec_prog, self.progress_info);
         rayon::spawn(move || {
@@ -166,11 +179,10 @@ impl Rsyncer {
             .build()
             .unwrap();
 
-        println!("Here");
         if num_threads == 1 {
             let (mut fs, mut destfs) = contexts[0].clone();
             walk_worker.s_walk(src_path, &mut fs, &mut destfs)?;
-            walk_worker.stop();
+            walk_worker.stop()?;
         }
 
         pool.install(|| {
@@ -179,7 +191,7 @@ impl Rsyncer {
                     Ok(_) => {}
                     Err(e) => return Err(e),
                 }
-                walk_worker.stop();
+                walk_worker.stop()?;
             }
 
             rayon::scope(|spawner| {
@@ -201,7 +213,18 @@ impl Rsyncer {
             });
             Ok(())
         })?;
-
+        if self.end_sync.send(EndState::EndProgram).is_err() {
+            error!("Channel to heartbeat is broken!");
+            return Err(ForkliftError::FSError(
+                "Channel to heartbeat is broken!".to_string(),
+            ));
+        }
+        if self.end_rendezvous.send(EndState::EndProgram).is_err() {
+            error!("Channel to rendezvous is broken!");
+            return Err(ForkliftError::FSError(
+                "Channel to rendezvous is broken!".to_string(),
+            ));
+        }
         Ok(())
     }
 }

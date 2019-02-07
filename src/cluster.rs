@@ -9,6 +9,7 @@ use crate::error::ForkliftResult;
 use crate::message;
 use crate::node::*;
 use crate::pulse::*;
+use crate::rsync::EndState;
 use crate::socket_node::*;
 
 pub struct Cluster {
@@ -178,7 +179,10 @@ impl Cluster {
             self.nodes.node_map.entry(name.to_string()).and_modify(|n| {
                 if !n.has_heartbeat && n.tickdown() {
                     let cl = ChangeList::new(ChangeType::RemNode, SocketNode::new(n.name));
-                    s.send(cl);
+                    if s.send(cl).is_err() {
+                        error!("Channel to rendezvous is broken!");
+                        panic!("Channel to rendezvous is broken!");
+                    }
                 } else {
                     n.has_heartbeat = false;
                     debug!("HEARTBEAT was heard for node {:?}", n);
@@ -287,7 +291,10 @@ impl Cluster {
                                     ChangeType::AddNode,
                                     SocketNode::new(*sent_address),
                                 );
-                                s.send(cl);
+                                if s.send(cl).is_err() {
+                                    error!("Channel to rendezvous is broken!");
+                                    panic!("Channel to rendezvous is broken!");
+                                }
                             }
                         });
                 }
@@ -390,9 +397,14 @@ impl Cluster {
         &mut self,
         full_address: &SocketAddr,
         has_nodelist: &mut bool,
+        recv_end: crossbeam::Receiver<EndState>,
     ) -> ForkliftResult<()> {
         let mut countdown = 0;
         loop {
+            if recv_end.try_recv().is_ok() {
+                println!("Got exit");
+                break;
+            }
             if countdown > 5000 && !*has_nodelist {
                 panic!(
                     "{} has not responded for a lifetime, please join to a different ip:port",
@@ -418,7 +430,7 @@ impl Cluster {
             self.read_and_heartbeat(&request, has_nodelist, full_address);
             self.send_and_tickdown(full_address, &request);
         }
-        //Ok(())
+        Ok(())
     }
 
     pub fn init_connect(&mut self, full_address: &SocketAddr) {

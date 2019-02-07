@@ -31,7 +31,7 @@ mod walk_worker;
 
 use crate::cluster::Cluster;
 use crate::console_output::ConsoleProgressOutput;
-use crate::error::ForkliftResult;
+use crate::error::{ForkliftError, ForkliftResult};
 use crate::input::*;
 use crate::node::*;
 use crate::rsync::*;
@@ -83,9 +83,15 @@ fn heartbeat(
     joined: &mut bool,
     full_address: SocketAddr,
     s: crossbeam::Sender<ChangeList>,
+    recv_end: crossbeam::Receiver<EndState>,
 ) -> ForkliftResult<()> {
     let mess = ChangeList::new(ChangeType::AddNode, SocketNode::new(full_address));
-    s.send(mess);
+    if s.send(mess).is_err() {
+        error!("Channel to Rendezvous is broken!");
+        return Err(ForkliftError::FSError(
+            "Channel to rendezvous is broken!".to_string(),
+        ));
+    }
 
     let router = match init_router(&full_address) {
         Ok(t) => t,
@@ -100,7 +106,7 @@ fn heartbeat(
                                                                                                    //sleep for a bit to let other nodes start up
     cluster.names = node_names;
     cluster.init_connect(&full_address);
-    cluster.heartbeat_loop(&full_address, joined)
+    cluster.heartbeat_loop(&full_address, joined, recv_end)
 }
 
 fn init_logs(f: &Path, level: simplelog::LevelFilter) -> ForkliftResult<()> {
@@ -215,13 +221,12 @@ fn main() -> ForkliftResult<()> {
     debug!("Log path: {:?}", logfile);
     info!("Logs made");
 
-    let (s, r) = channel::unbounded::<ChangeList>();
-    let mut active_nodes = Arc::new(Mutex::new(RendezvousNodes::default()));
+    let (send, recv) = channel::unbounded::<ChangeList>();
 
     let input = parse_matches(&matches)?;
-    if input.nodes.len() < 1 {
+    if input.nodes.len() < 2 {
         panic!(
-            "No input nodes!  Please have at least 1 node in the nodes section of your
+            "No input nodes!  Please have at least 2 node in the nodes section of your
         config file"
         );
     }
@@ -238,7 +243,7 @@ fn main() -> ForkliftResult<()> {
         }
     };
     let nodes = input.nodes.clone();
-    let node_names: NodeList = NodeList::new_with_list(nodes);
+    let node_names: NodeList = NodeList::new_with_list(nodes.clone());
     let full_address = match node_names.get_full_address(&ip_address.to_string()) {
         Some(a) => a,
         None => {
@@ -248,24 +253,75 @@ fn main() -> ForkliftResult<()> {
     };
     debug!("current full address: {:?}", full_address);
     let mine = SocketNode::new(full_address);
-    let mut joined = input.nodes.len() != 1;
+    let mut joined = input.nodes.len() != 2;
     let console_info = ConsoleProgressOutput::new();
     let system = input.system;
-    let syncer = Rsyncer::new(system, Box::new(console_info));
+    let (send_end, recv_end) = channel::unbounded::<EndState>();
+    let (send_rend, recv_rend) = channel::unbounded::<EndState>();
+    let mut send_nodes = RendezvousNodes::default();
+    for node in nodes {
+        send_nodes.insert(SocketNode::new(node));
+    }
+    let mut active_nodes = Arc::new(Mutex::new(send_nodes));
 
-    let stats = syncer.sync(
+    let syncer = Rsyncer::new(system, Box::new(console_info), send_end, send_rend);
+
+    /*let stats = syncer.sync(
         (&input.src_server, &input.dest_server),
         (&input.src_share, &input.dest_share),
         (input.debug_level, input.num_threads),
         (input.workgroup, username.to_string(), password.to_string()),
         active_nodes.clone(),
         mine,
-    );
-
-    rayon::join(
-        || heartbeat(node_names, &mut joined, full_address, s),
-        || rendezvous(&mut active_nodes, &r),
-    );
+    );*/
+    let (src_server, dest_server) = (input.src_server, input.dest_server);
+    let (src_share, dest_share) = (input.src_share, input.dest_share);
+    let (debug_level, num_threads) = (input.debug_level, input.num_threads);
+    let workgroup = input.workgroup;
+    rayon::scope(|s| {
+        s.spawn(|_| {
+            println!("Started Sync");
+            syncer.sync(
+                (&src_server, &dest_server),
+                (&src_share, &dest_share),
+                (debug_level, num_threads),
+                (workgroup, username.to_string(), password.to_string()),
+                active_nodes.clone(),
+                mine,
+            );
+        });
+        rayon::join(
+            || heartbeat(node_names, &mut joined, full_address, send, recv_end),
+            || rendezvous(&mut active_nodes.clone(), &recv, &recv_rend),
+            /*|| {
+                syncer.sync(
+                    (&src_server, &dest_server),
+                    (&src_share, &dest_share),
+                    (debug_level, num_threads),
+                    (workgroup, username.to_string(), password.to_string()),
+                    active_nodes.clone(),
+                    mine,
+                )
+            },*/
+        )
+    });
+    /* || heartbeat(node_names, &mut joined, full_address, s, recv_end),
+        || {
+            rayon::join(
+                || rendezvous(&mut active_nodes.clone(), &r, &recv_rend),
+                || {
+                    syncer.sync(
+                        (&src_server, &dest_server),
+                        (&src_share, &dest_share),
+                        (debug_level, num_threads),
+                        (workgroup, username.to_string(), password.to_string()),
+                        active_nodes.clone(),
+                        mine,
+                    )
+                },
+            )
+        },
+    );*/
     Ok(())
 }
 
@@ -275,25 +331,31 @@ fn main() -> ForkliftResult<()> {
 fn rendezvous(
     active_nodes: &mut Arc<Mutex<RendezvousNodes<SocketNode, DefaultNodeHasher>>>,
     r: &crossbeam::Receiver<ChangeList>,
+    recv_end: &crossbeam::Receiver<EndState>,
 ) {
+    println!("Started Rendezvous");
     loop {
+        if recv_end.try_recv().is_ok() {
+            println!("Got exit");
+            break;
+        }
         let mut list = active_nodes.lock().unwrap();
         match r.try_recv() {
             Ok(c) => {
                 match c.change_type {
                     ChangeType::AddNode => {
-                        debug!("Add Node {:?} to active list!", c.socket_node);
+                        println!("Add Node {:?} to active list!", c.socket_node);
                         list.insert(c.socket_node);
-                        debug!(
+                        println!(
                             "The current list is {:?}",
                             list.calc_candidates(&1).collect::<Vec<_>>()
                         );
                     }
                     ChangeType::RemNode => {
-                        debug!("Remove Node {:?} from active list!", c.socket_node);
+                        println!("Remove Node {:?} from active list!", c.socket_node);
                         //let list = Arc::get_mut(active_nodes).unwrap();
                         list.remove(&c.socket_node);
-                        debug!(
+                        println!(
                             "The current list is {:?}",
                             list.calc_candidates(&1).collect::<Vec<_>>()
                         );
