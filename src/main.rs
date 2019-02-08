@@ -259,12 +259,17 @@ fn main() -> ForkliftResult<()> {
     let (send_end, recv_end) = channel::unbounded::<EndState>();
     let (send_rend, recv_rend) = channel::unbounded::<EndState>();
     let mut send_nodes = RendezvousNodes::default();
-    for node in nodes {
-        send_nodes.insert(SocketNode::new(node));
-    }
-    let mut active_nodes = Arc::new(Mutex::new(send_nodes));
+    //for node in nodes {
+    //    send_nodes.insert(SocketNode::new(node));
+    //}
+    let active_nodes = Arc::new(Mutex::new(send_nodes));
 
-    let syncer = Rsyncer::new(system, Box::new(console_info), send_end, send_rend);
+    let syncer = Rsyncer::new(
+        system,
+        Box::new(console_info),
+        send_end.clone(),
+        send_rend.clone(),
+    );
 
     /*let stats = syncer.sync(
         (&input.src_server, &input.dest_server),
@@ -281,14 +286,25 @@ fn main() -> ForkliftResult<()> {
     rayon::scope(|s| {
         s.spawn(|_| {
             println!("Started Sync");
-            syncer.sync(
+            match syncer.sync(
                 (&src_server, &dest_server),
                 (&src_share, &dest_share),
                 (debug_level, num_threads),
                 (workgroup, username.to_string(), password.to_string()),
                 active_nodes.clone(),
                 mine,
-            );
+            ) {
+                Ok(_) => (),
+                Err(e) => {
+                    error!("{:?}", e);
+                    if send_end.send(EndState::EndProgram).is_err() {
+                        error!("Channel to heartbeat is broken!");
+                    }
+                    if send_rend.send(EndState::EndProgram).is_err() {
+                        error!("Channel to heartbeat is broken!");
+                    }
+                }
+            }
         });
         rayon::join(
             || heartbeat(node_names, &mut joined, full_address, send, recv_end),
@@ -333,7 +349,7 @@ fn rendezvous(
     r: &crossbeam::Receiver<ChangeList>,
     recv_end: &crossbeam::Receiver<EndState>,
 ) {
-    println!("Started Rendezvous");
+    debug!("Started Rendezvous");
     loop {
         if recv_end.try_recv().is_ok() {
             println!("Got exit");
@@ -344,18 +360,18 @@ fn rendezvous(
             Ok(c) => {
                 match c.change_type {
                     ChangeType::AddNode => {
-                        println!("Add Node {:?} to active list!", c.socket_node);
+                        info!("Add Node {:?} to active list!", c.socket_node);
                         list.insert(c.socket_node);
-                        println!(
+                        info!(
                             "The current list is {:?}",
                             list.calc_candidates(&1).collect::<Vec<_>>()
                         );
                     }
                     ChangeType::RemNode => {
-                        println!("Remove Node {:?} from active list!", c.socket_node);
+                        info!("Remove Node {:?} from active list!", c.socket_node);
                         //let list = Arc::get_mut(active_nodes).unwrap();
                         list.remove(&c.socket_node);
-                        println!(
+                        info!(
                             "The current list is {:?}",
                             list.calc_candidates(&1).collect::<Vec<_>>()
                         );

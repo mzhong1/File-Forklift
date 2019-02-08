@@ -158,11 +158,7 @@ impl Rsyncer {
                         create_nfs_context(dest_ip, dest_share, level)?,
                     );
 
-                    contexts.push((sctx, dctx));
-                    let (sctx, dctx) = (
-                        create_nfs_context(src_ip, src_share, level)?,
-                        create_nfs_context(dest_ip, dest_share, level)?,
-                    );
+                    contexts.push((sctx.clone(), dctx.clone()));
                     sync_contexts.push((sctx, dctx));
                 }
             }
@@ -189,7 +185,9 @@ impl Rsyncer {
             if num_threads > 1 {
                 match walk_worker.t_walk(dest_path, src_path, &mut contexts, &pool) {
                     Ok(_) => {}
-                    Err(e) => return Err(e),
+                    Err(e) => {
+                        return Err(e);
+                    }
                 }
                 walk_worker.stop()?;
             }

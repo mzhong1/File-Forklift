@@ -318,7 +318,7 @@ impl WalkWorker {
         let n = match nodes.lock() {
             Ok(e) => {
                 let mut list = e;
-                debug!(
+                info!(
                     "{:?}",
                     list.calc_candidates(&entry.to_string_lossy())
                         .collect::<Vec<_>>()
