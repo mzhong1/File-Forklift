@@ -60,28 +60,31 @@ pub enum SyncOutcome {
 ///
 /// @param path     The path to be checked
 ///
-/// @param fs       The filesystem context the path is checked against
+/// @param context  The filesystem context the path is checked against
 ///
 /// @return         true if the path exists (is valid), false otherwise
 ///
-pub fn exist(path: &Path, fs: &mut NetworkContext) -> bool {
-    fs.stat(path).is_ok()
+pub fn exist(path: &Path, context: &mut NetworkContext) -> bool {
+    context.stat(path).is_ok()
 }
 
 ///
 /// gets the relative path (the parts of the path in common)
 ///
-/// @param a    the base path
+/// @param base_path    the base path
 ///
-/// @param b    the comparison path
+/// @param comp_path    the comparison path
 ///
-/// @return     the relative path between a and b, error if
+/// @return     the relative path between base and comp, error if
 ///             a relative path does not exist
 ///
-pub fn get_rel_path(a: &Path, b: &Path) -> ForkliftResult<PathBuf> {
-    match diff_paths(&a, &b) {
+pub fn get_rel_path(base_path: &Path, comp_path: &Path) -> ForkliftResult<PathBuf> {
+    match diff_paths(&base_path, &comp_path) {
         None => {
-            let err = format!("Could not get relative path from {:?} to {:?}", &a, &b);
+            let err = format!(
+                "Could not get relative path from {:?} to {:?}",
+                &base_path, &comp_path
+            );
             Err(ForkliftError::FSError(err))
         }
         Some(path) => Ok(path),
@@ -94,12 +97,12 @@ pub fn get_rel_path(a: &Path, b: &Path) -> ForkliftResult<PathBuf> {
 /// @param path     The path of the file whose external attributes are
 ///                 being set
 ///
-/// @param fs       the Samba filesystem of the file
+/// @param context  the Samba filesystem of the file
 ///
 /// @param attr     The attribute being set.  valid descriptors can be
 ///                 found in Smbc.
 ///
-/// @param val      The value to be set in the external attribute
+/// @param value      The value to be set in the external attribute
 ///
 /// @param error    The error description should the set fail
 ///
@@ -109,13 +112,13 @@ pub fn get_rel_path(a: &Path, b: &Path) -> ForkliftResult<PathBuf> {
 ///
 pub fn set_xattr(
     path: &Path,
-    fs: &Smbc,
+    context: &Smbc,
     attr: &SmbcXAttr,
-    val: &SmbcXAttrValue,
+    value: &SmbcXAttrValue,
     error: &str,
     success: &str,
 ) -> ForkliftResult<()> {
-    match fs.setxattr(path, attr, val, XAttrFlags::SMBC_XATTR_FLAG_CREATE) {
+    match context.setxattr(path, attr, value, XAttrFlags::SMBC_XATTR_FLAG_CREATE) {
         Ok(_) => {
             trace!("set success! {}", success);
             Ok(())
@@ -134,7 +137,7 @@ pub fn set_xattr(
 /// @param path     The path of the file whose external attributes are
 ///                 being set
 ///
-/// @param fs       the Samba filesystem of the file
+/// @param context  the Samba filesystem of the file
 ///
 /// @param attr     The attribute to be retrieved. valid descriptors
 ///                 can be found in Smbc.
@@ -145,15 +148,22 @@ pub fn set_xattr(
 ///
 /// @note           See Smbc.rs for notes on getxattr.  Please note that
 ///                 you can in fact do an exclude for .* (all) operations
+///                 Also, all returned vectors should end in the \{0},
+///                 or Null character.  If you want to parse this using
+///                 xattr_parser, you will have to pop off the null
+///                 terminator.
+///
+/// @return         The attributes as a Vec<u8>, or error should the
+///                 function fail
 ///
 pub fn get_xattr(
     path: &Path,
-    fs: &Smbc,
+    context: &Smbc,
     attr: &SmbcXAttr,
     error: &str,
     success: &str,
 ) -> ForkliftResult<Vec<u8>> {
-    match fs.getxattr(path, attr) {
+    match context.getxattr(path, attr) {
         Ok(buf) => {
             debug!("{}", success);
             Ok(buf)
@@ -167,16 +177,16 @@ pub fn get_xattr(
 }
 
 ///
-/// make and/or update a directory endpoint in the destination filesytem,
+/// make and/or update a directory endpoint in the destination filesystem,
 /// keeping Dos or Unix permissions (depending on if the context is Samba or NFS)
 ///
 /// @param src_path     the path of the equivalent directory from the source filesystem
 ///
 /// @param dest_path    the path of the directory being created
 ///
-/// @param fs           the source filesystem
+/// @param src_context  the source filesystem
 ///
-/// @param destfs       the destination filesystem
+/// @param dest_context the destination filesystem
 ///
 /// @return             returns the Sync outcome (or an error)
 ///
@@ -187,13 +197,13 @@ pub fn get_xattr(
 pub fn make_dir(
     src_path: &Path,
     dest_path: &Path,
-    fs: &mut NetworkContext,
-    destfs: &mut NetworkContext,
+    src_context: &mut NetworkContext,
+    dest_context: &mut NetworkContext,
 ) -> ForkliftResult<SyncOutcome> {
     let outcome: SyncOutcome;
-    let exists = exist(dest_path, destfs);
+    let exists = exist(dest_path, dest_context);
     if !exists {
-        if let Err(e) = destfs.mkdir(dest_path) {
+        if let Err(e) = dest_context.mkdir(dest_path) {
             let err = format!(
                 "Error {}, Could not create {:?}, exists: {:?}",
                 e, dest_path, exists
@@ -202,9 +212,12 @@ pub fn make_dir(
             return Ok(SyncOutcome::UpToDate);
         }
     }
-    let (src_entry, dest_entry) = (Entry::new(&src_path, fs), Entry::new(&dest_path, destfs));
+    let (src_entry, dest_entry) = (
+        Entry::new(&src_path, src_context),
+        Entry::new(&dest_path, dest_context),
+    );
     // make sure permissions match
-    let out = match copy_permissions(&src_entry, &dest_entry, &fs, &destfs) {
+    let out = match copy_permissions(&src_entry, &dest_entry, &src_context, &dest_context) {
         Ok(out) => {
             debug!("Copy permissions successful");
             out
@@ -234,16 +247,18 @@ pub fn make_dir(
 /// @param root         the root filepath, to ensure correctness while looping
 ///                     over the parent directories
 ///
-/// @param fs           the source filesystem
+/// @param src_context  the source filesystem
 ///
-/// @param destfs       the destination filesystem
+/// @param dest_context the destination filesystem
+///
+/// @return             Nothing on success, Error should the function fail
 ///                     
 pub fn make_dir_all(
     dest_path: &Path,
     src_path: &Path,
     root: &Path,
-    fs: &mut NetworkContext,
-    destfs: &mut NetworkContext,
+    src_context: &mut NetworkContext,
+    dest_context: &mut NetworkContext,
 ) -> ForkliftResult<()> {
     let (mut stack, mut src_stack) = (vec![], vec![]);
     let (mut dest_parent, mut src_parent) = (dest_path.parent(), src_path.parent());
@@ -288,7 +303,7 @@ pub fn make_dir_all(
                 return Err(ForkliftError::FSError("Loop invariant failed".to_string()));
             }
         };
-        match make_dir(srcpath, &path, fs, destfs) {
+        match make_dir(srcpath, &path, src_context, dest_context) {
             Ok(_) => debug!("made dir {:?}", path),
             Err(e) => {
                 return Err(e);
@@ -299,6 +314,7 @@ pub fn make_dir_all(
 }
 
 ///
+/// Check if the source and dest entries have the same size
 /// Since size attributes remain the same for samba + nfs calls,
 /// Can do comparison
 ///
@@ -322,6 +338,7 @@ pub fn has_different_size(src: &Entry, dest: &Entry) -> ForkliftResult<bool> {
 }
 
 ///
+/// Check if the source entry is more recent than the dest entry
 /// Since time attributes remain the same for samba + nfs calls,
 /// we can do comparison.
 ///
