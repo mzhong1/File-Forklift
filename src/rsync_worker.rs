@@ -96,7 +96,13 @@ impl RsyncWorker {
             &mut dest_context,
         )?;
         let dest_entry = Entry::new(&dest_path, &dest_context);
-        let mut outcome = sync_entry(&src_entry, &dest_entry, src_context, dest_context)?;
+        let mut outcome = sync_entry(
+            &self.output,
+            &src_entry,
+            &dest_entry,
+            src_context,
+            dest_context,
+        )?;
         let dir = match src_entry.is_dir() {
             Some(d) => d,
             None => true,

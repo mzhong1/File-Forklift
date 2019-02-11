@@ -50,7 +50,12 @@ impl ProgressWorker {
                     file_done += done;
                     total_done += done;
                     let elapsed = now.elapsed().as_secs() as usize;
-                    let eta = ((elapsed * stats.tot_size) / total_done) - elapsed;
+                    let eta;
+                    if total_done == 0 || ((elapsed * stats.tot_size) / total_done) < elapsed {
+                        eta = elapsed;
+                    } else {
+                        eta = ((elapsed * stats.tot_size) / total_done) - elapsed;
+                    }
                     let detailed_progress = Progress {
                         current_file: current_file.clone(),
                         file_done,

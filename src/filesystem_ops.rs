@@ -1,14 +1,15 @@
+use ::smbc::*;
+use crossbeam::channel::Sender;
 use digest::Digest;
+use lazy_static::lazy_static;
+use libnfs::*;
+use log::*;
 use meowhash::*;
 use nix::fcntl::OFlag;
 use nix::sys::stat::Mode;
 use nom::types::CompleteByteSlice;
 use pathdiff::*;
 
-use ::smbc::*;
-use lazy_static::lazy_static;
-use libnfs::*;
-use log::*;
 use std::collections::hash_map::Entry as E;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -17,6 +18,7 @@ use std::sync::Mutex;
 use crate::error::{ForkliftError, ForkliftResult};
 use crate::filesystem::*;
 use crate::filesystem_entry::Entry;
+use crate::progress_message::ProgressMessage;
 
 /// default buffer size
 const BUFF_SIZE: u64 = 1024 * 1000;
@@ -303,12 +305,14 @@ pub fn make_dir_all(
                 return Err(ForkliftError::FSError("Loop invariant failed".to_string()));
             }
         };
-        match make_dir(srcpath, &path, src_context, dest_context) {
-            Ok(_) => debug!("made dir {:?}", path),
-            Err(e) => {
-                return Err(e);
-            }
-        };
+        if !exist(&path, dest_context) {
+            match make_dir(srcpath, &path, src_context, dest_context) {
+                Ok(_) => debug!("made dir {:?}", path),
+                Err(e) => {
+                    return Err(e);
+                }
+            };
+        }
     }
     Ok(())
 }
@@ -524,17 +528,18 @@ pub fn copy_link(
                 "Source File does not exist!".to_string(),
             ));
         }
-        (Some(src_stat), None) => (src_stat.size(), 0),
-        (Some(src_stat), Some(dest_stat)) => (src_stat.size(), dest_stat.size()),
+        (Some(src_stat), None) => (src_stat.size() + 1, 0),
+        (Some(src_stat), Some(dest_stat)) => (src_stat.size() + 1, dest_stat.size() + 1),
     };
     let (src_path, dest_path) = (src.path(), dest.path());
-    let src_target = read_link(src_path, &context, src_size)?;
-
+    let mut src_target = read_link(src_path, &context, src_size)?;
+    src_target.pop();
     let mut outcome: SyncOutcome;
 
     match dest.is_link() {
         Some(true) => {
-            let dest_target = read_link(dest_path, &dcontext, dest_size)?;
+            let mut dest_target = read_link(dest_path, &dcontext, dest_size)?;
+            dest_target.pop();
             if dest_target != src_target {
                 match dcontext.unlink(dest_path) {
                     Ok(_) => (),
@@ -563,7 +568,6 @@ pub fn copy_link(
             outcome = SyncOutcome::SymlinkCreated;
         }
     }
-
     //create new symlink, if creation fails, skip
     match dcontext.symlink(Path::new(&src_target), dest_path) {
         Ok(_) => (),
@@ -673,6 +677,8 @@ fn write_file(path: &Path, file: &FileType, buffer: &[u8], offset: u64) -> Forkl
 ///
 /// copy an entry from source to destination
 ///
+/// @param progress_sender  Channel to send progress to progress_worker
+///
 /// @param src          Source file entry
 ///
 /// @param dest         Dest file entry
@@ -684,6 +690,7 @@ fn write_file(path: &Path, file: &FileType, buffer: &[u8], offset: u64) -> Forkl
 /// @return             the sync outcome File Copied or an error
 ///
 fn copy_entry(
+    progress_sender: &Sender<ProgressMessage>,
     src: &Entry,
     dest: &Entry,
     src_context: &mut NetworkContext,
@@ -691,10 +698,13 @@ fn copy_entry(
 ) -> ForkliftResult<SyncOutcome> {
     //check if src exists (which it should...)
     let (src_path, dest_path) = (src.path(), dest.path());
-    if src.metadata().is_none() {
-        let err = format!("Source file {:?} should exist!", src_path);
-        error!("{}", err);
-        return Err(ForkliftError::FSError(err));
+    let src_meta = match src.metadata() {
+        None => {
+            let err = format!("Source file {:?} should exist!", src_path);
+            error!("{}", err);
+            return Err(ForkliftError::FSError(err));
+        }
+        Some(m) => m,
     };
     let err = format!("Could not open {:?} for reading", dest_path);
     let src_file = open_file(src_path, src_context, OFlag::empty(), &err)?;
@@ -721,8 +731,16 @@ fn copy_entry(
             end = true;
         }
         offset += num_written as u64;
-        //INSERT PROGRESS MESSAGE HERE
         //SEND PROGRESS
+        let progress = ProgressMessage::Syncing {
+            description: src.path().to_string_lossy().to_string(),
+            size: src_meta.size() as usize,
+            done: num_written as usize,
+        };
+
+        if progress_sender.send(progress).is_err() {
+            error!("Unable to send progress");
+        }
     }
     Ok(SyncOutcome::FileCopied)
 }
@@ -822,6 +840,7 @@ pub fn checksum_copy(
 /// @return             the outcome of the entry rsync (or a ForkliftError if it fails)
 ///
 pub fn sync_entry(
+    progress_sender: &Sender<ProgressMessage>,
     src: &Entry,
     dest: &Entry,
     src_context: &mut NetworkContext,
@@ -839,7 +858,6 @@ pub fn sync_entry(
             return Err(ForkliftError::FSError(err));
         }
     }
-
     match src.is_dir() {
         Some(true) => {
             trace!("Is directory!");
@@ -852,13 +870,12 @@ pub fn sync_entry(
             return Err(ForkliftError::FSError(err));
         }
     }
-
     //check if size different or if src more recent than dest
     match (has_different_size(src, dest), is_more_recent(src, dest)) {
         (Ok(size_dif), Ok(recent)) => {
             if size_dif || recent {
                 debug!("Is different!!! size {}  recent {}", size_dif, recent);
-                copy_entry(src, dest, src_context, dest_context)
+                copy_entry(progress_sender, src, dest, src_context, dest_context)
             } else {
                 debug!("not diff {} {}", size_dif, recent);
                 checksum_copy(src, dest, src_context, dest_context)
