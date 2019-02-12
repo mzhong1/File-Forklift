@@ -69,12 +69,18 @@ fn init_router(full_address: &SocketAddr) -> ForkliftResult<Socket> {
     Ok(router)
 }
 
-fn parse_matches(matches: &clap::ArgMatches<'_>) -> ForkliftResult<Input> {
+fn parse_matches(matches: &clap::ArgMatches<'_>) -> Input {
     let path = match matches.value_of("config") {
         None => Path::new(""),
         Some(t) => Path::new(t),
     };
-    let input = std::fs::read_to_string(path)?;
+    let input = match std::fs::read_to_string(path){
+        Ok(e) => e,
+        Err(e) => {
+            error!("{:?}, Unable to read file", e);
+            panic!("{:?}, Unable to read file", e);
+        }
+    };
     Input::new(&input)
 }
 
@@ -83,7 +89,7 @@ fn heartbeat(
     joined: &mut bool,
     full_address: SocketAddr,
     s: crossbeam::Sender<ChangeList>,
-    recv_end: crossbeam::Receiver<EndState>,
+    recv_end: &crossbeam::Receiver<EndState>,
 ) -> ForkliftResult<()> {
     let mess = ChangeList::new(ChangeType::AddNode, SocketNode::new(full_address));
     if s.send(mess).is_err() {
@@ -106,7 +112,7 @@ fn heartbeat(
                                                                                                    //sleep for a bit to let other nodes start up
     cluster.names = node_names;
     cluster.init_connect(&full_address);
-    cluster.heartbeat_loop(&full_address, joined, recv_end)
+    cluster.heartbeat_loop(&full_address, joined, &recv_end)
 }
 
 fn init_logs(f: &Path, level: simplelog::LevelFilter) -> ForkliftResult<()> {
@@ -223,7 +229,7 @@ fn main() -> ForkliftResult<()> {
 
     let (send, recv) = channel::unbounded::<ChangeList>();
 
-    let input = parse_matches(&matches)?;
+    let input = parse_matches(&matches);
     if input.nodes.len() < 2 {
         panic!(
             "No input nodes!  Please have at least 2 node in the nodes section of your
@@ -307,7 +313,7 @@ fn main() -> ForkliftResult<()> {
             }
         });
         rayon::join(
-            || heartbeat(node_names, &mut joined, full_address, send, recv_end),
+            || heartbeat(node_names, &mut joined, full_address, send, &recv_end),
             || rendezvous(&mut active_nodes.clone(), &recv, &recv_rend),
             /*|| {
                 syncer.sync(

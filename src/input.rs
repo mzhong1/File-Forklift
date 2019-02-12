@@ -1,6 +1,7 @@
 use crate::error::*;
 use crate::filesystem::FileSystemType;
 
+use log::*;
 use serde_derive::*;
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -29,8 +30,11 @@ pub struct Input {
 }
 
 impl Input {
-    pub fn new(input: &str) -> ForkliftResult<Self> {
-        let i: Input = serde_json::from_str(input)?;
+    pub fn new(input: &str) -> Self {
+        match serde_json::from_str(input){
+            Ok(e) => e,
+            Err(e) =>{error!("Error {:?}, unable to parse config file!", e);panic!("Error {:?}, unable to parse config file!", e)}
+        }
         /*if i.src_path.to_string_lossy().is_empty() {
             match i.system {
                 FileSystemType::Nfs => i.src_path.push("/".to_string()),
@@ -40,6 +44,5 @@ impl Input {
                 }
             }
         }*/
-        Ok(i)
     }
 }
