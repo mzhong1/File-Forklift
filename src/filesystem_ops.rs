@@ -843,16 +843,18 @@ pub fn checksum_copy(
 ///
 /// syncs the src and dest files.  It also sends the current progress
 /// of the rsync of the entry.
+/// 
+/// @param progress_sender  Channel to send progress to progress_worker
 ///
-/// @param src          Source file entry
+/// @param src              Source file entry
 ///
-/// @param dest         Dest file entry
+/// @param dest             Dest file entry
 ///
-/// @param src_context  the context of the source filesystem
+/// @param src_context      the context of the source filesystem
 ///
-/// @param dest_context the context of the destination filesystem
+/// @param dest_context     the context of the destination filesystem
 ///
-/// @return             the outcome of the entry rsync (or a ForkliftError if it fails)
+/// @return                 the outcome of the entry rsync (or a ForkliftError if it fails)
 ///
 pub fn sync_entry(
     progress_sender: &Sender<ProgressMessage>,
@@ -1009,9 +1011,9 @@ fn change_mode(
 ///
 fn get_mapped_sid(
     dest_path: &Path,
+    dest_ctx: &Smbc,
     sid: &str,
     dest_acls_plus: &[SmbcAclValue],
-    dest_ctx: &Smbc,
 ) -> ForkliftResult<Option<Sid>> {
     for (count, ace) in dest_acls_plus.iter().enumerate() {
         if let SmbcAclValue::AclPlus(ACE::Named(SidType::Named(Some(dest_sid)), _, _, _)) = ace {
@@ -1060,7 +1062,7 @@ fn map_temp_acl(dest_path: &Path, dest_ctx: &Smbc, sid: &str) -> ForkliftResult<
     set_xattr(dest_path, dest_ctx, &xattr_set, &val, &err, &suc)?;
 
     let dest_acls = get_acl_list(dest_path, dest_ctx, true)?;
-    let ret = match get_mapped_sid(dest_path, &sid, &dest_acls, dest_ctx) {
+    let ret = match get_mapped_sid(dest_path, dest_ctx,&sid, &dest_acls, ) {
         Ok(Some(dest_sid)) => dest_sid,
         Ok(None) => {
             let err = format!("Unsucessful in mapping sid {}", &sid);
@@ -1141,7 +1143,7 @@ fn replace_acl(
 ///
 fn map_name(dest_path: &Path, dest_ctx: &Smbc, sid: &str) -> ForkliftResult<Sid> {
     let destplus = get_acl_list(dest_path, dest_ctx, true)?;
-    match get_mapped_sid(dest_path, &sid, &destplus, dest_ctx) {
+    match get_mapped_sid(dest_path, dest_ctx, &sid, &destplus) {
         //add the acl to the file and call get_mapped_sid again
         Ok(None) => Ok(map_temp_acl(dest_path, dest_ctx, &sid)?),
         //the acl is in, map a to the returned sid
@@ -1229,6 +1231,18 @@ fn copy_acl(
 ///
 /// map named acl Sids from a source file to their destinarion numeric Sids
 /// then replace the incorrect destination acls with the source acls
+/// 
+/// @param dest_path        The destination filepath
+/// 
+/// @param dest_ctx         Samba context of destination
+/// 
+/// @param src_acls         numeric src acls for comparison
+/// 
+/// @param src_acls_plus    named arc acls for mapping
+/// 
+/// @param dest_acls        dest acls for mapping
+/// 
+/// @return                 true if an acl was copied or all dest acls were exhausted
 ///
 pub fn map_names_and_copy(
     dest_path: &Path,
