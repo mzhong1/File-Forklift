@@ -13,10 +13,15 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 pub struct WalkWorker {
+    /// channels to send entries to processors
     entry_outputs: Vec<Sender<Option<Entry>>>,
+    /// channel to send progress information
     progress_output: Sender<ProgressMessage>,
+    /// source path
     source: PathBuf,
+    /// Nodes to calculate entry processor
     nodes: Arc<Mutex<RendezvousNodes<SocketNode, DefaultNodeHasher>>>,
+    /// Current Node to determine what is processed
     node: SocketNode,
 }
 

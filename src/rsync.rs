@@ -13,7 +13,7 @@ use crossbeam::channel;
 use crossbeam::channel::Sender;
 use log::*;
 use rendezvous_hash::{DefaultNodeHasher, RendezvousNodes};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 #[derive(Default, Debug, Clone)]
@@ -80,14 +80,25 @@ impl SyncStats {
 }
 
 pub struct Rsyncer {
+    
+    /// share protocol to use
     filesystem_type: FileSystemType,
+    /// console ouput functions
     progress_info: Box<ProgressInfo + Send + Sync>,
+    /// channel to send heartbeat end signal
     end_sync: Sender<EndState>,
+    /// channel to send rendezvous loop end signal
     end_rendezvous: Sender<EndState>,
+    /// source root path
+    source: PathBuf,
+    /// destination root path,
+    destination: PathBuf,
 }
 
 pub enum EndState {
+    /// End the process
     EndProgram,
+    /// Rerun the program
     Rerun,
 }
 
@@ -97,12 +108,17 @@ impl Rsyncer {
         progress_info: Box<ProgressInfo + Send + Sync>,
         end_sync: Sender<EndState>,
         end_rendezvous: Sender<EndState>,
+        source: PathBuf,
+        destination: PathBuf,
     ) -> Rsyncer {
         Rsyncer {
+            
             filesystem_type,
             progress_info,
             end_sync,
             end_rendezvous,
+            source,
+            destination,
         }
     }
 
@@ -115,12 +131,10 @@ impl Rsyncer {
         nodelist: Arc<Mutex<RendezvousNodes<SocketNode, DefaultNodeHasher>>>,
         my_node: SocketNode,
     ) -> ForkliftResult<()> {
-        //let (stat_output, progress_input) = channel::unbounded::<ProgressMessage>();
-        //let progress_output = stat_output.clone();
-
         let mut send_handles: Vec<Sender<Option<Entry>>> = Vec::new();
 
         let mut syncers: Vec<RsyncWorker> = Vec::new();
+        //NOTE: Move this to main -> if source_path/dest_path == "", then replace as such
         let p = format!("smb://{}{}", src_ip, src_share);
         let d = format!("smb://{}{}", dest_ip, dest_share);
         let (src_path, dest_path) = match self.filesystem_type {
@@ -133,7 +147,7 @@ impl Rsyncer {
             let (send_e, rec_e) = channel::unbounded();
             send_handles.push(send_e);
             let sync_progress = send_prog.clone();
-            syncers.push(RsyncWorker::new(src_path, dest_path, rec_e, sync_progress));
+            syncers.push(RsyncWorker::new(self.source.as_path(), self.destination.as_path(), rec_e, sync_progress));
         }
         let mut contexts: Vec<(NetworkContext, NetworkContext)> = Vec::new();
         let mut sync_contexts: Vec<(NetworkContext, NetworkContext)> = Vec::new();
@@ -164,7 +178,7 @@ impl Rsyncer {
             }
         }
 
-        let walk_worker = WalkWorker::new(src_path, send_handles, send_prog, nodelist, my_node);
+        let walk_worker = WalkWorker::new(self.source.as_path(), send_handles, send_prog, nodelist, my_node);
         let progress_worker = ProgressWorker::new(rec_prog, self.progress_info);
         rayon::spawn(move || {
             progress_worker.start();
@@ -177,7 +191,7 @@ impl Rsyncer {
 
         if num_threads == 1 {
             let (mut fs, mut destfs) = contexts[0].clone();
-            walk_worker.s_walk(src_path, &mut fs, &mut destfs)?;
+            walk_worker.s_walk(self.source.as_path(), &mut fs, &mut destfs)?;
             walk_worker.stop()?;
         }
 

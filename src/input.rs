@@ -1,4 +1,3 @@
-use crate::error::*;
 use crate::filesystem::FileSystemType;
 
 use log::*;

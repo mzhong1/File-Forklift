@@ -264,7 +264,7 @@ fn main() -> ForkliftResult<()> {
     let system = input.system;
     let (send_end, recv_end) = channel::unbounded::<EndState>();
     let (send_rend, recv_rend) = channel::unbounded::<EndState>();
-    let mut send_nodes = RendezvousNodes::default();
+    let send_nodes = RendezvousNodes::default();
     //for node in nodes {
     //    send_nodes.insert(SocketNode::new(node));
     //}
@@ -275,6 +275,8 @@ fn main() -> ForkliftResult<()> {
         Box::new(console_info),
         send_end.clone(),
         send_rend.clone(),
+        input.src_path,
+        input.dest_path,
     );
 
     /*let stats = syncer.sync(
