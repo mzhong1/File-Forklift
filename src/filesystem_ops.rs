@@ -862,7 +862,7 @@ pub fn sync_entry(
     dest_context: &mut NetworkContext,
 ) -> ForkliftResult<SyncOutcome> {
     let description = src.path().to_string_lossy().into_owned();
-    if progress_sender.send(ProgressMessage::StartSync{description}).is_err() {
+    if progress_sender.send(ProgressMessage::StartSync(description)).is_err() {
             error!("Unable to send progress");
         }
     match src.is_link() {
