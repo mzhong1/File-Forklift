@@ -54,7 +54,7 @@ pub enum SyncOutcome {
     /// updated a directory internal bytes
     DirectoryUpdated,
     /// updated a file internal bytes
-    ChecksumUpdated,
+    ChecksumUpdated(Vec<u8>),
 }
 
 ///
@@ -679,15 +679,15 @@ fn write_file(path: &Path, file: &FileType, buffer: &[u8], offset: u64) -> Forkl
 ///
 /// @param progress_sender  Channel to send progress to progress_worker
 ///
-/// @param src          Source file entry
+/// @param src              Source file entry
 ///
-/// @param dest         Dest file entry
+/// @param dest             Dest file entry
 ///
-/// @param src_context  the context of the source filesystem
+/// @param src_context      the context of the source filesystem
 ///
-/// @param dest_context the context of the destination filesystem
+/// @param dest_context     the context of the destination filesystem
 ///
-/// @return             the sync outcome File Copied or an error
+/// @return                 the sync outcome File Copied or an error
 ///
 fn copy_entry(
     progress_sender: &Sender<ProgressMessage>,
@@ -749,18 +749,21 @@ fn copy_entry(
 /// checksums a destination file, copying over the data from the src file in the chunks
 /// where checksum fails
 ///
-/// @param src          Source file entry
+/// @param progress_sender  Channel to set progress to progress_worker
+/// 
+/// @param src              Source file entry
 ///
-/// @param dest         Dest file entry
+/// @param dest             Dest file entry
 ///
-/// @param src_context  the context of the source filesystem
+/// @param src_context      the context of the source filesystem
 ///
-/// @param dest_context the context of the destination filesystem
+/// @param dest_context     the context of the destination filesystem
 ///
-/// @return             the sync outcome File Updated or Up To Date,
-///                     otherwise an error occured
+/// @return                 the sync outcome Checksum Updated or Up To Date,
+///                         otherwise an error occured
 ///
 pub fn checksum_copy(
+    progress_sender: &Sender<ProgressMessage>,
     src: &Entry,
     dest: &Entry,
     src_context: &mut NetworkContext,
@@ -768,10 +771,13 @@ pub fn checksum_copy(
 ) -> ForkliftResult<SyncOutcome> {
     let (src_path, dest_path) = (src.path(), dest.path());
     //check if src exists (which it should...)
-    if src.metadata().is_none() {
-        let err = format!("Source file {:?} should exist", src_path);
-        error!("{}", err);
-        return Err(ForkliftError::FSError(err));
+    let src_meta = match src.metadata() {
+        None => {
+            let err = format!("Source file {:?} should exist!", src_path);
+            error!("{}", err);
+            return Err(ForkliftError::FSError(err));
+        }
+        Some(m) => m,
     };
     // open src and dest files
     let err = format!("Could not open {:?} for reading", dest_path);
@@ -813,18 +819,27 @@ pub fn checksum_copy(
         if src_buf.is_empty() {
             end = true;
         }
+        //send progress
+        let progress = ProgressMessage::CheckSyncing{
+            description: src.path().to_string_lossy().into_owned(),
+            size : src_meta.size() as usize,
+            done : offset as usize,
+            check_sum: hash_src.as_slice().to_vec(),
+        };
+         if progress_sender.send(progress).is_err() {
+            error!("Unable to send progress");
+        }
     }
-    meowhash.input(&file_buf);
+    meowhash.input(&file_buf); 
     // NOTE: send this value for final check
-    let _whole_checksum = meowhash.result();
+    let whole_checksum = meowhash.result();
+    let whole_checksum = whole_checksum.as_slice().to_vec();
     if counter == 0 {
         return Ok(SyncOutcome::UpToDate);
     }
-    Ok(SyncOutcome::ChecksumUpdated)
+    Ok(SyncOutcome::ChecksumUpdated(whole_checksum))
 }
 
-///don't forget to add a progress sender at some point......
-///Also update the function once you add progress sending...
 ///
 /// syncs the src and dest files.  It also sends the current progress
 /// of the rsync of the entry.
@@ -846,6 +861,10 @@ pub fn sync_entry(
     src_context: &mut NetworkContext,
     dest_context: &mut NetworkContext,
 ) -> ForkliftResult<SyncOutcome> {
+    let description = src.path().to_string_lossy().into_owned();
+    if progress_sender.send(ProgressMessage::StartSync{description}).is_err() {
+            error!("Unable to send progress");
+        }
     match src.is_link() {
         Some(true) => {
             trace!("Is link!");
@@ -878,7 +897,7 @@ pub fn sync_entry(
                 copy_entry(progress_sender, src, dest, src_context, dest_context)
             } else {
                 debug!("not diff {} {}", size_dif, recent);
-                checksum_copy(src, dest, src_context, dest_context)
+                checksum_copy(progress_sender, src, dest, src_context, dest_context)
             }
         }
         (Err(e), _) => Err(e),

@@ -20,6 +20,7 @@ impl ProgressWorker {
         }
     }
 
+    //NOte: Figure out a way to send off postgres in this function
     pub fn start(&self) -> SyncStats {
         let mut stats = SyncStats::new();
         let mut file_done = 0;
@@ -49,6 +50,28 @@ impl ProgressWorker {
                 ProgressMessage::Syncing { done, size, .. } => {
                     file_done += done;
                     total_done += done;
+                    let elapsed = now.elapsed().as_secs() as usize;
+                    let eta;
+                    if total_done == 0 || ((elapsed * stats.tot_size) / total_done) < elapsed {
+                        eta = elapsed;
+                    } else {
+                        eta = ((elapsed * stats.tot_size) / total_done) - elapsed;
+                    }
+                    let detailed_progress = Progress {
+                        current_file: current_file.clone(),
+                        file_done,
+                        file_size: size,
+                        total_done,
+                        total_size: stats.tot_size,
+                        index,
+                        num_files: stats.tot_files as usize,
+                        eta,
+                    };
+                    self.progress_info.progress(&detailed_progress);
+                }
+                ProgressMessage::CheckSyncing{ done, size, check_sum, ..} => {
+                    file_done = done;
+                    total_done = done;
                     let elapsed = now.elapsed().as_secs() as usize;
                     let eta;
                     if total_done == 0 || ((elapsed * stats.tot_size) / total_done) < elapsed {

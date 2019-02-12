@@ -8,7 +8,7 @@ struct TransferProgress{
     source_node_id: SourceNodes,
     timestamp: DateTime<Utc>,
     file_path: PathBuf,
-    checksum: 
+    checksum: Vec<u8>,
 }
 
 
