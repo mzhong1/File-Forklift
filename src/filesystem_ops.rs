@@ -357,9 +357,9 @@ pub fn has_different_size(src: &Entry, dest: &Entry) -> ForkliftResult<bool> {
 ///
 pub fn is_more_recent(src: &Entry, dest: &Entry) -> ForkliftResult<bool> {
     match (src.metadata(), dest.metadata()) {
-        (Some(src_stat), Some(dest_stat)) => Ok(src_stat.mtime().num_microseconds()
-            > dest_stat.mtime().num_microseconds()
-            && src_stat.mtime().num_seconds() > dest_stat.mtime().num_seconds()),
+        (Some(src_stat), Some(dest_stat)) => {
+            Ok(src_stat.mtime().num_seconds() > dest_stat.mtime().num_seconds())
+        }
         (None, _) => {
             let err = format!("Source File {:?} does not exist", src.path());
             error!("{}", err);
@@ -742,6 +742,7 @@ fn copy_entry(
             error!("Unable to send progress");
         }
     }
+
     Ok(SyncOutcome::FileCopied)
 }
 
@@ -897,7 +898,7 @@ pub fn sync_entry(
     //check if size different or if src more recent than dest
     match (has_different_size(src, dest), is_more_recent(src, dest)) {
         (Ok(size_dif), Ok(recent)) => {
-            if size_dif || recent {
+            if size_dif {
                 debug!("Is different!!! size {}  recent {}", size_dif, recent);
                 copy_entry(progress_sender, src, dest, src_context, dest_context)
             } else {
