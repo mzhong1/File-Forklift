@@ -133,8 +133,8 @@ impl WalkWorker {
                         self.process_file(&newpath, &mut src_context, &self.nodes.clone())?;
                     if let Some(meta) = meta {
                         debug!("Sent: {:?}", &file_path);
-                        num_files += 1;
-                        total_size += meta.size() as usize;
+                        num_files = 1;
+                        total_size = meta.size() as usize;
                         //why is this not a forkliftResult? because threading sucks
                         if let Err(e) = self.progress_output.send(ProgressMessage::Todo {
                             num_files,
@@ -200,8 +200,8 @@ impl WalkWorker {
                 //file exists?
                 let meta = self.process_file(&newpath, src_context, &self.nodes.clone())?;
                 if let Some(meta) = meta {
-                    *num_files += 1;
-                    *total_size += meta.size() as u64;
+                    *num_files = 1;
+                    *total_size = meta.size() as u64;
                     match self.progress_output.send(ProgressMessage::Todo {
                         num_files: *num_files,
                         total_size: *total_size as usize,

@@ -80,7 +80,7 @@ impl SyncStats {
 }
 
 pub struct Rsyncer {
-    /// share protocol to use
+    /// share protocol to usize
     filesystem_type: FileSystemType,
     /// console ouput functions
     progress_info: Box<ProgressInfo + Send + Sync>,
@@ -132,13 +132,6 @@ impl Rsyncer {
         let mut send_handles: Vec<Sender<Option<Entry>>> = Vec::new();
 
         let mut syncers: Vec<RsyncWorker> = Vec::new();
-        //NOTE: Move this to main -> if source_path/dest_path == "", then replace as such
-        let p = format!("smb://{}{}", src_ip, src_share);
-        let d = format!("smb://{}{}", dest_ip, dest_share);
-        let (src_path, dest_path) = match self.filesystem_type {
-            FileSystemType::Samba => (Path::new(&p), Path::new(&d)),
-            FileSystemType::Nfs => (Path::new("/"), Path::new("/")),
-        };
 
         let (send_prog, rec_prog) = channel::unbounded::<ProgressMessage>();
         for _ in 0..num_threads {
@@ -203,7 +196,8 @@ impl Rsyncer {
             walk_worker.s_walk(self.source.as_path(), &mut fs, &mut destfs)?;
             walk_worker.stop()?;
         }
-
+        let src_path = self.source.as_path();
+        let dest_path = self.destination.as_path();
         pool.install(|| {
             if num_threads > 1 {
                 match walk_worker.t_walk(dest_path, src_path, &mut contexts, &pool) {

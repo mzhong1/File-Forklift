@@ -67,38 +67,30 @@ impl Input {
         if i.dest_share.is_empty() {
             panic!("Error! destination share not given!");
         }
-        //check if shares starts with '/', add if no
+        //check if shares starts with '/', exit if not
         if !i.src_share.starts_with('/') {
-            debug!("Source share does not start with '/', adding '/'");
-            i.src_share = format!("/{}", i.src_share);
+            panic!("Source share does not start with '/'");
         }
         if !i.dest_share.starts_with('/') {
-            debug!("Destination share does not start with '/', adding '/'");
-            i.dest_share = format!("/{}", i.dest_share);
+            panic!("Destination share does not start with '/'");
         }
         match i.system {
             FileSystemType::Nfs => {
-                // if the input is empty, default to '/'
+                // if the input is empty, exit
                 if i.src_path.to_string_lossy().is_empty() {
-                    debug!("Empty source path, defaulting to /");
-                    i.src_path = PathBuf::from("/")
+                    panic!("Empty source path!");
                 }
                 if i.dest_path.to_string_lossy().is_empty() {
-                    debug!("Empty destination path, defaulting to /");
-                    i.dest_path = PathBuf::from("/")
+                    panic!("Empty destination path!");
                 }
             }
             FileSystemType::Samba => {
-                // if the input is not an smburl, default to 'smb://server/share'
+                // if the input is not an smburl, 'smb://server/share', exit
                 if !is_smb_path(&i.src_path) {
-                    error!("Improperly formatted source path, defaulting to smb://server/share");
-                    i.src_path = PathBuf::from(format!("smb://{}{}", i.src_server, i.src_share));
+                    panic!("Improperly formatted source path, should be smb://server/share");
                 }
                 if !is_smb_path(&i.dest_path) {
-                    error!(
-                        "Improperly formatted destination path, defaulting to smb://server/share"
-                    );
-                    i.dest_path = PathBuf::from(format!("smb://{}{}", i.dest_server, i.dest_share));
+                    panic!("Improperly formatted destination path, should beto smb://server/share");
                 }
             }
         }

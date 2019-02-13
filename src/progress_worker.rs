@@ -34,8 +34,8 @@ impl ProgressWorker {
                     num_files,
                     total_size,
                 } => {
-                    stats.tot_files = num_files;
-                    stats.tot_size = total_size;
+                    stats.tot_files += num_files;
+                    stats.tot_size += total_size;
                 }
                 ProgressMessage::StartSync(x) => {
                     self.progress_info.new_file(&x);
