@@ -2,33 +2,17 @@ use colored::Colorize;
 use std::io;
 use std::io::Write;
 use term_size::*;
-use termcolor::{Buffer, BufferWriter, Color, ColorChoice, ColorSpec, WriteColor};
 
 use crate::progress_message::*;
 use crate::rsync::*;
-use log::*;
 
 /// Note: Credit to these functions goes to dmerejkowsky's rusync
 
-pub struct ConsoleProgressOutput {
-    writer: BufferWriter,
-    blue: ColorSpec,
-    whitebold: ColorSpec,
-    green: ColorSpec,
-}
+pub struct ConsoleProgressOutput {}
 
 impl ConsoleProgressOutput {
     pub fn new() -> ConsoleProgressOutput {
-        let (mut b, mut wb, mut g) = (ColorSpec::new(), ColorSpec::new(), ColorSpec::new());
-        b.set_fg(Some(Color::Blue));
-        wb.set_fg(Some(Color::White)).set_bold(true);
-        g.set_fg(Some(Color::Green));
-        ConsoleProgressOutput {
-            writer: BufferWriter::stdout(ColorChoice::Auto),
-            blue: b,
-            whitebold: wb,
-            green: g,
-        }
+        ConsoleProgressOutput {}
     }
 }
 
@@ -44,26 +28,11 @@ impl ProgressInfo for ConsoleProgressOutput {
             source.bold(),
             destination.bold()
         )
-        /*let mut buffer = self.writer.buffer();
-        handle_set_color(&mut buffer, &self.blue);
-        handle_write(&mut buffer, "::");
-        handle_reset_color(&mut buffer);
-        handle_write(&mut buffer, " Syncing from ");
-        handle_set_color(&mut buffer, &self.whitebold);
-        handle_write(&mut buffer, source);
-        handle_reset_color(&mut buffer);
-        handle_write(&mut buffer, " to ");
-        handle_set_color(&mut buffer, &self.whitebold);
-        handle_write(&mut buffer, destination);
-        handle_reset_color(&mut buffer);
-        handle_write(&mut buffer, " ...\n");
-        handle_print(&self.writer, &mut buffer);*/
     }
 
     fn new_file(&self, _name: &str) {}
 
     fn progress(&self, progress: &Progress) {
-        let mut buffer = self.writer.buffer();
         let eta_str = human_seconds(progress.eta);
         let percent_width = 3;
         let eta_width = eta_str.len();
@@ -83,20 +52,14 @@ impl ProgressInfo for ConsoleProgressOutput {
             filename = current_file
         );
         let file_percent = if progress.file_size == 0 {
-            1
+            100
         } else {
             ((progress.file_done * 100) as usize) / progress.file_size
         };
-        //let write_str = format!(
-        //    "{:>3}% {}/{} {} {:<}\r",
-        //    file_percent, index, num_files, current_file, eta_str
-        //);
         print!(
             "{:>3}% {}/{} {} {:<}\r",
             file_percent, index, num_files, current_file, eta_str
         );
-        //handle_write(&mut buffer, &write_str);
-        //handle_print(&self.writer, &mut buffer);
         let _ = io::stdout().flush();
     }
 
@@ -119,21 +82,6 @@ impl ProgressInfo for ConsoleProgressOutput {
             "{} permissions updated, {} checksum updated",
             stats.permissions_update, stats.checksum_updated
         );
-
-        /*let mut buffer = self.writer.buffer();
-        handle_set_color(&mut buffer, &self.green);
-        handle_write(&mut buffer, " ✓");
-        handle_reset_color(&mut buffer);
-        let write_str = format!(
-            " Synced {} files ({} up to date)\n",
-            stats.num_synced, stats.up_to_date
-        );
-        handle_write(&mut buffer, &write_str);
-        let write_str = format!(
-            "{} files copied, {} symlinks created, {} symlinks updated\n",
-            stats.copied, stats.symlink_created, stats.symlink_updated
-        );
-        handle_write(&mut buffer, &write_str);*/
     }
 }
 
@@ -156,28 +104,4 @@ fn human_seconds(s: usize) -> String {
     let minutes = (s / 60) % 60;
     let seconds = s % 60;
     return format!("{:02}:{:02}:{:02}", hours, minutes, seconds);
-}
-
-fn handle_set_color(buffer: &mut Buffer, color: &ColorSpec) {
-    if let Err(e) = buffer.set_color(color) {
-        error!("Error: {:?}, unable to set color", e);
-    }
-}
-
-fn handle_reset_color(buffer: &mut Buffer) {
-    if let Err(e) = buffer.reset() {
-        error!("Error: {:?}, unable to reset col", e);
-    }
-}
-
-fn handle_write(buffer: &mut Buffer, string: &str) {
-    if let Err(e) = write!(buffer, "{}", string) {
-        error!("Error {:?}: unable to write to console", e);
-    }
-}
-
-fn handle_print(writer: &BufferWriter, buffer: &mut Buffer) {
-    if let Err(e) = writer.print(&buffer) {
-        error!("Error {:?}: unable to print to console", e);
-    }
 }
