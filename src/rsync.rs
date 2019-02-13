@@ -80,7 +80,6 @@ impl SyncStats {
 }
 
 pub struct Rsyncer {
-    
     /// share protocol to use
     filesystem_type: FileSystemType,
     /// console ouput functions
@@ -112,7 +111,6 @@ impl Rsyncer {
         destination: PathBuf,
     ) -> Rsyncer {
         Rsyncer {
-            
             filesystem_type,
             progress_info,
             end_sync,
@@ -147,7 +145,12 @@ impl Rsyncer {
             let (send_e, rec_e) = channel::unbounded();
             send_handles.push(send_e);
             let sync_progress = send_prog.clone();
-            syncers.push(RsyncWorker::new(self.source.as_path(), self.destination.as_path(), rec_e, sync_progress));
+            syncers.push(RsyncWorker::new(
+                self.source.as_path(),
+                self.destination.as_path(),
+                rec_e,
+                sync_progress,
+            ));
         }
         let mut contexts: Vec<(NetworkContext, NetworkContext)> = Vec::new();
         let mut sync_contexts: Vec<(NetworkContext, NetworkContext)> = Vec::new();
@@ -178,7 +181,13 @@ impl Rsyncer {
             }
         }
 
-        let walk_worker = WalkWorker::new(self.source.as_path(), send_handles, send_prog, nodelist, my_node);
+        let walk_worker = WalkWorker::new(
+            self.source.as_path(),
+            send_handles,
+            send_prog,
+            nodelist,
+            my_node,
+        );
         let progress_worker = ProgressWorker::new(rec_prog, self.progress_info);
         rayon::spawn(move || {
             progress_worker.start();

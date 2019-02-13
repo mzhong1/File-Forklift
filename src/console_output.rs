@@ -82,7 +82,11 @@ impl ProgressInfo for ConsoleProgressOutput {
             pad = file_width as usize,
             filename = current_file
         );
-        let file_percent = if progress.file_size == 0 { 1 } else { ((progress.file_done * 100) as usize) / progress.file_size };
+        let file_percent = if progress.file_size == 0 {
+            1
+        } else {
+            ((progress.file_done * 100) as usize) / progress.file_size
+        };
         //let write_str = format!(
         //    "{:>3}% {}/{} {} {:<}\r",
         //    file_percent, index, num_files, current_file, eta_str

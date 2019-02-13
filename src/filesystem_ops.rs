@@ -750,7 +750,7 @@ fn copy_entry(
 /// where checksum fails
 ///
 /// @param progress_sender  Channel to set progress to progress_worker
-/// 
+///
 /// @param src              Source file entry
 ///
 /// @param dest             Dest file entry
@@ -820,17 +820,17 @@ pub fn checksum_copy(
             end = true;
         }
         //send progress
-        let progress = ProgressMessage::CheckSyncing{
+        let progress = ProgressMessage::CheckSyncing {
             description: src.path().to_string_lossy().into_owned(),
-            size : src_meta.size() as usize,
-            done : offset as usize,
+            size: src_meta.size() as usize,
+            done: offset as usize,
             check_sum: hash_src.as_slice().to_vec(),
         };
-         if progress_sender.send(progress).is_err() {
+        if progress_sender.send(progress).is_err() {
             error!("Unable to send progress");
         }
     }
-    meowhash.input(&file_buf); 
+    meowhash.input(&file_buf);
     // NOTE: send this value for final check
     let whole_checksum = meowhash.result();
     let whole_checksum = whole_checksum.as_slice().to_vec();
@@ -843,7 +843,7 @@ pub fn checksum_copy(
 ///
 /// syncs the src and dest files.  It also sends the current progress
 /// of the rsync of the entry.
-/// 
+///
 /// @param progress_sender  Channel to send progress to progress_worker
 ///
 /// @param src              Source file entry
@@ -864,9 +864,12 @@ pub fn sync_entry(
     dest_context: &mut NetworkContext,
 ) -> ForkliftResult<SyncOutcome> {
     let description = src.path().to_string_lossy().into_owned();
-    if progress_sender.send(ProgressMessage::StartSync(description)).is_err() {
-            error!("Unable to send progress");
-        }
+    if progress_sender
+        .send(ProgressMessage::StartSync(description))
+        .is_err()
+    {
+        error!("Unable to send progress");
+    }
     match src.is_link() {
         Some(true) => {
             trace!("Is link!");
@@ -1062,7 +1065,7 @@ fn map_temp_acl(dest_path: &Path, dest_ctx: &Smbc, sid: &str) -> ForkliftResult<
     set_xattr(dest_path, dest_ctx, &xattr_set, &val, &err, &suc)?;
 
     let dest_acls = get_acl_list(dest_path, dest_ctx, true)?;
-    let ret = match get_mapped_sid(dest_path, dest_ctx,&sid, &dest_acls, ) {
+    let ret = match get_mapped_sid(dest_path, dest_ctx, &sid, &dest_acls) {
         Ok(Some(dest_sid)) => dest_sid,
         Ok(None) => {
             let err = format!("Unsucessful in mapping sid {}", &sid);
@@ -1231,17 +1234,17 @@ fn copy_acl(
 ///
 /// map named acl Sids from a source file to their destinarion numeric Sids
 /// then replace the incorrect destination acls with the source acls
-/// 
+///
 /// @param dest_path        The destination filepath
-/// 
+///
 /// @param dest_ctx         Samba context of destination
-/// 
+///
 /// @param src_acls         numeric src acls for comparison
-/// 
+///
 /// @param src_acls_plus    named arc acls for mapping
-/// 
+///
 /// @param dest_acls        dest acls for mapping
-/// 
+///
 /// @return                 true if an acl was copied or all dest acls were exhausted
 ///
 pub fn map_names_and_copy(

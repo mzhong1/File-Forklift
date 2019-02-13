@@ -13,12 +13,12 @@ pub enum ProgressMessage {
         size: usize,
         done: usize,
     },
-    CheckSyncing{
+    CheckSyncing {
         description: String,
         size: usize,
         done: usize,
         check_sum: Vec<u8>,
-    }
+    },
 }
 
 pub struct Progress {

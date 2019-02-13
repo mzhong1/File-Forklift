@@ -74,7 +74,7 @@ fn parse_matches(matches: &clap::ArgMatches<'_>) -> Input {
         None => Path::new(""),
         Some(t) => Path::new(t),
     };
-    let input = match std::fs::read_to_string(path){
+    let input = match std::fs::read_to_string(path) {
         Ok(e) => e,
         Err(e) => {
             error!("{:?}, Unable to read file", e);
