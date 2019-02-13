@@ -131,7 +131,6 @@ impl WalkWorker {
                         self.process_file(&newpath, &mut src_context, &self.nodes.clone())?;
                     if let Some(meta) = meta {
                         debug!("Sent: {:?}", &file_path);
-                        //why is this not a forkliftResult? because threading sucks
                         if let Err(e) = self.progress_output.send(ProgressMessage::Todo {
                             num_files: 1,
                             total_size: meta.size() as usize,
