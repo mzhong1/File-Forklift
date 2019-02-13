@@ -13,7 +13,7 @@ use crossbeam::channel;
 use crossbeam::channel::Sender;
 use log::*;
 use rendezvous_hash::{DefaultNodeHasher, RendezvousNodes};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 #[derive(Default, Debug, Clone)]

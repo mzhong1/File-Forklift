@@ -108,8 +108,6 @@ impl WalkWorker {
                     ));
                 }
             };
-
-            let (mut num_files, mut total_size) = (0, 0);
             let (this, parent) = (Path::new("."), Path::new(".."));
             let check: bool;
             let mut check_paths: Vec<PathBuf> = vec![];
@@ -133,12 +131,10 @@ impl WalkWorker {
                         self.process_file(&newpath, &mut src_context, &self.nodes.clone())?;
                     if let Some(meta) = meta {
                         debug!("Sent: {:?}", &file_path);
-                        num_files = 1;
-                        total_size = meta.size() as usize;
                         //why is this not a forkliftResult? because threading sucks
                         if let Err(e) = self.progress_output.send(ProgressMessage::Todo {
-                            num_files,
-                            total_size: total_size as usize,
+                            num_files: 1,
+                            total_size: meta.size() as usize,
                         }) {
                             error!("Error {:?} unable to send progress", e);
                             return Err(ForkliftError::FSError(
