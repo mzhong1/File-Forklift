@@ -28,6 +28,7 @@ mod rsync;
 mod rsync_worker;
 mod socket_node;
 mod walk_worker;
+mod tables;
 
 use crate::cluster::Cluster;
 use crate::console_output::ConsoleProgressOutput;
