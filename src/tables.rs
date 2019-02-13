@@ -1,51 +1,59 @@
-use std::net::SocketAddr;
-use chrono::{DateTime, Utc};
-use error::ForkliftError;
-use std::path::PathBuf
-use postgres::Connection;
+use crate::error::ForkliftError;
+use chrono::NaiveDateTime;
+use postgres::*;
 use postgres_derive::*;
 
-#[derive(Debug, ToSql, FromSql)]
-struct TransferProgress{
-    entry_id: u64,
+#[derive(Debug, Clone, ToSql, FromSql)]
+struct TransferProgress {
+    entry_id: i64,
     source_node_id: SourceNodes,
-    timestamp: DateTime<Utc>,
-    file_path: PathBuf,
+    timestamp: NaiveDateTime,
+    file_path: String,
     checksum: Vec<u8>,
-    size: u64,
-    size_migrated: u64,
+    size: i64,
+    size_migrated: i64,
 }
 
-#[derive(Debug, ToSql, FromSql)]
-enum FailureID{
-    IoError = 0,
+#[derive(Debug, ToSql, FromSql, Clone)]
+enum FailureID {
+    IoError,
     SystemTimeError,
     NanomsgError,
     AddrParseError,
     SmbcError,
     FromUtf16Error,
     FromUtf8Error,
-    StringParseError
+    StringParseError,
     IpLocalError,
     InvalidConfigError,
     FSError,
     RecvError,
     SerdeJsonError,
 }
-#[derive(Debug, ToSql, FromSql)]
-struct NodeFailure{
+#[derive(Debug, Clone)]
+struct NodeFailure {
     failure_id: FailureID,
     reason: String,
     source_node_id: SourceNodes,
-    timestamp: DateTime<Utc>,
+    timestamp: NaiveDateTime,
 }
-#[derive(Debug, ToSql, FromSql)]
-struct SourceNodes{
-    souce_node_id: u64,
-    node_ip: SocketAddr,
+#[derive(Debug, Clone, ToSql, FromSql)]
+struct SourceNodes {
+    souce_node_id: i64,
+    node_address: String,
 }
 
-
-pub fn sendError(err: ForkliftError, reason: String, conn: Connection){
-
+pub fn init_connection(path: String) -> Connection {
+    let conn = Connection::connect(path, TlsMode::None).unwrap();
+    let state = "CREATE TABLE IF NOT EXISTS ErrorTypes (
+        failure_id FailureID UNIQUE PRIMARY KEY )";
+    conn.execute(state, &[]).unwrap();
+    conn.execute(
+        "INSERT INTO ErrorTypes (failure_id) VALUES ($1)",
+        &[&FailureID::IoError],
+    );
+    //let state = "INSERT INTO NodeFailures (failure_id) VALUES ($1)", FailureID::IoError;
+    conn
 }
+
+pub fn sendError(err: ForkliftError, reason: String, conn: Connection) {}

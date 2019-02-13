@@ -1,6 +1,5 @@
 use crate::filesystem::FileSystemType;
 
-use log::*;
 use serde_derive::*;
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -50,8 +49,9 @@ pub fn is_smb_path(path: &PathBuf) -> bool {
 }
 
 impl Input {
+    //NOTE, send invalid config error when panicking
     pub fn new(input: &str) -> Self {
-        let mut i: Input = match serde_json::from_str(input) {
+        let i: Input = match serde_json::from_str(input) {
             Ok(e) => e,
             Err(e) => panic!("Error {:?}, unable to parse config file!", e),
         };
