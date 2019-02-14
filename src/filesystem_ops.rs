@@ -552,8 +552,9 @@ pub fn copy_link(
                         return Err(ForkliftError::FSError(err));
                     }
                 }
+            } else {
+                return Ok(SyncOutcome::UpToDate);
             }
-            outcome = SyncOutcome::SymlinkUpdated
         }
         Some(false) => {
             //Not safe to delete
@@ -568,9 +569,9 @@ pub fn copy_link(
             outcome = SyncOutcome::SymlinkCreated;
         }
     }
-    //create new symlink, if creation fails, skip
+    //create update symlink, if creation fails, skip
     match dcontext.symlink(Path::new(&src_target), dest_path) {
-        Ok(_) => (),
+        Ok(_) => outcome = SyncOutcome::SymlinkUpdated,
         Err(e) => {
             let err = format!(
                 "Error {}, Could not create link from {:?} to {:?}",
@@ -675,78 +676,6 @@ fn write_file(path: &Path, file: &FileType, buffer: &[u8], offset: u64) -> Forkl
 }
 
 ///
-/// copy an entry from source to destination
-///
-/// @param progress_sender  Channel to send progress to progress_worker
-///
-/// @param src              Source file entry
-///
-/// @param dest             Dest file entry
-///
-/// @param src_context      the context of the source filesystem
-///
-/// @param dest_context     the context of the destination filesystem
-///
-/// @return                 the sync outcome File Copied or an error
-///
-fn copy_entry(
-    progress_sender: &Sender<ProgressMessage>,
-    src: &Entry,
-    dest: &Entry,
-    src_context: &mut NetworkContext,
-    dest_context: &mut NetworkContext,
-) -> ForkliftResult<SyncOutcome> {
-    //check if src exists (which it should...)
-    let (src_path, dest_path) = (src.path(), dest.path());
-    let src_meta = match src.metadata() {
-        None => {
-            let err = format!("Source file {:?} should exist!", src_path);
-            error!("{}", err);
-            return Err(ForkliftError::FSError(err));
-        }
-        Some(m) => m,
-    };
-    let err = format!("Could not open {:?} for reading", dest_path);
-    let src_file = open_file(src_path, src_context, OFlag::empty(), &err)?;
-    let flags = OFlag::O_CREAT;
-    let dest_file = match dest_context.create(
-        &dest_path,
-        flags,
-        Mode::S_IRWXU | Mode::S_IRWXO | Mode::S_IRWXG,
-    ) {
-        Ok(f) => f,
-        Err(e) => {
-            trace!("Error {:?}", e);
-            let err = format!("Could not open {:?} for writing", dest_path);
-            return Err(ForkliftError::FSError(err));
-        }
-    };
-
-    let mut offset = 0;
-    let mut end = false;
-    while { !end } {
-        let buffer = read_chunk(src_path, &src_file, offset)?;
-        let num_written = write_file(dest_path, &dest_file, &buffer, offset)?;
-        if num_written == 0 {
-            end = true;
-        }
-        offset += num_written as u64;
-        //SEND PROGRESS
-        let progress = ProgressMessage::Syncing {
-            description: src.path().to_string_lossy().to_string(),
-            size: src_meta.size() as usize,
-            done: num_written as usize,
-        };
-
-        if progress_sender.send(progress).is_err() {
-            error!("Unable to send progress");
-        }
-    }
-
-    Ok(SyncOutcome::FileCopied)
-}
-
-///
 /// checksums a destination file, copying over the data from the src file in the chunks
 /// where checksum fails
 ///
@@ -760,6 +689,8 @@ fn copy_entry(
 ///
 /// @param dest_context     the context of the destination filesystem
 ///
+/// @param is_copy          boolean to determine if file copy or checksum copy
+///
 /// @return                 the sync outcome Checksum Updated or Up To Date,
 ///                         otherwise an error occured
 ///
@@ -769,6 +700,7 @@ pub fn checksum_copy(
     dest: &Entry,
     src_context: &mut NetworkContext,
     dest_context: &mut NetworkContext,
+    is_copy: bool,
 ) -> ForkliftResult<SyncOutcome> {
     let (src_path, dest_path) = (src.path(), dest.path());
     //check if src exists (which it should...)
@@ -781,22 +713,40 @@ pub fn checksum_copy(
         Some(m) => m,
     };
     // open src and dest files
-    let err = format!("Could not open {:?} for reading", dest_path);
-    let src_file = open_file(src_path, src_context, OFlag::O_RDONLY, &err)?;
+    let err = format!("Could not open {:?} for reading", src_path);
+    let src_file = open_file(src_path, src_context, OFlag::empty(), &err)?;
     let flags = OFlag::O_CREAT;
-    let dest_file = open_file(dest_path, dest_context, flags, &err)?;
+    let dest_file;
+    if is_copy {
+        dest_file = match dest_context.create(
+            &dest_path,
+            flags,
+            Mode::S_IRWXU | Mode::S_IRWXO | Mode::S_IRWXG,
+        ) {
+            Ok(f) => f,
+            Err(e) => {
+                trace!("Error {:?}", e);
+                let err = format!("Error {:?} Could not open {:?} for writing", e, dest_path);
+                return Err(ForkliftError::FSError(err));
+            }
+        };
+    } else {
+        let err = format!("Could not open {:?} for writing", dest_path);
+        dest_file = open_file(dest_path, dest_context, flags, &err)?;
+    }
 
     //loop until end, count the number of times we needed to update the file
     let (mut offset, mut counter) = (0, 0);
     let mut meowhash = MeowHasher::new();
     let mut end = false;
-    let mut file_buf: Vec<u8> = vec![];
+    let mut src_file_buf: Vec<u8> = vec![];
+    let mut dest_file_buf: Vec<u8> = vec![];
     while { !end } {
         let mut num_written = 0;
         let mut src_buf = read_chunk(src_path, &src_file, offset)?;
         meowhash.input(&src_buf);
         let hash_src = meowhash.result_reset();
-        let dest_buf = read_chunk(dest_path, &dest_file, offset)?;
+        let mut dest_buf = read_chunk(dest_path, &dest_file, offset)?;
         meowhash.input(&dest_buf);
         let hash_dest = meowhash.result_reset();
 
@@ -807,14 +757,18 @@ pub fn checksum_copy(
             //write src_buf -> dest
             num_written = write_file(dest_path, &dest_file, &src_buf, offset)?;
             counter += 1;
+            dest_buf = read_chunk(dest_path, &dest_file, offset)?;
         }
-        //update offset, add bytes to file_buf and check if num_written > 0
+        //update offset, add bytes to file_bufs and check if num_written > 0
         if num_written > 0 {
             src_buf.truncate(num_written as usize);
-            file_buf.append(&mut src_buf);
+            src_file_buf.append(&mut src_buf);
+            dest_buf.truncate(num_written as usize);
+            dest_file_buf.append(&mut dest_buf);
             offset += num_written - 1;
         } else {
-            file_buf.append(&mut src_buf);
+            src_file_buf.append(&mut src_buf);
+            dest_file_buf.append(&mut dest_buf);
             offset += src_buf.len() as u64;
         }
         if src_buf.is_empty() {
@@ -831,14 +785,30 @@ pub fn checksum_copy(
             error!("Unable to send progress");
         }
     }
-    meowhash.input(&file_buf);
+    meowhash.input(&src_file_buf);
     // NOTE: send this value for final check
-    let whole_checksum = meowhash.result();
+    let whole_checksum = meowhash.result_reset();
+    meowhash.input(&dest_file_buf);
+    let test_checksum = meowhash.result();
+    if whole_checksum != test_checksum {
+        //error.......
+        let err = format!(
+            "File {:?} had checksum {:?} on source, but has checksum {:?} on destination.",
+            src.path(),
+            whole_checksum,
+            test_checksum
+        );
+        return Err(ForkliftError::ChecksumError(err));
+    }
     let whole_checksum = whole_checksum.as_slice().to_vec();
     if counter == 0 {
         return Ok(SyncOutcome::UpToDate);
     }
-    Ok(SyncOutcome::ChecksumUpdated(whole_checksum))
+    if is_copy {
+        Ok(SyncOutcome::FileCopied)
+    } else {
+        Ok(SyncOutcome::ChecksumUpdated(whole_checksum))
+    }
 }
 
 ///
@@ -896,18 +866,26 @@ pub fn sync_entry(
         }
     }
     //check if size different or if src more recent than dest
-    match (has_different_size(src, dest), is_more_recent(src, dest)) {
-        (Ok(size_dif), Ok(recent)) => {
+    match (
+        dest.metadata(),
+        has_different_size(src, dest),
+        is_more_recent(src, dest),
+    ) {
+        (None, _, _) => {
+            debug!("Destination does not exist yet!");
+            checksum_copy(progress_sender, src, dest, src_context, dest_context, true)
+        }
+        (Some(_), Ok(size_dif), Ok(recent)) => {
+            debug!("Is different!!! size {}  recent {}", size_dif, recent);
             if size_dif {
-                debug!("Is different!!! size {}  recent {}", size_dif, recent);
-                copy_entry(progress_sender, src, dest, src_context, dest_context)
+                checksum_copy(progress_sender, src, dest, src_context, dest_context, false)
+            //copy_entry(progress_sender, src, dest, src_context, dest_context)
             } else {
-                debug!("not diff {} {}", size_dif, recent);
-                checksum_copy(progress_sender, src, dest, src_context, dest_context)
+                checksum_copy(progress_sender, src, dest, src_context, dest_context, false)
             }
         }
-        (Err(e), _) => Err(e),
-        (_, Err(e)) => Err(e),
+        (_, Err(e), _) => Err(e),
+        (_, _, Err(e)) => Err(e),
     }
 }
 
