@@ -148,10 +148,10 @@ impl WalkWorker {
                             spawner.spawn(|_| {
                                 let mut contexts = loop_contexts;
                                 let newpath = newpath;
-                                if let Err(_e) =
+                                if let Err(e) =
                                     self.t_walk(&root_path, &newpath, &mut contexts, &pool)
                                 {
-                                    error!("Unable to recursively call");
+                                    error!("Error {:?}, Unable to recursively call", e);
                                 }
                             });
                         }

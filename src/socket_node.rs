@@ -4,6 +4,7 @@ use rendezvous_hash::Node as RNode;
 use rendezvous_hash::NodeHasher;
 use std::cmp::Ordering;
 use std::hash::{Hash, Hasher};
+use std::net::IpAddr;
 use std::net::SocketAddr;
 
 #[derive(Debug, Clone, Eq)]
@@ -13,6 +14,12 @@ pub struct SocketNode {
 impl SocketNode {
     pub fn new(s: SocketAddr) -> Self {
         SocketNode { id: s }
+    }
+    pub fn get_ip(&self) -> IpAddr {
+        self.id.ip()
+    }
+    pub fn get_port(&self) -> u16 {
+        self.id.port()
     }
 }
 

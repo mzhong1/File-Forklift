@@ -31,6 +31,7 @@ pub enum ForkliftError {
     FSError(String),
     RecvError(RecvError),
     SerdeJsonError(SerdeJsonError),
+    ChecksumError(String),
 }
 
 impl fmt::Display for ForkliftError {
@@ -39,6 +40,7 @@ impl fmt::Display for ForkliftError {
             ForkliftError::InvalidConfigError => f.write_str("InvalidConfigError"),
             ForkliftError::IpLocalError => f.write_str("IpLocalError"),
             ForkliftError::FSError(_) => f.write_str("FileSystemError"),
+            ForkliftError::ChecksumError(_) => f.write_str("ChecksumError"),
             _ => f.write_str(self.description()),
         }
     }
@@ -62,6 +64,7 @@ impl err for ForkliftError {
             ForkliftError::FSError(ref d) => &d,
             ForkliftError::RecvError(ref e) => e.description(),
             ForkliftError::SerdeJsonError(ref e) => e.description(),
+            ForkliftError::ChecksumError(ref d) => &d,
         }
     }
 
@@ -82,6 +85,7 @@ impl err for ForkliftError {
             ForkliftError::FSError(ref _d) => None,
             ForkliftError::RecvError(ref e) => e.cause(),
             ForkliftError::SerdeJsonError(ref e) => e.cause(),
+            ForkliftError::ChecksumError(ref _d) => None,
         }
     }
 }

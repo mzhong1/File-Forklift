@@ -25,6 +25,8 @@ pub struct Input {
     /// Samba smb url to root or subdirectory (if Glusterfs, MUST be subdirectory)
     /// Input "" if using 'default' path
     pub dest_path: PathBuf,
+    /// format is probably postgresql://postgres@ip:port
+    pub database_url: String,
 }
 
 /// NOTE: the smburl format is smb://server/share.  Other
