@@ -1,5 +1,6 @@
 use crossbeam::channel::RecvError;
 use nanomsg::Error as NanomsgError;
+use postgres::Error as PostgresError;
 use serde_json::Error as SerdeJsonError;
 use smbc::Error as SmbcError;
 use std::error::Error as err;
@@ -32,6 +33,7 @@ pub enum ForkliftError {
     RecvError(RecvError),
     SerdeJsonError(SerdeJsonError),
     ChecksumError(String),
+    PostgresError(PostgresError),
 }
 
 impl fmt::Display for ForkliftError {
@@ -65,6 +67,7 @@ impl err for ForkliftError {
             ForkliftError::RecvError(ref e) => e.description(),
             ForkliftError::SerdeJsonError(ref e) => e.description(),
             ForkliftError::ChecksumError(ref d) => &d,
+            ForkliftError::PostgresError(ref e) => e.description(),
         }
     }
 
@@ -86,6 +89,7 @@ impl err for ForkliftError {
             ForkliftError::RecvError(ref e) => e.cause(),
             ForkliftError::SerdeJsonError(ref e) => e.cause(),
             ForkliftError::ChecksumError(ref _d) => None,
+            ForkliftError::PostgresError(ref e) => e.cause(),
         }
     }
 }
@@ -147,5 +151,11 @@ impl From<RecvError> for ForkliftError {
 impl From<SerdeJsonError> for ForkliftError {
     fn from(err: SerdeJsonError) -> ForkliftError {
         ForkliftError::SerdeJsonError(err)
+    }
+}
+
+impl From<PostgresError> for ForkliftError {
+    fn from(err: PostgresError) -> ForkliftError {
+        ForkliftError::PostgresError(err)
     }
 }
