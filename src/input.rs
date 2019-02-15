@@ -26,7 +26,7 @@ pub struct Input {
     /// Input "" if using 'default' path
     pub dest_path: PathBuf,
     /// format is probably postgresql://postgres@ip:port
-    pub database_url: String,
+    pub database_url: Option<String>,
 }
 
 /// NOTE: the smburl format is smb://server/share.  Other
