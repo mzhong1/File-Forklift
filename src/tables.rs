@@ -2,10 +2,12 @@ use crate::error::*;
 use crate::rsync::SyncStats;
 use crate::socket_node::*;
 
-use chrono::NaiveDateTime;
+use chrono::{NaiveDateTime, Utc};
 use lazy_static::*;
+use log::*;
 use postgres::*;
 use postgres_derive::*;
+
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::Mutex;
 
@@ -49,24 +51,55 @@ pub enum ErrorType {
     SerdeJsonError,
     #[postgres(name = "ChecksumError")]
     ChecksumError,
+    CrossbeamChannelError,
+    PostgresError,
 }
 #[derive(Debug, Clone)]
 pub struct ErrorLog {
-    node_id: Nodes,
     failure_id: ErrorType,
     reason: String,
     timestamp: NaiveDateTime,
 }
 
+pub fn current_time() -> NaiveDateTime {
+    let now = Utc::now();
+    NaiveDateTime::from_timestamp(now.timestamp(), now.timestamp_subsec_nanos())
+}
+
 impl ErrorLog {
-    pub fn new(
-        node_id: Nodes,
-        failure_id: ErrorType,
-        reason: String,
-        timestamp: NaiveDateTime,
-    ) -> Self {
+    pub fn new(failure_id: ErrorType, reason: String, timestamp: NaiveDateTime) -> Self {
         ErrorLog {
-            node_id,
+            failure_id,
+            reason,
+            timestamp,
+        }
+    }
+    pub fn from_err(err: &ForkliftError, timestamp: NaiveDateTime) -> Self {
+        let failure_id = match err {
+            ForkliftError::AddrParseError(_) => ErrorType::AddrParseError,
+            ForkliftError::ChecksumError(_) => ErrorType::ChecksumError,
+            ForkliftError::ConvertStringError(ConvertStringError::FromUtf16Error(_)) => {
+                ErrorType::FromUtf16Error
+            }
+            ForkliftError::ConvertStringError(ConvertStringError::FromUtf8Error(_)) => {
+                ErrorType::FromUtf8Error
+            }
+            ForkliftError::ConvertStringError(ConvertStringError::StringParseError(_)) => {
+                ErrorType::StringParseError
+            }
+            ForkliftError::FSError(_) => ErrorType::FSError,
+            ForkliftError::InvalidConfigError(_) => ErrorType::InvalidConfigError,
+            ForkliftError::IoError(_) => ErrorType::IoError,
+            ForkliftError::IpLocalError(_) => ErrorType::IpLocalError,
+            ForkliftError::NanomsgError(_) => ErrorType::NanomsgError,
+            ForkliftError::PostgresError(_) => ErrorType::PostgresError,
+            ForkliftError::RecvError(_) => ErrorType::RecvError,
+            ForkliftError::SerdeJsonError(_) => ErrorType::SerdeJsonError,
+            ForkliftError::SmbcError(_) => ErrorType::SmbcError,
+            ForkliftError::SystemTimeError(_) => ErrorType::SystemTimeError,
+        };
+        let reason = format!("{:?}", err);
+        ErrorLog {
             failure_id,
             reason,
             timestamp,
@@ -173,7 +206,7 @@ impl Files {
 }
 
 // create ErrorTypes Table
-pub fn init_errortypes(conn: &Connection) {
+pub fn init_errortypes(conn: &Connection) -> ForkliftResult<()> {
     conn.execute(
         "DO $$
         BEGIN
@@ -192,17 +225,18 @@ pub fn init_errortypes(conn: &Connection) {
             'FSError',
             'RecvError', 
             'SerdeJsonError',
-            'ChecksumError');
+            'ChecksumError',
+            'CrossbeamChannelError',
+            'PostgresError');
             END IF;
         END
         $$",
         &[],
-    )
-    .unwrap();
+    )?;
+    Ok(())
 }
 
-pub fn init_nodetable(conn: &Connection) {
-    //let updates = vec![UpdateType::NodeAdded, UpdateType::NodeDied];
+pub fn init_nodetable(conn: &Connection) -> ForkliftResult<()> {
     conn.execute(
         "DO $$
         BEGIN
@@ -215,8 +249,7 @@ pub fn init_nodetable(conn: &Connection) {
         END
         $$",
         &[],
-    )
-    .unwrap();
+    )?;
     let state = "CREATE TABLE IF NOT EXISTS Nodes (
         node_id BIGSERIAL UNIQUE,
         ip TEXT,
@@ -224,20 +257,22 @@ pub fn init_nodetable(conn: &Connection) {
         node_status \"NodeStatus\",
         last_updated TIMESTAMP,
         PRIMARY KEY (ip, port))";
-    conn.execute(state, &[]).unwrap();
+    conn.execute(state, &[])?;
+    Ok(())
 }
 
-pub fn init_errorlog(conn: &Connection) {
+pub fn init_errorlog(conn: &Connection) -> ForkliftResult<()> {
     let state = "CREATE TABLE IF NOT EXISTS ErrorLog (
         entry_num BIGSERIAL UNIQUE PRIMARY KEY,
         node_id BIGINT REFERENCES Nodes(node_id),
         failure_id \"ErrorType\",
         reason text,
         timestamp TIMESTAMP)";
-    conn.execute(state, &[]).unwrap();
+    conn.execute(state, &[])?;
+    Ok(())
 }
 
-pub fn init_files(conn: &Connection) {
+pub fn init_files(conn: &Connection) -> ForkliftResult<()> {
     let state = "CREATE TABLE IF NOT EXISTS Files (
         path text UNIQUE PRIMARY KEY,
         node_id BIGINT REFERENCES Nodes(node_id),
@@ -245,10 +280,11 @@ pub fn init_files(conn: &Connection) {
         dest_checksum BYTEA,
         size BIGINT,
         last_modified_time TIMESTAMP)";
-    conn.execute(state, &[]).unwrap();
+    conn.execute(state, &[])?;
+    Ok(())
 }
 
-pub fn init_totalsync(conn: &Connection) {
+pub fn init_totalsync(conn: &Connection) -> ForkliftResult<()> {
     let state = "CREATE TABLE IF NOT EXISTS TotalSync(
         node_id BIGINT UNIQUE PRIMARY KEY REFERENCES Nodes(node_id),
         total_files BIGINT,
@@ -264,23 +300,23 @@ pub fn init_totalsync(conn: &Connection) {
         directory_created BIGINT,
         directory_updated BIGINT,
         timestamp Timestamp)";
-    conn.execute(state, &[]).unwrap();
+    conn.execute(state, &[])?;
+    Ok(())
 }
 
-pub fn init_connection(path: String) -> Connection {
+pub fn init_connection(path: String) -> ForkliftResult<Connection> {
     let conn = Connection::connect(path, TlsMode::None).expect("Cannot connect to database");
-
-    init_errortypes(&conn);
-    println!("ErrorTypes Created!");
-    init_nodetable(&conn);
-    println!("Nodes Created!");
-    init_errorlog(&conn);
-    println!("ErrorLog Created!");
-    init_files(&conn);
-    println!("Files Created!");
-    init_totalsync(&conn);
-    println!("TotalSync Created!");
-    conn
+    init_errortypes(&conn)?;
+    debug!("ErrorTypes Created!");
+    init_nodetable(&conn)?;
+    debug!("Nodes Created!");
+    init_errorlog(&conn)?;
+    debug!("ErrorLog Created!");
+    init_files(&conn)?;
+    debug!("Files Created!");
+    init_totalsync(&conn)?;
+    debug!("TotalSync Created!");
+    Ok(conn)
 }
 
 pub fn set_current_node(node: &SocketNode) {
@@ -382,5 +418,20 @@ pub fn update_files(file: &Files, conn: &Connection) -> ForkliftResult<()> {
          &file.dest_checksum,
          &file.size,
          &file.last_modified_time])?;
+    Ok(())
+}
+
+pub fn post_err(
+    err_type: ErrorType,
+    reason: String,
+    conn: &Option<Connection>,
+) -> ForkliftResult<()> {
+    match conn {
+        Some(e) => {
+            let fail = ErrorLog::new(err_type, reason, current_time());
+            log_errorlog(&fail, &e)?;
+        }
+        None => (),
+    }
     Ok(())
 }

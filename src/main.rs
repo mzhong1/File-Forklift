@@ -3,6 +3,7 @@ use clap::{App, Arg};
 use crossbeam::channel;
 use log::*;
 use nanomsg::{Protocol, Socket};
+use postgres::*;
 use rendezvous_hash::{DefaultNodeHasher, RendezvousNodes};
 use simplelog::{CombinedLogger, Config, SharedLogger, TermLogger, WriteLogger};
 
@@ -37,6 +38,7 @@ use crate::input::*;
 use crate::node::*;
 use crate::rsync::*;
 use crate::socket_node::*;
+use crate::tables::*;
 
 #[test]
 fn test_init_router() {
@@ -237,15 +239,50 @@ fn main() -> ForkliftResult<()> {
         config file"
         );
     }
+
+    //get database url and check if we are logging anything to database
+    //SOME if yes, NONE if not logging to DB
+    let database = match input.database_url {
+        Some(e) => e,
+        None => String::new(),
+    };
+
+    let conn: Option<Connection>;
+    if !database.is_empty() {
+        //init databases;
+        conn = Some(init_connection(database)?);
+    } else {
+        conn = None;
+    }
+
     trace!("Attempting to get local ip address");
     let ip_address = match local_ip::get_ip() {
         Ok(Some(ip)) => ip.ip(),
         Ok(None) => {
             error!("No local ip! ABORT!");
+            match &conn {
+                Some(e) => {
+                    let fail = ErrorLog::new(
+                        ErrorType::IpLocalError,
+                        "No local ip found".to_string(),
+                        current_time(),
+                    );
+                    log_errorlog(&fail, &e)?;
+                }
+                None => (),
+            }
+
             panic!("No local ip! ABORT!")
         }
         Err(e) => {
             error!("Error: {}", e);
+            match &conn {
+                Some(c) => {
+                    let fail = ErrorLog::from_err(&e, current_time());
+                    log_errorlog(&fail, &c)?;
+                }
+                None => (),
+            }
             panic!("Error: {}", e)
         }
     };
@@ -255,20 +292,29 @@ fn main() -> ForkliftResult<()> {
         Some(a) => a,
         None => {
             error!("ip address {} not in the node_list ", ip_address);
+            match &conn {
+                Some(c) => {
+                    let fail = ErrorLog::new(
+                        ErrorType::IpLocalError,
+                        format!("ip address {} not in the node_list ", ip_address),
+                        current_time(),
+                    );
+                    log_errorlog(&fail, &c)?;
+                }
+                None => (),
+            }
             panic!("ip address {} not in the node_list ", ip_address)
         }
     };
     debug!("current full address: {:?}", full_address);
     let mine = SocketNode::new(full_address);
+    set_current_node(&mine);
     let mut joined = input.nodes.len() != 2;
     let console_info = ConsoleProgressOutput::new();
     let system = input.system;
     let (send_end, recv_end) = channel::unbounded::<EndState>();
     let (send_rend, recv_rend) = channel::unbounded::<EndState>();
     let send_nodes = RendezvousNodes::default();
-    //for node in nodes {
-    //    send_nodes.insert(SocketNode::new(node));
-    //}
     let active_nodes = Arc::new(Mutex::new(send_nodes));
 
     let syncer = Rsyncer::new(
@@ -280,14 +326,6 @@ fn main() -> ForkliftResult<()> {
         input.dest_path,
     );
 
-    /*let stats = syncer.sync(
-        (&input.src_server, &input.dest_server),
-        (&input.src_share, &input.dest_share),
-        (input.debug_level, input.num_threads),
-        (input.workgroup, username.to_string(), password.to_string()),
-        active_nodes.clone(),
-        mine,
-    );*/
     let (src_server, dest_server) = (input.src_server, input.dest_server);
     let (src_share, dest_share) = (input.src_share, input.dest_share);
     let (debug_level, num_threads) = (input.debug_level, input.num_threads);
@@ -306,6 +344,7 @@ fn main() -> ForkliftResult<()> {
                 Ok(_) => (),
                 Err(e) => {
                     error!("{:?}", e);
+
                     if send_end.send(EndState::EndProgram).is_err() {
                         error!("Channel to heartbeat is broken!");
                     }
@@ -318,35 +357,8 @@ fn main() -> ForkliftResult<()> {
         rayon::join(
             || heartbeat(node_names, &mut joined, full_address, send, &recv_end),
             || rendezvous(&mut active_nodes.clone(), &recv, &recv_rend),
-            /*|| {
-                syncer.sync(
-                    (&src_server, &dest_server),
-                    (&src_share, &dest_share),
-                    (debug_level, num_threads),
-                    (workgroup, username.to_string(), password.to_string()),
-                    active_nodes.clone(),
-                    mine,
-                )
-            },*/
         )
     });
-    /* || heartbeat(node_names, &mut joined, full_address, s, recv_end),
-        || {
-            rayon::join(
-                || rendezvous(&mut active_nodes.clone(), &r, &recv_rend),
-                || {
-                    syncer.sync(
-                        (&src_server, &dest_server),
-                        (&src_share, &dest_share),
-                        (debug_level, num_threads),
-                        (workgroup, username.to_string(), password.to_string()),
-                        active_nodes.clone(),
-                        mine,
-                    )
-                },
-            )
-        },
-    );*/
     Ok(())
 }
 
@@ -378,7 +390,6 @@ fn rendezvous(
                     }
                     ChangeType::RemNode => {
                         info!("Remove Node {:?} from active list!", c.socket_node);
-                        //let list = Arc::get_mut(active_nodes).unwrap();
                         list.remove(&c.socket_node);
                         info!(
                             "The current list is {:?}",

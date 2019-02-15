@@ -25,6 +25,7 @@ pub struct Input {
     /// Samba smb url to root or subdirectory (if Glusterfs, MUST be subdirectory)
     /// Input "" if using 'default' path
     pub dest_path: PathBuf,
+    /// URL of database to log errors to, or NULL if not logging to database
     /// format is probably postgresql://postgres@ip:port
     pub database_url: Option<String>,
 }

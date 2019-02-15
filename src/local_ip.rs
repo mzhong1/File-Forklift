@@ -57,7 +57,9 @@ pub fn get_ip() -> ForkliftResult<Option<SocketAddr>> {
             }
         }
     }
-    Err(ForkliftError::IpLocalError)
+    Err(ForkliftError::IpLocalError(
+        "Could not determine local ip address".to_string(),
+    ))
 }
 
 //get the ip in ipv6.
@@ -87,7 +89,9 @@ pub fn get_ipv6() -> ForkliftResult<Option<SocketAddr>> {
             }
         }
     }
-    Err(ForkliftError::IpLocalError)
+    Err(ForkliftError::IpLocalError(
+        "Could not determine local ip address".to_string(),
+    ))
 }
 
 #[test]
