@@ -34,6 +34,7 @@ pub enum ForkliftError {
     SerdeJsonError(SerdeJsonError),
     ChecksumError(String),
     PostgresError(PostgresError),
+    CrossbeamChannelError(String),
 }
 
 impl fmt::Display for ForkliftError {
@@ -43,6 +44,7 @@ impl fmt::Display for ForkliftError {
             ForkliftError::IpLocalError(_) => f.write_str("IpLocalError"),
             ForkliftError::FSError(_) => f.write_str("FileSystemError"),
             ForkliftError::ChecksumError(_) => f.write_str("ChecksumError"),
+            ForkliftError::CrossbeamChannelError(_) => f.write_str("CrossbeamChannelError"),
             _ => f.write_str(self.description()),
         }
     }
@@ -68,6 +70,7 @@ impl err for ForkliftError {
             ForkliftError::SerdeJsonError(ref e) => e.description(),
             ForkliftError::ChecksumError(ref d) => &d,
             ForkliftError::PostgresError(ref e) => e.description(),
+            ForkliftError::CrossbeamChannelError(ref d) => &d,
         }
     }
 
@@ -90,6 +93,7 @@ impl err for ForkliftError {
             ForkliftError::SerdeJsonError(ref e) => e.cause(),
             ForkliftError::ChecksumError(ref _d) => None,
             ForkliftError::PostgresError(ref e) => e.cause(),
+            ForkliftError::CrossbeamChannelError(ref _d) => None,
         }
     }
 }

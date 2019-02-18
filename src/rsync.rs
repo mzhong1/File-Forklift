@@ -230,13 +230,13 @@ impl Rsyncer {
         })?;
         if self.end_sync.send(EndState::EndProgram).is_err() {
             error!("Channel to heartbeat is broken!");
-            return Err(ForkliftError::FSError(
+            return Err(ForkliftError::CrossbeamChannelError(
                 "Channel to heartbeat is broken!".to_string(),
             ));
         }
         if self.end_rendezvous.send(EndState::EndProgram).is_err() {
             error!("Channel to rendezvous is broken!");
-            return Err(ForkliftError::FSError(
+            return Err(ForkliftError::CrossbeamChannelError(
                 "Channel to rendezvous is broken!".to_string(),
             ));
         }

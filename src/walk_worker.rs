@@ -47,7 +47,7 @@ impl WalkWorker {
             // Stop all the senders
             if s.send(None).is_err() {
                 error!("Unable to stop");
-                return Err(ForkliftError::FSError(
+                return Err(ForkliftError::CrossbeamChannelError(
                     "Error, channel disconnected, unable to stop rsync_worker".to_string(),
                 ));
             }
@@ -63,7 +63,9 @@ impl WalkWorker {
         let sender = match self.entry_outputs.get(0) {
             Some(s) => s,
             None => {
-                return Err(ForkliftError::FSError("Empty channel vector!".to_string()));
+                return Err(ForkliftError::CrossbeamChannelError(
+                    "Empty channel vector!".to_string(),
+                ));
             }
         };
         let mut min = sender.len();
@@ -77,12 +79,17 @@ impl WalkWorker {
         let sender = match self.entry_outputs.get(index) {
             Some(s) => s,
             None => {
-                return Err(ForkliftError::FSError("Empty channel vector!".to_string()));
+                return Err(ForkliftError::CrossbeamChannelError(
+                    "Empty channel vector in walk_worker!".to_string(),
+                ));
             }
         };
-        if let Err(_e) = sender.send(entry) {
+        if let Err(e) = sender.send(entry) {
             error!("Unable to send Entry");
-            return Err(ForkliftError::FSError("Unable to send entry".to_string()));
+            return Err(ForkliftError::CrossbeamChannelError(format!(
+                "Error {:?}, Unable to send entry to rsync_worker",
+                e
+            )));
         };
         Ok(())
     }
@@ -136,9 +143,10 @@ impl WalkWorker {
                             total_size: meta.size() as usize,
                         }) {
                             error!("Error {:?} unable to send progress", e);
-                            return Err(ForkliftError::FSError(
-                                "unable to send progress".to_string(),
-                            ));
+                            return Err(ForkliftError::CrossbeamChannelError(format!(
+                                "Error {:?}, unable to send progress",
+                                e
+                            )));
                         }
                     }
                     match entry.filetype() {
@@ -203,7 +211,7 @@ impl WalkWorker {
                     }) {
                         Ok(_) => {}
                         Err(e) => {
-                            return Err(ForkliftError::FSError(format!(
+                            return Err(ForkliftError::CrossbeamChannelError(format!(
                                 "Error: {:?}, unable to send progress",
                                 e
                             )));

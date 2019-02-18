@@ -98,6 +98,7 @@ impl ErrorLog {
             ForkliftError::SerdeJsonError(_) => ErrorType::SerdeJsonError,
             ForkliftError::SmbcError(_) => ErrorType::SmbcError,
             ForkliftError::SystemTimeError(_) => ErrorType::SystemTimeError,
+            ForkliftError::CrossbeamChannelError(_) => ErrorType::CrossbeamChannelError,
         };
         let reason = format!("{:?}", err);
         ErrorLog {

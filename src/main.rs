@@ -97,7 +97,7 @@ fn heartbeat(
     let mess = ChangeList::new(ChangeType::AddNode, SocketNode::new(full_address));
     if s.send(mess).is_err() {
         error!("Channel to Rendezvous is broken!");
-        return Err(ForkliftError::FSError(
+        return Err(ForkliftError::CrossbeamChannelError(
             "Channel to rendezvous is broken!".to_string(),
         ));
     }
@@ -106,7 +106,7 @@ fn heartbeat(
         Ok(t) => t,
         Err(e) => {
             error!("Error {:?}, Unable to connect router!", e);
-            panic!("Error {:?}, Unable to connect router!", e)
+            return Err(e);
         }
     }; //Make the node
     std::thread::sleep(std::time::Duration::from_millis(10));
@@ -380,21 +380,25 @@ fn rendezvous(
     conn: Arc<Mutex<Option<Connection>>>,
 ) -> ForkliftResult<()> {
     debug!("Started Rendezvous");
-    let datac = conn.lock().unwrap();
+    let datac = match conn.lock() {
+        Ok(e) => e,
+        Err(e) => {
+            error!("Error {:?}, Poisoned rendezvous database connection", e);
+            panic!("Poisoned rendezvous database connection");
+        }
+    };
     loop {
         if recv_end.try_recv().is_ok() {
             println!("Got exit");
             post_update_nodes(NodeStatus::NodeFinished, &datac)?;
-
             break;
         }
         let mut list = match active_nodes.lock() {
             Ok(l) => l,
             Err(e) => {
-                error!("Error, {:?}", e);
                 post_err(
                     ErrorType::PoisonedMutex,
-                    "Poisoned rendezvous mutex".to_string(),
+                    format!("Error {:?}, Poisoned rendezvous mutex", e),
                     &datac,
                 )?;
                 return Err(ForkliftError::FSError("Poisoned Rendezvous.".to_string()));

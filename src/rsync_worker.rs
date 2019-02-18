@@ -67,7 +67,7 @@ impl RsyncWorker {
             match self.output.send(progress) {
                 Ok(_) => {}
                 Err(e) => {
-                    return Err(ForkliftError::FSError(format!(
+                    return Err(ForkliftError::CrossbeamChannelError(format!(
                         "Error: {:?}, unable to send progress",
                         e
                     )));
