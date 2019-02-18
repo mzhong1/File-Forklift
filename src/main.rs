@@ -233,13 +233,6 @@ fn main() -> ForkliftResult<()> {
     let (send, recv) = channel::unbounded::<ChangeList>();
 
     let input = parse_matches(&matches);
-    if input.nodes.len() < 2 {
-        panic!(
-            "No input nodes!  Please have at least 2 node in the nodes section of your
-        config file"
-        );
-    }
-
     //get database url and check if we are logging anything to database
     //SOME if yes, NONE if not logging to DB
     let database = match input.database_url {
@@ -247,42 +240,43 @@ fn main() -> ForkliftResult<()> {
         None => String::new(),
     };
 
-    let conn: Option<Connection>;
-    if !database.is_empty() {
+    let (conn, heart_conn, rendezv_conn, sync_conn) = if !database.is_empty() {
         //init databases;
-        conn = Some(init_connection(database)?);
+        (
+            Some(init_connection(database.clone())?),
+            Some(get_connection(database.clone())?),
+            Some(get_connection(database.clone())?),
+            Some(get_connection(database)?),
+        )
     } else {
-        conn = None;
+        (None, None, None, None)
+    };
+
+    if input.nodes.len() < 2 {
+        post_err(
+            ErrorType::InvalidConfigError,
+            "Not enough input nodes.  Need at least 2".to_string(),
+            &conn,
+        )?;
+        panic!(
+            "No input nodes!  Please have at least 2 node in the nodes section of your
+        config file"
+        );
     }
 
     trace!("Attempting to get local ip address");
     let ip_address = match local_ip::get_ip() {
         Ok(Some(ip)) => ip.ip(),
         Ok(None) => {
-            error!("No local ip! ABORT!");
-            match &conn {
-                Some(e) => {
-                    let fail = ErrorLog::new(
-                        ErrorType::IpLocalError,
-                        "No local ip found".to_string(),
-                        current_time(),
-                    );
-                    log_errorlog(&fail, &e)?;
-                }
-                None => (),
-            }
-
+            post_err(
+                ErrorType::IpLocalError,
+                "No local ip found".to_string(),
+                &conn,
+            )?;
             panic!("No local ip! ABORT!")
         }
         Err(e) => {
-            error!("Error: {}", e);
-            match &conn {
-                Some(c) => {
-                    let fail = ErrorLog::from_err(&e, current_time());
-                    log_errorlog(&fail, &c)?;
-                }
-                None => (),
-            }
+            post_forklift_err(&e, &conn)?;
             panic!("Error: {}", e)
         }
     };
@@ -291,24 +285,17 @@ fn main() -> ForkliftResult<()> {
     let full_address = match node_names.get_full_address(&ip_address.to_string()) {
         Some(a) => a,
         None => {
-            error!("ip address {} not in the node_list ", ip_address);
-            match &conn {
-                Some(c) => {
-                    let fail = ErrorLog::new(
-                        ErrorType::IpLocalError,
-                        format!("ip address {} not in the node_list ", ip_address),
-                        current_time(),
-                    );
-                    log_errorlog(&fail, &c)?;
-                }
-                None => (),
-            }
+            post_err(
+                ErrorType::IpLocalError,
+                format!("Ip Address {} not in the node_list", ip_address),
+                &conn,
+            )?;
             panic!("ip address {} not in the node_list ", ip_address)
         }
     };
     debug!("current full address: {:?}", full_address);
     let mine = SocketNode::new(full_address);
-    set_current_node(&mine);
+    set_current_node(&mine)?;
     let mut joined = input.nodes.len() != 2;
     let console_info = ConsoleProgressOutput::new();
     let system = input.system;
@@ -330,6 +317,10 @@ fn main() -> ForkliftResult<()> {
     let (src_share, dest_share) = (input.src_share, input.dest_share);
     let (debug_level, num_threads) = (input.debug_level, input.num_threads);
     let workgroup = input.workgroup;
+    let wrap_conn = Arc::new(Mutex::new(conn));
+    let wrap_h_conn = Arc::new(Mutex::new(heart_conn));
+    let wrap_r_conn = Arc::new(Mutex::new(rendezv_conn));
+    let wrap_s_conn = Arc::new(Mutex::new(sync_conn));
     rayon::scope(|s| {
         s.spawn(|_| {
             println!("Started Sync");
@@ -343,20 +334,37 @@ fn main() -> ForkliftResult<()> {
             ) {
                 Ok(_) => (),
                 Err(e) => {
-                    error!("{:?}", e);
-
-                    if send_end.send(EndState::EndProgram).is_err() {
-                        error!("Channel to heartbeat is broken!");
+                    let conn = wrap_conn.lock().unwrap();
+                    if post_forklift_err(&e, &conn).is_err() {
+                        // Note, only Errors if there IS a database and query/execution fails
+                        panic!("Unable to send error {:?} to database", e);
                     }
-                    if send_rend.send(EndState::EndProgram).is_err() {
-                        error!("Channel to heartbeat is broken!");
+                    if send_end.send(EndState::EndProgram).is_err()
+                        && post_err(
+                            ErrorType::CrossbeamChannelError,
+                            "Channel to heartbeat is broken!".to_string(),
+                            &conn,
+                        )
+                        .is_err()
+                    {
+                        panic!("Unable to send heartbeat channel broken error to database");
+                    }
+                    if send_rend.send(EndState::EndProgram).is_err()
+                        && post_err(
+                            ErrorType::CrossbeamChannelError,
+                            "Channel to Rendezvous is broken!".to_string(),
+                            &conn,
+                        )
+                        .is_err()
+                    {
+                        panic!("Unable to send rendezvous channel broken error to database");
                     }
                 }
             }
         });
         rayon::join(
             || heartbeat(node_names, &mut joined, full_address, send, &recv_end),
-            || rendezvous(&mut active_nodes.clone(), &recv, &recv_rend),
+            || rendezvous(&mut active_nodes.clone(), &recv, &recv_rend, wrap_r_conn),
         )
     });
     Ok(())
@@ -369,20 +377,36 @@ fn rendezvous(
     active_nodes: &mut Arc<Mutex<RendezvousNodes<SocketNode, DefaultNodeHasher>>>,
     r: &crossbeam::Receiver<ChangeList>,
     recv_end: &crossbeam::Receiver<EndState>,
-) {
+    conn: Arc<Mutex<Option<Connection>>>,
+) -> ForkliftResult<()> {
     debug!("Started Rendezvous");
+    let datac = conn.lock().unwrap();
     loop {
         if recv_end.try_recv().is_ok() {
             println!("Got exit");
+            post_update_nodes(NodeStatus::NodeFinished, &datac)?;
+
             break;
         }
-        let mut list = active_nodes.lock().unwrap();
+        let mut list = match active_nodes.lock() {
+            Ok(l) => l,
+            Err(e) => {
+                error!("Error, {:?}", e);
+                post_err(
+                    ErrorType::PoisonedMutex,
+                    "Poisoned rendezvous mutex".to_string(),
+                    &datac,
+                )?;
+                return Err(ForkliftError::FSError("Poisoned Rendezvous.".to_string()));
+            }
+        };
         match r.try_recv() {
             Ok(c) => {
                 match c.change_type {
                     ChangeType::AddNode => {
                         info!("Add Node {:?} to active list!", c.socket_node);
                         list.insert(c.socket_node);
+                        post_update_nodes(NodeStatus::NodeAdded, &datac)?;
                         info!(
                             "The current list is {:?}",
                             list.calc_candidates(&1).collect::<Vec<_>>()
@@ -391,6 +415,7 @@ fn rendezvous(
                     ChangeType::RemNode => {
                         info!("Remove Node {:?} from active list!", c.socket_node);
                         list.remove(&c.socket_node);
+                        post_update_nodes(NodeStatus::NodeDied, &datac)?;
                         info!(
                             "The current list is {:?}",
                             list.calc_candidates(&1).collect::<Vec<_>>()
@@ -401,4 +426,5 @@ fn rendezvous(
             Err(_) => trace!("No Changes"),
         }
     }
+    Ok(())
 }

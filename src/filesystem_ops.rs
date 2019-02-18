@@ -53,8 +53,8 @@ pub enum SyncOutcome {
     DirectoryCreated,
     /// updated a directory internal bytes
     DirectoryUpdated,
-    /// updated a file internal bytes
-    ChecksumUpdated(Vec<u8>),
+    /// updated a file internal bytes, send src, dest checksum
+    ChecksumUpdated(Vec<u8>, Vec<u8>),
 }
 
 ///
@@ -453,15 +453,9 @@ fn make_target(size: i64, readmax: u64) -> ForkliftResult<Vec<u8>> {
     let mut src_target: Vec<u8>;
     if size <= readmax as i64 {
         if size > 0 {
-            src_target = Vec::with_capacity(size as usize);
-            unsafe {
-                src_target.set_len(size as usize);
-            }
+            src_target = vec![0; size as usize]
         } else {
-            src_target = Vec::with_capacity(readmax as usize);
-            unsafe {
-                src_target.set_len(readmax as usize);
-            }
+            src_target = vec![0; readmax as usize]
         }
     } else {
         return Err(ForkliftError::FSError("File Name too long".to_string()));
@@ -542,7 +536,9 @@ pub fn copy_link(
             dest_target.pop();
             if dest_target != src_target {
                 match dcontext.unlink(dest_path) {
-                    Ok(_) => (),
+                    Ok(_) => {
+                        outcome = SyncOutcome::SymlinkUpdated;
+                    }
                     Err(e) => {
                         let err = format!(
                             "Could not remove {:?} while updating link, {}",
@@ -571,7 +567,7 @@ pub fn copy_link(
     }
     //create update symlink, if creation fails, skip
     match dcontext.symlink(Path::new(&src_target), dest_path) {
-        Ok(_) => outcome = SyncOutcome::SymlinkUpdated,
+        Ok(_) => (),
         Err(e) => {
             let err = format!(
                 "Error {}, Could not create link from {:?} to {:?}",
@@ -779,7 +775,6 @@ pub fn checksum_copy(
             description: src.path().to_string_lossy().into_owned(),
             size: src_meta.size() as usize,
             done: offset as usize,
-            check_sum: hash_src.as_slice().to_vec(),
         };
         if progress_sender.send(progress).is_err() {
             error!("Unable to send progress");
@@ -801,13 +796,14 @@ pub fn checksum_copy(
         return Err(ForkliftError::ChecksumError(err));
     }
     let whole_checksum = whole_checksum.as_slice().to_vec();
+    let test_checksum = test_checksum.as_slice().to_vec();
     if counter == 0 {
         return Ok(SyncOutcome::UpToDate);
     }
     if is_copy {
         Ok(SyncOutcome::FileCopied)
     } else {
-        Ok(SyncOutcome::ChecksumUpdated(whole_checksum))
+        Ok(SyncOutcome::ChecksumUpdated(whole_checksum, test_checksum))
     }
 }
 
@@ -826,6 +822,11 @@ pub fn checksum_copy(
 /// @param dest_context     the context of the destination filesystem
 ///
 /// @return                 the outcome of the entry rsync (or a ForkliftError if it fails)
+///
+/// @note                   no destination => FileCopied, diff size => File Copied
+///                         diff srctime more recent => File Copied
+///                         Otherwise, checksum copy
+///                         
 ///
 pub fn sync_entry(
     progress_sender: &Sender<ProgressMessage>,
@@ -877,9 +878,8 @@ pub fn sync_entry(
         }
         (Some(_), Ok(size_dif), Ok(recent)) => {
             debug!("Is different!!! size {}  recent {}", size_dif, recent);
-            if size_dif {
-                checksum_copy(progress_sender, src, dest, src_context, dest_context, false)
-            //copy_entry(progress_sender, src, dest, src_context, dest_context)
+            if size_dif || recent {
+                checksum_copy(progress_sender, src, dest, src_context, dest_context, true)
             } else {
                 checksum_copy(progress_sender, src, dest, src_context, dest_context, false)
             }

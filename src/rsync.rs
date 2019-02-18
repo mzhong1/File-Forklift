@@ -72,7 +72,7 @@ impl SyncStats {
             SyncOutcome::SymlinkCreated => self.symlink_created += 1,
             SyncOutcome::SymlinkSkipped => self.symlink_skipped += 1,
             SyncOutcome::PermissionsUpdated => self.permissions_update += 1,
-            SyncOutcome::ChecksumUpdated(_) => self.checksum_updated += 1,
+            SyncOutcome::ChecksumUpdated(_, _) => self.checksum_updated += 1,
             SyncOutcome::DirectoryUpdated => self.directory_updated += 1,
             SyncOutcome::DirectoryCreated => self.directory_created += 1,
         }

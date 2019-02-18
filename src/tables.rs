@@ -53,6 +53,7 @@ pub enum ErrorType {
     ChecksumError,
     CrossbeamChannelError,
     PostgresError,
+    PoisonedMutex,
 }
 #[derive(Debug, Clone)]
 pub struct ErrorLog {
@@ -115,7 +116,7 @@ pub struct Nodes {
 }
 
 impl Nodes {
-    pub fn new(
+    pub fn new_all(
         node_ip: String,
         node_port: i32,
         node_status: NodeStatus,
@@ -127,6 +128,17 @@ impl Nodes {
             node_status,
             last_updated,
         }
+    }
+
+    pub fn new(node_status: NodeStatus) -> ForkliftResult<Self> {
+        let socket = get_current_node()?;
+        let last_updated = current_time();
+        Ok(Nodes::new_all(
+            socket.get_ip().to_string(),
+            i32::from(socket.get_port()),
+            node_status,
+            last_updated,
+        ))
     }
 }
 
@@ -227,7 +239,8 @@ pub fn init_errortypes(conn: &Connection) -> ForkliftResult<()> {
             'SerdeJsonError',
             'ChecksumError',
             'CrossbeamChannelError',
-            'PostgresError');
+            'PostgresError',
+            'PoisonedMutex');
             END IF;
         END
         $$",
@@ -319,14 +332,36 @@ pub fn init_connection(path: String) -> ForkliftResult<Connection> {
     Ok(conn)
 }
 
-pub fn set_current_node(node: &SocketNode) {
-    let mut n = CURRENT_SOCKET.lock().unwrap();
+pub fn get_connection(path: String) -> ForkliftResult<Connection> {
+    let conn = Connection::connect(path, TlsMode::None).expect("Cannot connect to database");
+    Ok(conn)
+}
+
+pub fn set_current_node(node: &SocketNode) -> ForkliftResult<()> {
+    let mut n = match CURRENT_SOCKET.lock() {
+        Ok(list) => list,
+        Err(e) => {
+            error!("Error {:?}", e);
+            return Err(ForkliftError::FSError(
+                "Poison Error! unable to set current node!".to_string(),
+            ));
+        }
+    };
     n.pop();
     n.push(node.clone());
+    Ok(())
 }
 
 pub fn get_current_node() -> ForkliftResult<SocketNode> {
-    let n = CURRENT_SOCKET.lock().unwrap();
+    let n = match CURRENT_SOCKET.lock() {
+        Ok(list) => list,
+        Err(e) => {
+            error!("Error: {:?}", e);
+            return Err(ForkliftError::FSError(
+                "Poison Error! Unable to get current node".to_string(),
+            ));
+        }
+    };
     match n.get(0) {
         Some(e) => Ok(e.clone()),
         None => Err(ForkliftError::FSError("Lazy_static is empty!".to_string())),
@@ -334,7 +369,21 @@ pub fn get_current_node() -> ForkliftResult<SocketNode> {
 }
 
 /// update Nodelist
-pub fn update_nodes(node: &Nodes, conn: &Connection) {
+/// If current node is Finished, then can only change if node becomes Active
+/// otherwise, store the most recent change message
+pub fn update_nodes(node: &Nodes, conn: &Connection) -> ForkliftResult<()> {
+    if let NodeStatus::NodeDied = node.node_status {
+        let mut status: NodeStatus = NodeStatus::NodeAdded;
+        for row in &conn.query(
+            "SELECT node_status FROM Nodes WHERE node.ip = $1 AND node.port = $2",
+            &[&node.node_ip, &node.node_port],
+        )? {
+            status = row.get(0);
+        }
+        if let NodeStatus::NodeFinished = status {
+            return Ok(());
+        }
+    }
     conn.execute(
         "INSERT INTO Nodes(ip, port, node_status, last_updated) VALUES($1, $2, $3, $4)
         ON CONFLICT (ip, port) DO UPDATE SET node_status = $3, last_updated = $4 WHERE nodes.ip = $1 AND nodes.port = $2",
@@ -344,30 +393,27 @@ pub fn update_nodes(node: &Nodes, conn: &Connection) {
             &node.node_status,
             &node.last_updated,
         ],
-    )
-    .unwrap();
+    )?;
+    Ok(())
 }
 
-pub fn get_node_id(node: &SocketNode, conn: &Connection) -> i64 {
+pub fn get_node_id(node: &SocketNode, conn: &Connection) -> ForkliftResult<i64> {
     let mut val = -1;
     let ip = node.get_ip().to_string();
-    let port = node.get_port() as i32;
-    for row in &conn
-        .query(
-            "SELECT node_id FROM Nodes WHERE nodes.ip = $1 AND nodes.port = $2",
-            &[&ip, &port],
-        )
-        .unwrap()
-    {
+    let port = i32::from(node.get_port());
+    for row in &conn.query(
+        "SELECT node_id FROM Nodes WHERE nodes.ip = $1 AND nodes.port = $2",
+        &[&ip, &port],
+    )? {
         val = row.get(0);
     }
-    val
+    Ok(val)
 }
 
 /// log Error Node failures (log pretty much all of them)
 pub fn log_errorlog(failure: &ErrorLog, conn: &Connection) -> ForkliftResult<()> {
     let socket = get_current_node()?;
-    let node_id = get_node_id(&socket, conn);
+    let node_id = get_node_id(&socket, conn)?;
     conn.execute(
         "INSERT INTO ErrorLog(node_id, failure_id, reason, timestamp) VALUES ($1, $2, $3, $4)",
         &[
@@ -383,7 +429,7 @@ pub fn log_errorlog(failure: &ErrorLog, conn: &Connection) -> ForkliftResult<()>
 /// update totalsync
 pub fn update_totalsync(stat: &TotalSync, conn: &Connection) -> ForkliftResult<()> {
     let socket = get_current_node()?;
-    let node_id = get_node_id(&socket, conn);
+    let node_id = get_node_id(&socket, conn)?;
     conn.execute(
         "INSERT INTO TotalSync(node_id, total_files, total_size, num_synced, up_to_date, copied, symlink_created, symlink_updated, symlink_skipped, permissions_updated, checksum_updated, directory_created, directory_updated) VALUES($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
         ON CONFLICT (node_id) DO UPDATE SET total_files = $2, total_size = $3, num_synced = $4, up_to_date = $5, copied = $6, symlink_created = $7, symlink_updated = $8, symlink_skipped = $9, permissions_updated = $10, checksum_updated = $11, directory_created = $12, directory_updated = $13 WHERE totalsync.node_id = $1",
@@ -409,7 +455,7 @@ pub fn update_totalsync(stat: &TotalSync, conn: &Connection) -> ForkliftResult<(
 /// update Files table
 pub fn update_files(file: &Files, conn: &Connection) -> ForkliftResult<()> {
     let socket = get_current_node()?;
-    let node_id = get_node_id(&socket, conn);
+    let node_id = get_node_id(&socket, conn)?;
     conn.execute("INSERT INTO Files(path, node_id, src_checksum, dest_checksum, size, last_modified_time) VALUES($1, $2, $3, $4, $5, $6)
         ON CONFLICT (path) DO UPDATE SET node_id = $2, src_checksum = $3, dest_checksum = $4, size = $5, last_modified_time = $6 WHERE files.path = $1",
          &[&file.path,
@@ -421,15 +467,39 @@ pub fn update_files(file: &Files, conn: &Connection) -> ForkliftResult<()> {
     Ok(())
 }
 
+pub fn post_update_nodes(status: NodeStatus, conn: &Option<Connection>) -> ForkliftResult<()> {
+    match conn {
+        Some(e) => {
+            let node = Nodes::new(status)?;
+            update_nodes(&node, &e)?;
+        }
+        None => (),
+    }
+    Ok(())
+}
+
 pub fn post_err(
     err_type: ErrorType,
     reason: String,
     conn: &Option<Connection>,
 ) -> ForkliftResult<()> {
+    error!("{}", reason);
     match conn {
         Some(e) => {
             let fail = ErrorLog::new(err_type, reason, current_time());
             log_errorlog(&fail, &e)?;
+        }
+        None => (),
+    }
+    Ok(())
+}
+
+pub fn post_forklift_err(e: &ForkliftError, conn: &Option<Connection>) -> ForkliftResult<()> {
+    error!("{:?}", e);
+    match &conn {
+        Some(c) => {
+            let fail = ErrorLog::from_err(e, current_time());
+            log_errorlog(&fail, &c)?;
         }
         None => (),
     }

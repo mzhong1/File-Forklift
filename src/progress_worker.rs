@@ -47,34 +47,7 @@ impl ProgressWorker {
                     stats.add_outcome(&x);
                     file_done = 0;
                 }
-                ProgressMessage::Syncing { done, size, .. } => {
-                    file_done += done;
-                    total_done += done;
-                    let elapsed = now.elapsed().as_secs() as usize;
-                    let eta =
-                        if total_done == 0 || ((elapsed * stats.tot_size) / total_done) < elapsed {
-                            elapsed
-                        } else {
-                            ((elapsed * stats.tot_size) / total_done) - elapsed
-                        };
-                    let detailed_progress = Progress {
-                        current_file: current_file.clone(),
-                        file_done,
-                        file_size: size,
-                        total_done,
-                        total_size: stats.tot_size,
-                        index,
-                        num_files: stats.tot_files as usize,
-                        eta,
-                    };
-                    self.progress_info.progress(&detailed_progress);
-                }
-                ProgressMessage::CheckSyncing {
-                    done,
-                    size,
-                    check_sum,
-                    ..
-                } => {
+                ProgressMessage::CheckSyncing { done, size, .. } => {
                     file_done = done;
                     total_done = done;
                     let elapsed = now.elapsed().as_secs() as usize;
