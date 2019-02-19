@@ -1,10 +1,9 @@
-use crossbeam::channel::Receiver;
-use postgres::Connection;
-use std::sync::{Arc, Mutex};
+use crossbeam::channel::{Receiver, Sender};
 use std::time::Instant;
 
 use crate::error::ForkliftResult;
 use crate::filesystem_ops::SyncOutcome;
+use crate::postgres_logger::{send_mess, LogMessage};
 use crate::progress_message::*;
 use crate::rsync::SyncStats;
 use crate::tables::*;
@@ -29,8 +28,7 @@ impl ProgressWorker {
     }
 
     //NOte: Figure out a way to send off postgres in this function
-    pub fn start(&self, conn: &Arc<Mutex<Option<Connection>>>) -> ForkliftResult<SyncStats> {
-        let conn = conn.lock().unwrap();
+    pub fn start(&self, send_log: &Sender<LogMessage>) -> ForkliftResult<SyncStats> {
         let mut stats = SyncStats::new();
         let mut file_done = 0;
         let mut current_file = "".to_string();
@@ -62,7 +60,7 @@ impl ProgressWorker {
                                 size,
                                 update,
                             );
-                            post_update_files(file, &conn)?;
+                            send_mess(LogMessage::File(file), send_log)?;
                         }
                         SyncOutcome::ChecksumUpdated(path, src_check, dest_check, size, update) => {
                             let file = Files::new(
@@ -72,7 +70,7 @@ impl ProgressWorker {
                                 size,
                                 update,
                             );
-                            post_update_files(file, &conn)?;
+                            send_mess(LogMessage::File(file), send_log)?;
                         }
                         _ => {}
                     }
@@ -80,7 +78,7 @@ impl ProgressWorker {
                     file_done = 0;
                 }
                 ProgressMessage::SendError(error) => {
-                    post_forklift_err(&error, &conn)?;
+                    send_mess(LogMessage::Error(error), send_log)?;
                 }
                 ProgressMessage::CheckSyncing { done, size, .. } => {
                     file_done = done;
@@ -105,7 +103,7 @@ impl ProgressWorker {
                     self.progress_info.progress(&detailed_progress);
                 }
             }
-            post_update_totalsync(stats.clone(), &conn)?;
+            send_mess(LogMessage::TotalSync(stats.clone()), send_log)?;
         }
         self.progress_info.end(&stats);
         Ok(stats)

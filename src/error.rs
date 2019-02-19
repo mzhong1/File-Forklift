@@ -38,7 +38,6 @@ pub enum ForkliftError {
     TimeoutError(String),
     HeartbeatError(String),
     CLIError(String),
-    PoisonedMutexError(String),
 }
 
 impl fmt::Display for ForkliftError {
@@ -52,7 +51,6 @@ impl fmt::Display for ForkliftError {
             ForkliftError::TimeoutError(_) => f.write_str("TimeoutError"),
             ForkliftError::HeartbeatError(_) => f.write_str("HeartbeatError"),
             ForkliftError::CLIError(_) => f.write_str("CLIError"),
-            ForkliftError::PoisonedMutexError(_) => f.write_str("PoisonedMutexError"),
             _ => f.write_str(self.description()),
         }
     }
@@ -82,7 +80,6 @@ impl err for ForkliftError {
             ForkliftError::TimeoutError(ref d) => &d,
             ForkliftError::HeartbeatError(ref d) => &d,
             ForkliftError::CLIError(ref d) => &d,
-            ForkliftError::PoisonedMutexError(ref d) => &d,
         }
     }
 
@@ -109,7 +106,6 @@ impl err for ForkliftError {
             ForkliftError::TimeoutError(ref _d) => None,
             ForkliftError::HeartbeatError(ref _d) => None,
             ForkliftError::CLIError(ref _d) => None,
-            ForkliftError::PoisonedMutexError(ref _d) => None,
         }
     }
 }

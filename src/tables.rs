@@ -104,7 +104,6 @@ impl ErrorLog {
             ForkliftError::TimeoutError(_) => ErrorType::TimeoutError,
             ForkliftError::HeartbeatError(_) => ErrorType::HeartbeatError,
             ForkliftError::CLIError(_) => ErrorType::InvalidConfigError,
-            ForkliftError::PoisonedMutexError(_) => ErrorType::PoisonedMutexError,
         };
         let reason = format!("{:?}", err);
         ErrorLog {
@@ -341,11 +340,6 @@ pub fn init_connection(path: String) -> ForkliftResult<Connection> {
     Ok(conn)
 }
 
-pub fn get_connection(path: String) -> ForkliftResult<Connection> {
-    let conn = Connection::connect(path, TlsMode::None).expect("Cannot connect to database");
-    Ok(conn)
-}
-
 pub fn set_current_node(node: &SocketNode) -> ForkliftResult<()> {
     let mut n = match CURRENT_SOCKET.lock() {
         Ok(list) => list,
@@ -495,11 +489,10 @@ pub fn post_update_totalsync(stat: SyncStats, conn: &Option<Connection>) -> Fork
     Ok(())
 }
 
-pub fn post_update_nodes(status: NodeStatus, conn: &Option<Connection>) -> ForkliftResult<()> {
+pub fn post_update_nodes(status: Nodes, conn: &Option<Connection>) -> ForkliftResult<()> {
     match conn {
         Some(e) => {
-            let node = Nodes::new(status)?;
-            update_nodes(&node, &e)?;
+            update_nodes(&status, &e)?;
         }
         None => (),
     }

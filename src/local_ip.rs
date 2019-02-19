@@ -2,10 +2,11 @@ use nix;
 
 use self::nix::ifaddrs::getifaddrs;
 use crate::error::{ForkliftError, ForkliftResult};
+use crate::postgres_logger::{send_mess, LogMessage};
 use crate::tables::*;
 
+use crossbeam::channel::Sender;
 use log::*;
-use postgres::*;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Result};
 use std::net::{SocketAddr, SocketAddrV4, SocketAddrV6};
@@ -33,7 +34,7 @@ fn get_default_v4_iface() -> Result<Option<String>> {
 
 /// Get the local ip address of the default route
 /// on this machine
-pub fn get_ip(conn: &Option<Connection>) -> ForkliftResult<Option<SocketAddr>> {
+pub fn get_ip(send_log: Sender<LogMessage>) -> ForkliftResult<Option<SocketAddr>> {
     let default_iface = get_default_v4_iface()?;
     let default_iface = default_iface.unwrap();
     trace!("Default interface: {:?}", default_iface);
@@ -51,14 +52,14 @@ pub fn get_ip(conn: &Option<Connection>) -> ForkliftResult<Option<SocketAddr>> {
                     }
                 }
                 None => {
-                    post_err(
+                    let mess = LogMessage::ErrorType(
                         ErrorType::IpLocalError,
                         format!(
                             "interface {} with unsupported address family",
                             ifaddr.interface_name
                         ),
-                        conn,
-                    )?;
+                    );
+                    send_mess(mess, &send_log)?;
                 }
             }
         }
@@ -98,13 +99,6 @@ pub fn get_ipv6() -> ForkliftResult<Option<SocketAddr>> {
     Err(ForkliftError::IpLocalError(
         "Could not determine local ip address".to_string(),
     ))
-}
-
-#[test]
-fn test_get_ip() {
-    let op: Option<Connection> = None;
-    let socketa = get_ip(&op).unwrap().unwrap();
-    println!("socket: {:?}", socketa);
 }
 
 #[test]

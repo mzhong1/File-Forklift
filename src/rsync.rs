@@ -8,11 +8,11 @@ use crate::progress_worker::*;
 use crate::rsync_worker::*;
 use crate::socket_node::*;
 use crate::walk_worker::*;
+use crate::LogMessage;
 
 use crossbeam::channel;
 use crossbeam::channel::Sender;
 use log::*;
-use postgres::*;
 use rendezvous_hash::{DefaultNodeHasher, RendezvousNodes};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -85,37 +85,26 @@ pub struct Rsyncer {
     filesystem_type: FileSystemType,
     /// console ouput functions
     progress_info: Box<ProgressInfo + Send + Sync>,
-    /// channel to send heartbeat end signal
-    end_sync: Sender<EndState>,
-    /// channel to send rendezvous loop end signal
-    end_rendezvous: Sender<EndState>,
+    /// channe to send postgres logs
+    postgres_output: Sender<LogMessage>,
     /// source root path
     source: PathBuf,
     /// destination root path,
     destination: PathBuf,
 }
 
-pub enum EndState {
-    /// End the process
-    EndProgram,
-    /// Rerun the program
-    Rerun,
-}
-
 impl Rsyncer {
     pub fn new(
         filesystem_type: FileSystemType,
         progress_info: Box<ProgressInfo + Send + Sync>,
-        end_sync: Sender<EndState>,
-        end_rendezvous: Sender<EndState>,
+        postgres_output: Sender<LogMessage>,
         source: PathBuf,
         destination: PathBuf,
     ) -> Rsyncer {
         Rsyncer {
             filesystem_type,
             progress_info,
-            end_sync,
-            end_rendezvous,
+            postgres_output,
             source,
             destination,
         }
@@ -129,7 +118,6 @@ impl Rsyncer {
         (workgroup, username, password): (String, String, String),
         nodelist: Arc<Mutex<RendezvousNodes<SocketNode, DefaultNodeHasher>>>,
         my_node: SocketNode,
-        conn: &Arc<Mutex<Option<Connection>>>,
     ) -> ForkliftResult<()> {
         let mut send_handles: Vec<Sender<Option<Entry>>> = Vec::new();
 
@@ -185,7 +173,7 @@ impl Rsyncer {
         );
         let progress_worker =
             ProgressWorker::new(rec_prog, self.progress_info, src_share.to_string());
-        let c = Arc::clone(conn);
+        let c = self.postgres_output.clone();
         rayon::spawn(move || {
             progress_worker.start(&c).unwrap();
         });
@@ -236,14 +224,9 @@ impl Rsyncer {
             });
             Ok(())
         })?;
-        if self.end_sync.send(EndState::EndProgram).is_err() {
+        if self.postgres_output.send(LogMessage::End).is_err() {
             return Err(ForkliftError::CrossbeamChannelError(
                 "Channel to heartbeat is broken!".to_string(),
-            ));
-        }
-        if self.end_rendezvous.send(EndState::EndProgram).is_err() {
-            return Err(ForkliftError::CrossbeamChannelError(
-                "Channel to rendezvous is broken!".to_string(),
             ));
         }
         Ok(())
