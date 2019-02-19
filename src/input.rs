@@ -8,6 +8,9 @@ use std::path::PathBuf;
 pub struct Input {
     /// Socket addresses of either all nodes in the cluster or this program's ip and another node
     pub nodes: Vec<SocketAddr>,
+    /// Node lifetime
+    #[serde(default = "default_lifetime")]
+    pub lifetime: u64,
     /// server of the source share
     pub src_server: String,
     /// server of the destination share
@@ -38,6 +41,10 @@ pub struct Input {
 
 fn default_workgroup() -> String {
     "WORKGROUP".to_string()
+}
+
+fn default_lifetime() -> u64 {
+    5
 }
 /// NOTE: the smburl format is smb://server/share.  Other
 /// smburl syntax, such as smb://username:password@server/share will not

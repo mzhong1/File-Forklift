@@ -94,6 +94,7 @@ fn heartbeat(
     s: crossbeam::Sender<ChangeList>,
     recv_end: &crossbeam::Receiver<EndState>,
     conn: &Arc<Mutex<Option<Connection>>>,
+    lifetime: u64,
 ) -> ForkliftResult<()> {
     let mess = ChangeList::new(ChangeType::AddNode, SocketNode::new(full_address));
     if s.send(mess).is_err() {
@@ -111,7 +112,7 @@ fn heartbeat(
         }
     }; //Make the node
     std::thread::sleep(std::time::Duration::from_millis(10));
-    let mut cluster = Cluster::new(router, &full_address, s);
+    let mut cluster = Cluster::new(router, &full_address, s, lifetime);
     cluster.nodes = NodeMap::init_nodemap(&full_address, cluster.lifetime, &node_names.node_list); //create mutable hashmap of nodes
                                                                                                    //sleep for a bit to let other nodes start up
     cluster.names = node_names;
@@ -322,6 +323,7 @@ fn main() -> ForkliftResult<()> {
     let wrap_h_conn = Arc::new(Mutex::new(heart_conn));
     let wrap_r_conn = Arc::new(Mutex::new(rendezv_conn));
     let wrap_s_conn = Arc::new(Mutex::new(sync_conn));
+    let lifetime = input.lifetime;
     rayon::scope(|s| {
         s.spawn(|_| {
             println!("Started Sync");
@@ -372,6 +374,7 @@ fn main() -> ForkliftResult<()> {
                     send,
                     &recv_end,
                     &wrap_h_conn,
+                    lifetime,
                 )
             },
             || rendezvous(&mut active_nodes.clone(), &recv, &recv_rend, wrap_r_conn),

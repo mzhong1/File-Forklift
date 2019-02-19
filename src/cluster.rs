@@ -22,11 +22,16 @@ pub struct Cluster {
 }
 
 impl Cluster {
-    pub fn new(r: Socket, init: &SocketAddr, s: crossbeam::Sender<ChangeList>) -> Self {
+    pub fn new(
+        r: Socket,
+        init: &SocketAddr,
+        s: crossbeam::Sender<ChangeList>,
+        lifetime: u64,
+    ) -> Self {
         let mut list = NodeList::new();
         list.add_node_to_list(init);
         Cluster {
-            lifetime: 5,
+            lifetime,
             pulse: Pulse::new(1000),
             names: list,
             nodes: NodeMap::new(),
