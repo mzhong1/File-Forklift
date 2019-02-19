@@ -53,7 +53,7 @@ pub enum ErrorType {
     ChecksumError,
     CrossbeamChannelError,
     PostgresError,
-    PoisonedMutex,
+    PoisonedMutexError,
     TimeoutError,
     HeartbeatError,
 }
@@ -104,6 +104,7 @@ impl ErrorLog {
             ForkliftError::TimeoutError(_) => ErrorType::TimeoutError,
             ForkliftError::HeartbeatError(_) => ErrorType::HeartbeatError,
             ForkliftError::CLIError(_) => ErrorType::InvalidConfigError,
+            ForkliftError::PoisonedMutexError(_) => ErrorType::PoisonedMutexError,
         };
         let reason = format!("{:?}", err);
         ErrorLog {
@@ -246,7 +247,7 @@ pub fn init_errortypes(conn: &Connection) -> ForkliftResult<()> {
             'ChecksumError',
             'CrossbeamChannelError',
             'PostgresError',
-            'PoisonedMutex',
+            'PoisonedMutexError',
             'TimeoutError',
             'HeartbeatError');
             END IF;
@@ -472,6 +473,25 @@ pub fn update_files(file: &Files, conn: &Connection) -> ForkliftResult<()> {
          &file.dest_checksum,
          &file.size,
          &file.last_modified_time])?;
+    Ok(())
+}
+
+pub fn post_update_files(file: Files, conn: &Option<Connection>) -> ForkliftResult<()> {
+    match conn {
+        Some(e) => update_files(&file, &e)?,
+        None => (),
+    }
+    Ok(())
+}
+
+pub fn post_update_totalsync(stat: SyncStats, conn: &Option<Connection>) -> ForkliftResult<()> {
+    match conn {
+        Some(e) => {
+            let tot_stat = TotalSync::new(&stat);
+            update_totalsync(&tot_stat, e)?;
+        }
+        None => (),
+    }
     Ok(())
 }
 

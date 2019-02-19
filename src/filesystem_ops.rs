@@ -1,4 +1,5 @@
 use ::smbc::*;
+use chrono::NaiveDateTime;
 use crossbeam::channel::Sender;
 use digest::Digest;
 use lazy_static::lazy_static;
@@ -19,6 +20,7 @@ use crate::error::{ForkliftError, ForkliftResult};
 use crate::filesystem::*;
 use crate::filesystem_entry::Entry;
 use crate::progress_message::ProgressMessage;
+use crate::tables::*;
 
 /// default buffer size
 const BUFF_SIZE: u64 = 1024 * 1000;
@@ -39,8 +41,8 @@ lazy_static! {
 pub enum SyncOutcome {
     /// file/directory is up-to-date
     UpToDate,
-    /// copied a file
-    FileCopied,
+    /// copied a file,  send path, src, dest checksum, size
+    FileCopied(String, Vec<u8>, Vec<u8>, i64, NaiveDateTime),
     /// updated a symlink
     SymlinkUpdated,
     /// created a symlink
@@ -53,8 +55,8 @@ pub enum SyncOutcome {
     DirectoryCreated,
     /// updated a directory internal bytes
     DirectoryUpdated,
-    /// updated a file internal bytes, send src, dest checksum
-    ChecksumUpdated(Vec<u8>, Vec<u8>),
+    /// updated a file internal bytes, send path, src, dest checksum, size
+    ChecksumUpdated(String, Vec<u8>, Vec<u8>, i64, NaiveDateTime),
 }
 
 ///
@@ -127,7 +129,6 @@ pub fn set_xattr(
         }
         Err(e) => {
             let err = format!("Error {}, {}", e, error);
-            error!("{}", err);
             Err(ForkliftError::FSError(err))
         }
     }
@@ -172,7 +173,6 @@ pub fn get_xattr(
         }
         Err(e) => {
             let err = format!("Error {}, {}", e, error);
-            error!("{}", err);
             Err(ForkliftError::FSError(err))
         }
     }
@@ -801,9 +801,21 @@ pub fn checksum_copy(
         return Ok(SyncOutcome::UpToDate);
     }
     if is_copy {
-        Ok(SyncOutcome::FileCopied)
+        Ok(SyncOutcome::FileCopied(
+            src.path().to_string_lossy().to_string(),
+            whole_checksum,
+            test_checksum,
+            src_meta.size(),
+            current_time(),
+        ))
     } else {
-        Ok(SyncOutcome::ChecksumUpdated(whole_checksum, test_checksum))
+        Ok(SyncOutcome::ChecksumUpdated(
+            src.path().to_string_lossy().to_string(),
+            whole_checksum,
+            test_checksum,
+            src_meta.size(),
+            current_time(),
+        ))
     }
 }
 
@@ -1297,7 +1309,6 @@ pub fn map_names_and_copy(
                                 "Error {}, failed to remove the old acl {} from {:?}",
                                 e, ace, dest_path
                             );
-                            error!("{}", err);
                             return Err(ForkliftError::FSError(err));
                         }
                     }
@@ -1347,7 +1358,6 @@ pub fn get_acl_list(path: &Path, fs: &Smbc, plus: bool) -> ForkliftResult<Vec<Sm
                 e,
                 String::from_utf8_lossy(&acls)
             );
-            error!("{}", err);
             return Err(ForkliftError::FSError(err));
         }
     };
@@ -1383,7 +1393,6 @@ fn change_stat_mode(path: &Path, context: &NetworkContext, mode: u32) -> Forklif
         }
         Err(e) => {
             let err = format!("Error {}, mode {:?}", e, Mode::from_bits_truncate(mode));
-            error!("{}", err);
             Err(ForkliftError::FSError(err))
         }
     }
@@ -1413,12 +1422,10 @@ pub fn copy_permissions(
         (Some(true), _) => return Ok(SyncOutcome::UpToDate),
         (None, _) => {
             let err = format!("is_link was None for {:?}", src.path());
-            error!("{}", err);
             return Err(ForkliftError::FSError(err));
         }
         (_, None) => {
             let err = format!("src file does not exist for {:?}", src.path());
-            error!("{}", err);
             return Err(ForkliftError::FSError(err));
         }
         (Some(false), Some(stat)) => stat.mode(),

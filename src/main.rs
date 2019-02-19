@@ -72,7 +72,7 @@ fn init_router(full_address: &SocketAddr) -> ForkliftResult<Socket> {
     Ok(router)
 }
 
-fn parse_matches(matches: &clap::ArgMatches<'_>) -> Input {
+fn parse_matches(matches: &clap::ArgMatches<'_>) -> ForkliftResult<Input> {
     let path = match matches.value_of("config") {
         None => Path::new(""),
         Some(t) => Path::new(t),
@@ -81,10 +81,13 @@ fn parse_matches(matches: &clap::ArgMatches<'_>) -> Input {
         Ok(e) => e,
         Err(e) => {
             error!("{:?}, Unable to read file", e);
-            panic!("{:?}, Unable to read file", e);
+            return Err(ForkliftError::InvalidConfigError(format!(
+                "Error {:?}, unable to read file",
+                e
+            )));
         }
     };
-    Input::new(&input)
+    Ok(Input::new(&input))
 }
 
 fn heartbeat(
@@ -231,7 +234,7 @@ fn main() -> ForkliftResult<()> {
 
     let (send, recv) = channel::unbounded::<ChangeList>();
 
-    let input = parse_matches(&matches);
+    let input = parse_matches(&matches)?;
     //get database url and check if we are logging anything to database
     //SOME if yes, NONE if not logging to DB
     let database = match input.database_url {
@@ -257,10 +260,11 @@ fn main() -> ForkliftResult<()> {
             "Not enough input nodes.  Need at least 2".to_string(),
             &conn,
         )?;
-        panic!(
+        return Err(ForkliftError::InvalidConfigError(
             "No input nodes!  Please have at least 2 node in the nodes section of your
         config file"
-        );
+                .to_string(),
+        ));
     }
 
     trace!("Attempting to get local ip address");
@@ -272,11 +276,11 @@ fn main() -> ForkliftResult<()> {
                 "No local ip found".to_string(),
                 &conn,
             )?;
-            panic!("No local ip! ABORT!")
+            return Err(ForkliftError::IpLocalError("No local ip".to_string()));
         }
         Err(e) => {
             post_forklift_err(&e, &conn)?;
-            panic!("Error: {}", e)
+            return Err(e);
         }
     };
     let nodes = input.nodes.clone();
@@ -289,12 +293,17 @@ fn main() -> ForkliftResult<()> {
                 format!("Ip Address {} not in the node_list", ip_address),
                 &conn,
             )?;
-            panic!("ip address {} not in the node_list ", ip_address)
+            return Err(ForkliftError::IpLocalError(format!(
+                "ip address {} not in the node list",
+                ip_address
+            )));
         }
     };
     debug!("current full address: {:?}", full_address);
     let mine = SocketNode::new(full_address);
-    set_current_node(&mine)?;
+    if let Err(e) = set_current_node(&mine) {
+        post_forklift_err(&e, &conn)?;
+    };
     let mut joined = input.nodes.len() != 2;
     let console_info = ConsoleProgressOutput::new();
     let system = input.system;
@@ -331,6 +340,7 @@ fn main() -> ForkliftResult<()> {
                 (workgroup, username.to_string(), password.to_string()),
                 active_nodes.clone(),
                 mine,
+                &wrap_s_conn,
             ) {
                 Ok(_) => (),
                 Err(e) => {
@@ -362,19 +372,30 @@ fn main() -> ForkliftResult<()> {
                 }
             }
         });
+
         rayon::join(
-            || {
-                heartbeat(
-                    node_names,
-                    &mut joined,
-                    full_address,
-                    send,
-                    &recv_end,
-                    &wrap_h_conn,
-                    lifetime,
-                )
+            || match heartbeat(
+                node_names,
+                &mut joined,
+                full_address,
+                send,
+                &recv_end,
+                &wrap_h_conn,
+                lifetime,
+            ) {
+                Ok(_) => Ok(()),
+                Err(e) => {
+                    let conn = wrap_conn.lock().unwrap();
+                    post_forklift_err(&e, &conn)
+                }
             },
-            || rendezvous(&mut active_nodes.clone(), &recv, &recv_rend, wrap_r_conn),
+            || match rendezvous(&mut active_nodes.clone(), &recv, &recv_rend, wrap_r_conn) {
+                Ok(_) => Ok(()),
+                Err(e) => {
+                    let conn = wrap_conn.lock().unwrap();
+                    post_forklift_err(&e, &conn)
+                }
+            },
         )
     });
     Ok(())
@@ -393,8 +414,10 @@ fn rendezvous(
     let datac = match conn.lock() {
         Ok(e) => e,
         Err(e) => {
-            error!("Error {:?}, Poisoned rendezvous database connection", e);
-            panic!("Poisoned rendezvous database connection");
+            return Err(ForkliftError::PoisonedMutexError(format!(
+                "Error {:?}, poisoned rendezvous database connection",
+                e,
+            )));
         }
     };
     loop {
@@ -407,7 +430,7 @@ fn rendezvous(
             Ok(l) => l,
             Err(e) => {
                 post_err(
-                    ErrorType::PoisonedMutex,
+                    ErrorType::PoisonedMutexError,
                     format!("Error {:?}, Poisoned rendezvous mutex", e),
                     &datac,
                 )?;

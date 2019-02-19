@@ -46,7 +46,6 @@ impl WalkWorker {
         for s in self.entry_outputs.iter() {
             // Stop all the senders
             if s.send(None).is_err() {
-                error!("Unable to stop");
                 return Err(ForkliftError::CrossbeamChannelError(
                     "Error, channel disconnected, unable to stop rsync_worker".to_string(),
                 ));
@@ -85,7 +84,6 @@ impl WalkWorker {
             }
         };
         if let Err(e) = sender.send(entry) {
-            error!("Unable to send Entry");
             return Err(ForkliftError::CrossbeamChannelError(format!(
                 "Error {:?}, Unable to send entry to rsync_worker",
                 e
@@ -109,7 +107,6 @@ impl WalkWorker {
             let (mut src_context, mut dest_context) = match contexts.get(index) {
                 Some((s, d)) => (s.clone(), d.clone()),
                 None => {
-                    error!("unable to retrieve contexts");
                     return Err(ForkliftError::FSError(
                         "Unable to retrieve contexts".to_string(),
                     ));
@@ -142,7 +139,6 @@ impl WalkWorker {
                             num_files: 1,
                             total_size: meta.size() as usize,
                         }) {
-                            error!("Error {:?} unable to send progress", e);
                             return Err(ForkliftError::CrossbeamChannelError(format!(
                                 "Error {:?}, unable to send progress",
                                 e
@@ -160,6 +156,10 @@ impl WalkWorker {
                                     self.t_walk(&root_path, &newpath, &mut contexts, &pool)
                                 {
                                     error!("Error {:?}, Unable to recursively call", e);
+                                    let mess = ProgressMessage::SendError(ForkliftError::FSError(
+                                        format!("Error {:?}, Unable to recursively call", e),
+                                    ));
+                                    self.progress_output.send(mess).unwrap()
                                 }
                             });
                         }
@@ -339,7 +339,6 @@ impl WalkWorker {
                 }
             }
             Err(_) => {
-                error!("Failed to lock!");
                 return Err(ForkliftError::FSError("failed to lock".to_string()));
             }
         };

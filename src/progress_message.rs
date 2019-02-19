@@ -1,3 +1,4 @@
+use crate::error::ForkliftError;
 use crate::filesystem_ops::SyncOutcome;
 use crate::rsync::SyncStats;
 
@@ -8,7 +9,7 @@ pub enum ProgressMessage {
         num_files: u64,
         total_size: usize,
     },
-
+    SendError(ForkliftError),
     CheckSyncing {
         description: String,
         size: usize,

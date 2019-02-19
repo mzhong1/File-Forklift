@@ -518,7 +518,8 @@ fn test_add_node_to_map() {
         ),
         5,
         false,
-    );
+    )
+    .unwrap();
     assert_eq!(expected_result, map.node_map);
 
     let mut expected_result = HashMap::new();
@@ -570,6 +571,7 @@ fn test_add_node_to_map() {
         ),
         5,
         false,
-    );
+    )
+    .unwrap();
     assert_eq!(expected_result, map.node_map);
 }

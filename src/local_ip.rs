@@ -58,7 +58,7 @@ pub fn get_ip(conn: &Option<Connection>) -> ForkliftResult<Option<SocketAddr>> {
                             ifaddr.interface_name
                         ),
                         conn,
-                    );
+                    )?;
                 }
             }
         }

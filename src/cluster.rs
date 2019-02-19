@@ -83,7 +83,7 @@ impl Cluster {
             debug!("Node Map before adding {:?}", self.nodes.node_map);
             self.names.add_node_to_list(&full_address);
             self.nodes
-                .add_node_to_map(&full_address, self.lifetime, heartbeat);
+                .add_node_to_map(&full_address, self.lifetime, heartbeat)?;
             match self.connect_node(&full_address) {
                 Ok(t) => t,
                 Err(e) => {
@@ -161,7 +161,7 @@ impl Cluster {
         if !msg_body.is_empty() {
             match &msg_body[0].parse::<SocketAddr>() {
                 Ok(s) => {
-                    self.add_node(&s, true, conn);
+                    self.add_node(&s, true, conn)?;
                     debug!("Send a NODELIST to {:?}", s);
                     match self.router.nb_write(buffer.as_slice()) {
                         Ok(_) => debug!("NODELIST sent to {:?}!", s),
@@ -252,12 +252,12 @@ impl Cluster {
                 if !n.has_heartbeat && n.tickdown() {
                     let cl = ChangeList::new(ChangeType::RemNode, SocketNode::new(n.name));
                     if s.send(cl).is_err() {
-                        error!("Channel to rendezvous is broken!");
                         post_err(
                             ErrorType::CrossbeamChannelError,
                             "Channel to rendezvous is broken".to_string(),
                             conn,
-                        );
+                        )
+                        .unwrap();
                         panic!("Channel to rendezvous is broken!");
                     }
                 } else {
@@ -418,7 +418,8 @@ impl Cluster {
                                         ErrorType::CrossbeamChannelError,
                                         "Channel to rendezvous is broken".to_string(),
                                         conn,
-                                    );
+                                    )
+                                    .unwrap();
                                     panic!("Channel to rendezvous is broken!");
                                 }
                             }

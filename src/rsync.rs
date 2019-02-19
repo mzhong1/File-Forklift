@@ -12,6 +12,7 @@ use crate::walk_worker::*;
 use crossbeam::channel;
 use crossbeam::channel::Sender;
 use log::*;
+use postgres::*;
 use rendezvous_hash::{DefaultNodeHasher, RendezvousNodes};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -66,13 +67,13 @@ impl SyncStats {
     pub fn add_outcome(&mut self, outcome: &SyncOutcome) {
         self.num_synced += 1;
         match outcome {
-            SyncOutcome::FileCopied => self.copied += 1,
+            SyncOutcome::FileCopied(..) => self.copied += 1,
             SyncOutcome::UpToDate => self.up_to_date += 1,
             SyncOutcome::SymlinkUpdated => self.symlink_updated += 1,
             SyncOutcome::SymlinkCreated => self.symlink_created += 1,
             SyncOutcome::SymlinkSkipped => self.symlink_skipped += 1,
             SyncOutcome::PermissionsUpdated => self.permissions_update += 1,
-            SyncOutcome::ChecksumUpdated(_, _) => self.checksum_updated += 1,
+            SyncOutcome::ChecksumUpdated(..) => self.checksum_updated += 1,
             SyncOutcome::DirectoryUpdated => self.directory_updated += 1,
             SyncOutcome::DirectoryCreated => self.directory_created += 1,
         }
@@ -128,6 +129,7 @@ impl Rsyncer {
         (workgroup, username, password): (String, String, String),
         nodelist: Arc<Mutex<RendezvousNodes<SocketNode, DefaultNodeHasher>>>,
         my_node: SocketNode,
+        conn: &Arc<Mutex<Option<Connection>>>,
     ) -> ForkliftResult<()> {
         let mut send_handles: Vec<Sender<Option<Entry>>> = Vec::new();
 
@@ -173,7 +175,7 @@ impl Rsyncer {
                 }
             }
         }
-
+        let send_prog_thread = send_prog.clone();
         let walk_worker = WalkWorker::new(
             self.source.as_path(),
             send_handles,
@@ -181,9 +183,11 @@ impl Rsyncer {
             nodelist,
             my_node,
         );
-        let progress_worker = ProgressWorker::new(rec_prog, self.progress_info);
+        let progress_worker =
+            ProgressWorker::new(rec_prog, self.progress_info, src_share.to_string());
+        let c = Arc::clone(conn);
         rayon::spawn(move || {
-            progress_worker.start();
+            progress_worker.start(&c).unwrap();
         });
         let pool = rayon::ThreadPoolBuilder::new()
             .num_threads(num_threads as usize)
@@ -221,7 +225,11 @@ impl Rsyncer {
                                     input.len()
                                 );
                             }
-                            Err(e) => error!("Error: {:?}", e),
+                            Err(e) => {
+                                error!("Error: {:?}", e);
+                                let mess = ProgressMessage::SendError(e);
+                                send_prog_thread.send(mess).unwrap();
+                            }
                         };
                     });
                 }
@@ -229,13 +237,11 @@ impl Rsyncer {
             Ok(())
         })?;
         if self.end_sync.send(EndState::EndProgram).is_err() {
-            error!("Channel to heartbeat is broken!");
             return Err(ForkliftError::CrossbeamChannelError(
                 "Channel to heartbeat is broken!".to_string(),
             ));
         }
         if self.end_rendezvous.send(EndState::EndProgram).is_err() {
-            error!("Channel to rendezvous is broken!");
             return Err(ForkliftError::CrossbeamChannelError(
                 "Channel to rendezvous is broken!".to_string(),
             ));
