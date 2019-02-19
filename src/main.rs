@@ -93,6 +93,7 @@ fn heartbeat(
     full_address: SocketAddr,
     s: crossbeam::Sender<ChangeList>,
     recv_end: &crossbeam::Receiver<EndState>,
+    conn: &Arc<Mutex<Option<Connection>>>,
 ) -> ForkliftResult<()> {
     let mess = ChangeList::new(ChangeType::AddNode, SocketNode::new(full_address));
     if s.send(mess).is_err() {
@@ -363,7 +364,16 @@ fn main() -> ForkliftResult<()> {
             }
         });
         rayon::join(
-            || heartbeat(node_names, &mut joined, full_address, send, &recv_end),
+            || {
+                heartbeat(
+                    node_names,
+                    &mut joined,
+                    full_address,
+                    send,
+                    &recv_end,
+                    &wrap_h_conn,
+                )
+            },
             || rendezvous(&mut active_nodes.clone(), &recv, &recv_rend, wrap_r_conn),
         )
     });

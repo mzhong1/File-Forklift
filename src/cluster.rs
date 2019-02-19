@@ -5,7 +5,7 @@ use nanomsg::{Error, PollFd, PollInOut, PollRequest, Socket};
 use std::net::SocketAddr;
 
 use self::api::service_generated::*;
-use crate::error::ForkliftResult;
+use crate::error::*;
 use crate::message;
 use crate::node::*;
 use crate::pulse::*;
@@ -119,6 +119,7 @@ impl Cluster {
         let (valid, err) = self.is_valid_cluster();
         if !valid {
             error!("Cluster invalid! {}", err);
+            // self.conn send error here
             panic!("Cluster invalid! {}", err);
         }
         if !msg_body.is_empty() {
@@ -406,10 +407,10 @@ impl Cluster {
                 break;
             }
             if countdown > 5000 && !*has_nodelist {
-                panic!(
+                return Err(ForkliftError::TimeoutError(format!(
                     "{} has not responded for a lifetime, please join to a different ip:port",
                     full_address
-                );
+                )));
             }
             ::std::thread::sleep(::std::time::Duration::from_millis(10));
             countdown += 10;
@@ -423,7 +424,7 @@ impl Cluster {
                     Ok(t) => t,
                     Err(e) => {
                         error!("Time ran backwards!  Abort! {}", e);
-                        panic!("Time ran backwards! Abort! {}", e)
+                        return Err(e);
                     }
                 };
             }

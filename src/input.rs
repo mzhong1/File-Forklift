@@ -6,30 +6,39 @@ use std::path::PathBuf;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Input {
+    /// Socket addresses of either all nodes in the cluster or this program's ip and another node
     pub nodes: Vec<SocketAddr>,
+    /// server of the source share
     pub src_server: String,
+    /// server of the destination share
     pub dest_server: String,
-    /// Share should be formatted as '/sharename'
+    /// source share name; should be formatted as '/sharename'
     pub src_share: String,
-    /// Share should be formatted as '/sharename'
+    /// destination share name; should be formatted as '/sharename'
     pub dest_share: String,
+    /// Share type (Nfs or Samba)
     pub system: FileSystemType,
+    /// The debug level of the filesystem context
     pub debug_level: u32,
+    /// The number of threads used in the processing
     pub num_threads: u32,
+    /// The workgroup of the user (Please default to WORKGROUP if not using Samba)
+    #[serde(default = "default_workgroup")]
     pub workgroup: String,
     /// NFS is always "/" (unless using subdirectory),
     /// Samba smb url to root or subdirectory (if Glusterfs, MUST be subdirectory)
-    /// Input "" if using 'default' path
     pub src_path: PathBuf,
     /// NFS is always "/" (unless using subdirectory),
     /// Samba smb url to root or subdirectory (if Glusterfs, MUST be subdirectory)
-    /// Input "" if using 'default' path
     pub dest_path: PathBuf,
     /// URL of database to log errors to, or NULL if not logging to database
-    /// format is probably postgresql://postgres@ip:port
+    /// format is probably postgresql://postgres:password@ip:port
     pub database_url: Option<String>,
 }
 
+fn default_workgroup() -> String {
+    "WORKGROUP".to_string()
+}
 /// NOTE: the smburl format is smb://server/share.  Other
 /// smburl syntax, such as smb://username:password@server/share will not
 /// work, though they will pass the is_smb_path test, as whether or not

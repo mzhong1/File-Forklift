@@ -54,6 +54,7 @@ pub enum ErrorType {
     CrossbeamChannelError,
     PostgresError,
     PoisonedMutex,
+    TimeoutError,
 }
 #[derive(Debug, Clone)]
 pub struct ErrorLog {
@@ -99,6 +100,7 @@ impl ErrorLog {
             ForkliftError::SmbcError(_) => ErrorType::SmbcError,
             ForkliftError::SystemTimeError(_) => ErrorType::SystemTimeError,
             ForkliftError::CrossbeamChannelError(_) => ErrorType::CrossbeamChannelError,
+            ForkliftError::TimeoutError(_) => ErrorType::TimeoutError,
         };
         let reason = format!("{:?}", err);
         ErrorLog {
@@ -241,7 +243,8 @@ pub fn init_errortypes(conn: &Connection) -> ForkliftResult<()> {
             'ChecksumError',
             'CrossbeamChannelError',
             'PostgresError',
-            'PoisonedMutex');
+            'PoisonedMutex',
+            'TimeoutError');
             END IF;
         END
         $$",
