@@ -1,6 +1,6 @@
 use api;
 
-use crossbeam::channel::Sender;
+use crossbeam::channel::{Sender, Receiver};
 use log::*;
 use nanomsg::{Error, PollFd, PollInOut, PollRequest, Socket};
 use std::net::SocketAddr;
@@ -517,7 +517,7 @@ impl Cluster {
         &mut self,
         full_address: &SocketAddr,
         has_nodelist: &mut bool,
-        recv_end: &crossbeam::Receiver<EndState>,
+        recv_end: &Receiver<EndState>,
     ) -> ForkliftResult<()> {
         let mut countdown = 0;
         loop {

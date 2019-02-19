@@ -106,6 +106,7 @@ impl ProgressWorker {
             send_mess(LogMessage::TotalSync(stats.clone()), send_log)?;
         }
         self.progress_info.end(&stats);
+        send_mess(LogMessage::End, send_log)?;
         Ok(stats)
     }
 }

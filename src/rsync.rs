@@ -224,11 +224,6 @@ impl Rsyncer {
             });
             Ok(())
         })?;
-        if self.postgres_output.send(LogMessage::End).is_err() {
-            return Err(ForkliftError::CrossbeamChannelError(
-                "Channel to heartbeat is broken!".to_string(),
-            ));
-        }
         Ok(())
     }
 }
