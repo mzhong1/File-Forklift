@@ -196,8 +196,9 @@ fn main() -> ForkliftResult<()> {
     let path = match dirs::home_dir() {
         Some(path) => path.join(logfile),
         None => {
-            error!("Home directory not found");
-            panic!("Home Directory not found!")
+            return Err(ForkliftError::CLIError(
+                "Home directory not found".to_string(),
+            ));
         }
     };
     let username = match matches.value_of("username") {
@@ -209,8 +210,7 @@ fn main() -> ForkliftResult<()> {
             }
         }
         None => {
-            error!("username not found");
-            panic!("username not found!")
+            return Err(ForkliftError::CLIError("username not found".to_string()));
         }
     };
     let password = match matches.value_of("password") {
@@ -222,8 +222,7 @@ fn main() -> ForkliftResult<()> {
             }
         }
         None => {
-            error!("password not found");
-            panic!("password not found!")
+            return Err(ForkliftError::CLIError("password not found".to_string()));
         }
     };
     init_logs(&path, level)?;

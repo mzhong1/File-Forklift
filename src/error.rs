@@ -37,6 +37,7 @@ pub enum ForkliftError {
     CrossbeamChannelError(String),
     TimeoutError(String),
     HeartbeatError(String),
+    CLIError(String),
 }
 
 impl fmt::Display for ForkliftError {
@@ -49,6 +50,7 @@ impl fmt::Display for ForkliftError {
             ForkliftError::CrossbeamChannelError(_) => f.write_str("CrossbeamChannelError"),
             ForkliftError::TimeoutError(_) => f.write_str("TimeoutError"),
             ForkliftError::HeartbeatError(_) => f.write_str("HeartbeatError"),
+            ForkliftError::CLIError(_) => f.write_str("CLIError"),
             _ => f.write_str(self.description()),
         }
     }
@@ -77,6 +79,7 @@ impl err for ForkliftError {
             ForkliftError::CrossbeamChannelError(ref d) => &d,
             ForkliftError::TimeoutError(ref d) => &d,
             ForkliftError::HeartbeatError(ref d) => &d,
+            ForkliftError::CLIError(ref d) => &d,
         }
     }
 
@@ -102,6 +105,7 @@ impl err for ForkliftError {
             ForkliftError::CrossbeamChannelError(ref _d) => None,
             ForkliftError::TimeoutError(ref _d) => None,
             ForkliftError::HeartbeatError(ref _d) => None,
+            ForkliftError::CLIError(ref _d) => None,
         }
     }
 }

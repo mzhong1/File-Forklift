@@ -103,6 +103,7 @@ impl ErrorLog {
             ForkliftError::CrossbeamChannelError(_) => ErrorType::CrossbeamChannelError,
             ForkliftError::TimeoutError(_) => ErrorType::TimeoutError,
             ForkliftError::HeartbeatError(_) => ErrorType::HeartbeatError,
+            ForkliftError::CLIError(_) => ErrorType::InvalidConfigError,
         };
         let reason = format!("{:?}", err);
         ErrorLog {
