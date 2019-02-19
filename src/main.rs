@@ -98,12 +98,10 @@ fn heartbeat(
 ) -> ForkliftResult<()> {
     let mess = ChangeList::new(ChangeType::AddNode, SocketNode::new(full_address));
     if s.send(mess).is_err() {
-        error!("Channel to Rendezvous is broken!");
         return Err(ForkliftError::CrossbeamChannelError(
             "Channel to rendezvous is broken!".to_string(),
         ));
     }
-
     let router = match init_router(&full_address) {
         Ok(t) => t,
         Err(e) => {
@@ -113,11 +111,11 @@ fn heartbeat(
     }; //Make the node
     std::thread::sleep(std::time::Duration::from_millis(10));
     let mut cluster = Cluster::new(router, &full_address, s, lifetime);
-    cluster.nodes = NodeMap::init_nodemap(&full_address, cluster.lifetime, &node_names.node_list); //create mutable hashmap of nodes
-                                                                                                   //sleep for a bit to let other nodes start up
+    cluster.nodes = NodeMap::init_nodemap(&full_address, cluster.lifetime, &node_names.node_list)?; //create mutable hashmap of nodes
+                                                                                                    //sleep for a bit to let other nodes start up
     cluster.names = node_names;
-    cluster.init_connect(&full_address);
-    cluster.heartbeat_loop(&full_address, joined, &recv_end)
+    cluster.init_connect(&full_address, conn)?;
+    cluster.heartbeat_loop(&full_address, joined, &recv_end, conn)
 }
 
 fn init_logs(f: &Path, level: simplelog::LevelFilter) -> ForkliftResult<()> {
@@ -267,7 +265,7 @@ fn main() -> ForkliftResult<()> {
     }
 
     trace!("Attempting to get local ip address");
-    let ip_address = match local_ip::get_ip() {
+    let ip_address = match local_ip::get_ip(&conn) {
         Ok(Some(ip)) => ip.ip(),
         Ok(None) => {
             post_err(

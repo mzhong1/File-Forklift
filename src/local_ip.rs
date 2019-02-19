@@ -2,8 +2,10 @@ use nix;
 
 use self::nix::ifaddrs::getifaddrs;
 use crate::error::{ForkliftError, ForkliftResult};
+use crate::tables::*;
 
 use log::*;
+use postgres::*;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Result};
 use std::net::{SocketAddr, SocketAddrV4, SocketAddrV6};
@@ -31,7 +33,7 @@ fn get_default_v4_iface() -> Result<Option<String>> {
 
 /// Get the local ip address of the default route
 /// on this machine
-pub fn get_ip() -> ForkliftResult<Option<SocketAddr>> {
+pub fn get_ip(conn: &Option<Connection>) -> ForkliftResult<Option<SocketAddr>> {
     let default_iface = get_default_v4_iface()?;
     let default_iface = default_iface.unwrap();
     trace!("Default interface: {:?}", default_iface);
@@ -49,9 +51,13 @@ pub fn get_ip() -> ForkliftResult<Option<SocketAddr>> {
                     }
                 }
                 None => {
-                    error!(
-                        "interface {} with unsupported address family",
-                        ifaddr.interface_name
+                    post_err(
+                        ErrorType::IpLocalError,
+                        format!(
+                            "interface {} with unsupported address family",
+                            ifaddr.interface_name
+                        ),
+                        conn,
                     );
                 }
             }
@@ -96,7 +102,8 @@ pub fn get_ipv6() -> ForkliftResult<Option<SocketAddr>> {
 
 #[test]
 fn test_get_ip() {
-    let socketa = get_ip().unwrap().unwrap();
+    let op: Option<Connection> = None;
+    let socketa = get_ip(&op).unwrap().unwrap();
     println!("socket: {:?}", socketa);
 }
 

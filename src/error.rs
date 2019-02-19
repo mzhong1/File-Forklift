@@ -36,6 +36,7 @@ pub enum ForkliftError {
     PostgresError(PostgresError),
     CrossbeamChannelError(String),
     TimeoutError(String),
+    HeartbeatError(String),
 }
 
 impl fmt::Display for ForkliftError {
@@ -47,6 +48,7 @@ impl fmt::Display for ForkliftError {
             ForkliftError::ChecksumError(_) => f.write_str("ChecksumError"),
             ForkliftError::CrossbeamChannelError(_) => f.write_str("CrossbeamChannelError"),
             ForkliftError::TimeoutError(_) => f.write_str("TimeoutError"),
+            ForkliftError::HeartbeatError(_) => f.write_str("HeartbeatError"),
             _ => f.write_str(self.description()),
         }
     }
@@ -74,6 +76,7 @@ impl err for ForkliftError {
             ForkliftError::PostgresError(ref e) => e.description(),
             ForkliftError::CrossbeamChannelError(ref d) => &d,
             ForkliftError::TimeoutError(ref d) => &d,
+            ForkliftError::HeartbeatError(ref d) => &d,
         }
     }
 
@@ -98,6 +101,7 @@ impl err for ForkliftError {
             ForkliftError::PostgresError(ref e) => e.cause(),
             ForkliftError::CrossbeamChannelError(ref _d) => None,
             ForkliftError::TimeoutError(ref _d) => None,
+            ForkliftError::HeartbeatError(ref _d) => None,
         }
     }
 }

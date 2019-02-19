@@ -1,5 +1,6 @@
 use log::*;
 
+use crate::error::*;
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
@@ -198,10 +199,12 @@ impl NodeMap {
         full_address: &SocketAddr,
         lifetime: u64,
         node_names: &[SocketAddr],
-    ) -> Self {
+    ) -> ForkliftResult<Self> {
         if lifetime == 0 {
             error!("Lifetime is trivial (less than or equal to zero)!");
-            panic!("Lifetime is trivial (less than or equal to zero)!");
+            return Err(ForkliftError::InvalidConfigError(
+                "Lifetime is trivial".to_string(),
+            ));
         }
         debug! {"Initialize hashmap of nodes with lifetime {} from socket list {:?} not including {}", lifetime, node_names, full_address};
         let mut nodes = NodeMap::new();
@@ -214,7 +217,7 @@ impl NodeMap {
                 nodes.node_map.insert(node_ip.to_string(), temp_node);
             }
         }
-        nodes
+        Ok(nodes)
     }
 
     /**
@@ -222,10 +225,17 @@ impl NodeMap {
      * REQUIRES: lifetime > 0
      * ENSURES: new full_address node is added to the NodeMap
      */
-    pub fn add_node_to_map(&mut self, full_address: &SocketAddr, lifetime: u64, heartbeat: bool) {
+    pub fn add_node_to_map(
+        &mut self,
+        full_address: &SocketAddr,
+        lifetime: u64,
+        heartbeat: bool,
+    ) -> ForkliftResult<()> {
         if lifetime == 0 {
             error!("Lifetime is trivial (less than or equal to zero)!");
-            panic!("Lifetime is trivial (less than or equal to zero)!");
+            return Err(ForkliftError::HeartbeatError(
+                "Lifetime of added node is trivial!".to_string(),
+            ));
         }
         trace!("Adding node to map");
         let temp_node = Node::node_new(*full_address, lifetime, 0, heartbeat);
@@ -233,6 +243,7 @@ impl NodeMap {
         self.node_map
             .entry(full_address.to_string())
             .or_insert(temp_node);
+        Ok(())
     }
 }
 
@@ -427,7 +438,7 @@ fn test_init_nodemap() {
         ::std::net::IpAddr::V4(::std::net::Ipv4Addr::new(172, 17, 0, 1)),
         7654,
     );
-    let map = NodeMap::init_nodemap(&my_full_address, 5, &mut names);
+    let map = NodeMap::init_nodemap(&my_full_address, 5, &mut names).unwrap();
     println!("Expected Map {:?}", expected_result);
     println!("My Map: {:?}", map.node_map);
     assert_eq!(expected_result, map.node_map);
