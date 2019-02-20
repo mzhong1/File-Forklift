@@ -119,8 +119,8 @@ fn heartbeat(
     cluster.nodes = NodeMap::init_nodemap(&full_address, cluster.lifetime, &node_names.node_list)?; //create mutable hashmap of nodes
                                                                                                     //sleep for a bit to let other nodes start up
     cluster.names = node_names;
-    cluster.init_connect(&full_address)?;
-    cluster.heartbeat_loop(&full_address, joined, &recv_end)
+    cluster.init_connect()?;
+    cluster.heartbeat_loop(joined, &recv_end)
 }
 
 fn init_logs(f: &Path, level: simplelog::LevelFilter) -> ForkliftResult<()> {
