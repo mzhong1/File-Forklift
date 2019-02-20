@@ -34,7 +34,7 @@ fn get_default_v4_iface() -> Result<Option<String>> {
 
 /// Get the local ip address of the default route
 /// on this machine
-pub fn get_ip(send_log: Sender<LogMessage>) -> ForkliftResult<Option<SocketAddr>> {
+pub fn get_ip(send_log: &Sender<LogMessage>) -> ForkliftResult<Option<SocketAddr>> {
     let default_iface = get_default_v4_iface()?;
     let default_iface = default_iface.unwrap();
     trace!("Default interface: {:?}", default_iface);

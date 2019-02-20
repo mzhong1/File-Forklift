@@ -30,10 +30,10 @@ impl ProgressWorker {
     //NOte: Figure out a way to send off postgres in this function
     pub fn start(&self, send_log: &Sender<LogMessage>) -> ForkliftResult<SyncStats> {
         let mut stats = SyncStats::new();
-        let mut file_done = 0;
+        let mut file_done;
         let mut current_file = "".to_string();
         let mut index = 0;
-        let mut total_done = 0;
+        let mut total_done;
         let now = Instant::now();
         for progress in self.input.iter() {
             match progress {
@@ -74,8 +74,9 @@ impl ProgressWorker {
                         }
                         _ => {}
                     }
+
                     stats.add_outcome(&x);
-                    file_done = 0;
+                    //file_done = 0;
                 }
                 ProgressMessage::SendError(error) => {
                     send_mess(LogMessage::Error(error), send_log)?;
@@ -103,7 +104,7 @@ impl ProgressWorker {
                     self.progress_info.progress(&detailed_progress);
                 }
             }
-            send_mess(LogMessage::TotalSync(stats.clone()), send_log)?;
+            send_mess(LogMessage::TotalSync(stats), send_log)?;
         }
         self.progress_info.end(&stats);
         send_mess(LogMessage::End, send_log)?;

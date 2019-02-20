@@ -470,7 +470,7 @@ pub fn update_files(file: &Files, conn: &Connection) -> ForkliftResult<()> {
     Ok(())
 }
 
-pub fn post_update_files(file: Files, conn: &Option<Connection>) -> ForkliftResult<()> {
+pub fn post_update_files(file: &Files, conn: &Option<Connection>) -> ForkliftResult<()> {
     match conn {
         Some(e) => update_files(&file, &e)?,
         None => (),
@@ -478,7 +478,7 @@ pub fn post_update_files(file: Files, conn: &Option<Connection>) -> ForkliftResu
     Ok(())
 }
 
-pub fn post_update_totalsync(stat: SyncStats, conn: &Option<Connection>) -> ForkliftResult<()> {
+pub fn post_update_totalsync(stat: &SyncStats, conn: &Option<Connection>) -> ForkliftResult<()> {
     match conn {
         Some(e) => {
             let tot_stat = TotalSync::new(&stat);
@@ -489,7 +489,7 @@ pub fn post_update_totalsync(stat: SyncStats, conn: &Option<Connection>) -> Fork
     Ok(())
 }
 
-pub fn post_update_nodes(status: Nodes, conn: &Option<Connection>) -> ForkliftResult<()> {
+pub fn post_update_nodes(status: &Nodes, conn: &Option<Connection>) -> ForkliftResult<()> {
     match conn {
         Some(e) => {
             update_nodes(&status, &e)?;

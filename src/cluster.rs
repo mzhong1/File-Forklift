@@ -1,6 +1,6 @@
 use api;
 
-use crossbeam::channel::{Sender, Receiver};
+use crossbeam::channel::{Receiver, Sender};
 use log::*;
 use nanomsg::{Error, PollFd, PollInOut, PollRequest, Socket};
 use std::net::SocketAddr;
@@ -12,40 +12,70 @@ use crate::node::*;
 use crate::postgres_logger::{send_mess, LogMessage};
 use crate::pulse::*;
 use crate::socket_node::*;
-use crate::tables::*;
+use crate::tables::ErrorType;
 use crate::EndState;
 
 pub struct Cluster {
+    /// the number of seconds a node can live without hearing a heartbeat
     pub lifetime: u64,
+    /// Object to determine when to beat
     pub pulse: Pulse,
+    /// List of socket addresses in the cluster
     pub names: NodeList,
+    /// mapping of socket addresses to SocketNodes
     pub nodes: NodeMap,
+    /// router used to connect with other nodes
     pub router: Socket,
-    pub sender: Sender<ChangeList>,
-    pub send_log: Sender<LogMessage>,
+    /// current node address
+    pub node_address: SocketAddr,
+    /// channel to rendezvous thread
+    pub node_change_output: Sender<ChangeList>,
+    /// channel to postgres logger
+    pub log_output: Sender<LogMessage>,
 }
 
 impl Cluster {
+    ///
+    /// Create a new cluster
+    ///
+    /// @param lifetime             the number of seconds a node can live without a heartbeat.  Must be > 0
+    ///
+    /// @param router               router to connect with nodes
+    ///
+    /// @param init                 initial socket address (current machine's address)
+    ///
+    /// @param node_change_output   channel to rendezvous thread
+    ///
+    /// @param log_output           channel to postgres logging
+    ///
+    /// @return                     a new Cluster
+    ///
     pub fn new(
         lifetime: u64,
         router: Socket,
-        init: &SocketAddr,
-        sender: Sender<ChangeList>,
-        send_log: Sender<LogMessage>,
+        node_address: &SocketAddr,
+        node_change_output: Sender<ChangeList>,
+        log_output: Sender<LogMessage>,
     ) -> Self {
         let mut names = NodeList::new();
-        names.add_node_to_list(init);
+        names.add_node_to_list(node_address);
         Cluster {
             lifetime,
             pulse: Pulse::new(1000),
             names,
             nodes: NodeMap::new(),
             router,
-            sender,
-            send_log,
+            node_address: *node_address,
+            node_change_output,
+            log_output,
         }
     }
 
+    ///
+    /// checks if the Cluster is valid
+    ///
+    /// @return     true if the cluster is valid, false otherwise
+    ///
     fn is_valid_cluster(&self) -> (bool, String) {
         if self.lifetime == 0 {
             return (false, "Lifetime is 0!".to_string());
@@ -56,37 +86,41 @@ impl Cluster {
         (true, "Cluster is Valid".to_string())
     }
 
-    /**
-     * connect_node: &self * &str -> ForkliftResult<()>
-     * REQUIRES: router in self is a valid Socket
-     * ENSURES: connects router to the address of full_address, output
-     * error otherwise
-     */
-    pub fn connect_node(&mut self, full_address: &SocketAddr) -> ForkliftResult<()> {
-        debug!("Try to connect router to {}", full_address);
-        let tcp: String = format!("tcp://{}", full_address.to_string());
+    ///
+    /// connect router to an address
+    ///
+    /// @param connect_address  valid socket address to connect to
+    ///    
+    /// @return                 nothing on success, Error on failure
+    ///
+    pub fn connect_node(&mut self, connect_address: &SocketAddr) -> ForkliftResult<()> {
+        debug!("Try to connect router to {}", connect_address);
+        let tcp: String = format!("tcp://{}", connect_address.to_string());
         self.router.connect(&tcp)?;
         Ok(())
     }
 
-    /**
-     * add_node: &mut self * &str * bool-> null
-     * REQUIRES: router in self is properly connected
-     * ENSURES: makes a new node given that the node names does not previously exist, and adds itself to both the
-     * node_Names and the nodes, and connects the node to given.  Otherwise it does nothing.
-     */
-    pub fn add_node(&mut self, full_address: &SocketAddr, heartbeat: bool) -> ForkliftResult<()> {
-        if !self.names.contains_full_address(full_address) {
+    ///
+    /// Add a new node to the cluster if it does not previouslt exist
+    ///
+    /// @param node_address     address of node to add
+    ///
+    /// @param heartbeat        boolean determining node liveness
+    ///
+    /// @return                 nothing on success, Error if fails
+    ///
+    pub fn add_node(&mut self, node_address: &SocketAddr, heartbeat: bool) -> ForkliftResult<()> {
+        if !self.names.contains_full_address(node_address) {
             debug!("Node names before adding {:?}", self.names.node_list);
             debug!("Node Map before adding {:?}", self.nodes.node_map);
-            self.names.add_node_to_list(&full_address);
+            self.names.add_node_to_list(&node_address);
             self.nodes
-                .add_node_to_map(&full_address, self.lifetime, heartbeat)?;
-            match self.connect_node(&full_address) {
+                .add_node_to_map(&node_address, self.lifetime, heartbeat)?;
+            match self.connect_node(&node_address) {
                 Ok(t) => t,
                 Err(e) => {
                     error!("Unable to connect to the node at ip address: {}", e);
-                    self.send_message(LogMessage::Error(e))?;
+                    self.send_log(LogMessage::Error(e))?;
                 }
             };
             debug!("Node names after adding {:?}", self.names.node_list);
@@ -95,58 +129,47 @@ impl Cluster {
         Ok(())
     }
 
-    /**
-     * send_getlist: &self * &str * &PollRequest -> ForkliftResult<()>
-     * REQUIRES: &PollRequest a valid file descriptor
-     * full_addr in the form of ip:port, router in self a valid socket
-     * ENSURES: sends a GETLIST with the message of full_address to the cluster.
-     */
-    pub fn send_getlist(
-        &mut self,
-        full_address: &SocketAddr,
-        request: &PollRequest<'_>,
-    ) -> ForkliftResult<()> {
-        let beat = self.pulse.beat();
-        if request.get_fds()[0].can_write() && beat {
-            debug!("Send a GETLIST from {}", full_address);
-            let message =
-                message::create_message(MessageType::GETLIST, &[full_address.to_string()]);
-            match self.router.nb_write(message.as_slice()) {
-                Ok(_) => debug!("GETLIST sent from {}", full_address),
-                Err(Error::TryAgain) => {
-                    self.send_message(LogMessage::ErrorType(
-                        ErrorType::NanomsgError,
-                        "Receiver not ready, message can't be sent".to_string(),
-                    ))?;
-                }
-                Err(e) => {
-                    self.send_message(LogMessage::ErrorType(
-                        ErrorType::NanomsgError,
-                        format!("Error {:?}, Failed to write to socket", e),
-                    ))?;
-                }
-            };
+    ///
+    /// send a GETLIST message to a node with the socket address of the current node
+    ///
+    /// @param request          poll of connected sockets (a valid file descriptor)
+    ///
+    /// @return                 nothing on success, else error
+    pub fn send_getlist(&mut self, request: &PollRequest<'_>) -> ForkliftResult<()> {
+        if request.get_fds()[0].can_write() && self.pulse.beat() {
+            trace!("Send a GETLIST from {}", self.node_address);
+            let msg =
+                message::create_message(MessageType::GETLIST, &[self.node_address.to_string()]);
+            self.send_message(msg, "Getlist sent!")?;
         }
         Ok(())
     }
-    pub fn send_message(&self, mess: LogMessage) -> ForkliftResult<()> {
-        send_mess(mess, &self.send_log)?;
+
+    ///
+    /// send message to postgres
+    ///
+    /// @param message  message to send
+    ///
+    /// @return         nothing on success, error on fail
+    ///
+    pub fn send_log(&self, message: LogMessage) -> ForkliftResult<()> {
+        send_mess(message, &self.log_output)?;
         Ok(())
     }
-    /**
-     * send_nodelist: &mut self * &[String] -> null
-     * REQUIRES: self is valid, msg_body should be non-empty, with the first and only item in the message body
-     * from the GETLIST recieved message body (containing the address of the node asking for the NODELIST),
-     * router a valid connected socket
-     * ENSURES: The router sends a NODELIST to the sender of a GETLIST request (although it goes to all connected nodes),
-     * otherwise it does nothing if the message body of the GETLIST request is empty.  
-     */
+
+    ///
+    /// send a nodelist message to all connected nodes upon receiving a GETLIST request from a node.
+    /// Do nothing if the GETLIST request is empty
+    ///
+    /// @param msg_body     A non-empty message with the socket address of the node requesting a NODELIST
+    ///
+    /// @return             Nothing on success, else error.  
+    ///
     pub fn send_nodelist(&mut self, msg_body: &[String]) -> ForkliftResult<()> {
         let address_names = self.names.to_string_vector();
-        let buffer = message::create_message(MessageType::NODELIST, &address_names);
+        let msg = message::create_message(MessageType::NODELIST, &address_names);
         let (valid, err) = self.is_valid_cluster();
         if !valid {
-            // self.conn send error here
             return Err(ForkliftError::HeartbeatError(format!(
                 "Error {:?}, cluster invalid",
                 err,
@@ -157,28 +180,10 @@ impl Cluster {
                 Ok(s) => {
                     self.add_node(&s, true)?;
                     debug!("Send a NODELIST to {:?}", s);
-                    match self.router.nb_write(buffer.as_slice()) {
-                        Ok(_) => debug!("NODELIST sent to {:?}!", s),
-                        Err(Error::TryAgain) => {
-                            self.send_message(LogMessage::ErrorType(
-                                ErrorType::NanomsgError,
-                                "Receiver not ready, message can't be sent".to_string(),
-                            ))?;
-                        }
-                        Err(err) => {
-                            self.send_message(LogMessage::ErrorType(
-                                ErrorType::NanomsgError,
-                                format!("Error {:?}. Problem while writing", err),
-                            ))?;
-                        }
-                    };
+                    self.send_message(msg, "Nodelist sent!")?;
                 }
                 Err(e) => {
-                    error!(
-                        "Unable to parse the sender's address into a SocketAddr {}",
-                        e
-                    );
-                    self.send_message(LogMessage::ErrorType(
+                    self.send_log(LogMessage::ErrorType(
                         ErrorType::AddrParseError,
                         format!("Error {:?}, unable to parse the sender's address", e),
                     ))?;
@@ -188,25 +193,26 @@ impl Cluster {
         Ok(())
     }
 
-    /**
-     * send_heartbeat: &mut self * &str -> null
-     * REQUIRES: router in self a valid Socket
-     * ENSURES: sends a HEARTBEAT message to all connected nodes
-     */
-    pub fn send_heartbeat(&mut self, full_address: &SocketAddr) -> ForkliftResult<()> {
-        debug!("Send a HEARTBEAT!");
-        let buffer = vec![full_address.to_string()];
-        let msg = message::create_message(MessageType::HEARTBEAT, &buffer);
+    ///
+    /// broadcast a message to the cluster
+    ///
+    /// @param msg      the bit-serialized message
+    ///
+    /// @param debug    the debug message upon success
+    ///
+    /// @return         nothing on success, else error
+    ///
+    fn send_message(&mut self, msg: Vec<u8>, debug: &str) -> ForkliftResult<()> {
         match self.router.nb_write(msg.as_slice()) {
-            Ok(_) => debug!("HEARTBEAT sent!"),
+            Ok(_) => debug!("{}", debug),
             Err(Error::TryAgain) => {
-                self.send_message(LogMessage::ErrorType(
+                self.send_log(LogMessage::ErrorType(
                     ErrorType::NanomsgError,
                     "Receiver not ready, message can't be sent".to_string(),
                 ))?;
             }
             Err(err) => {
-                self.send_message(LogMessage::ErrorType(
+                self.send_log(LogMessage::ErrorType(
                     ErrorType::NanomsgError,
                     format!("Error {:?}. Problem while writing", err),
                 ))?;
@@ -215,13 +221,25 @@ impl Cluster {
         Ok(())
     }
 
-    /**
-     * tickdown_nodes: &mut self -> null
-     * REQUIRES: is valid Cluster
-     * ENSURES: for all nodes that have not sent a HEARTBEAT message to you within
-     * a second, tickdown their liveness.  For all nodes that HAVE sent you a
-     * HEARTBEAT message, reset their has_heartbeat value to false
-     */
+    ///
+    /// send a HEARTBEAT message to all connected nodes
+    ///
+    /// @return     nothing on success, else error
+    ///
+    pub fn send_heartbeat(&mut self) -> ForkliftResult<()> {
+        debug!("Send a HEARTBEAT!");
+        let buffer = vec![self.node_address.to_string()];
+        let msg = message::create_message(MessageType::HEARTBEAT, &buffer);
+        self.send_message(msg, "Heeartbeat sent!")?;
+        Ok(())
+    }
+
+    ///
+    /// tickdown the liveness of all nodes that have not sent a HEARTBEAT within a second.
+    /// reset has_heartbeat to false on all nodes
+    ///
+    /// @return     nothing on success, else error
+    ///
     pub fn tickdown_nodes(&mut self) -> ForkliftResult<()> {
         let (valid, err) = self.is_valid_cluster();
         if !valid {
@@ -232,20 +250,17 @@ impl Cluster {
         }
         trace!("Tickdown and reset nodes");
         for name in &self.names.to_string_vector() {
-            let s = &self.sender;
-            let log = &self.send_log;
+            let change_output = &self.node_change_output;
+            let log_output = &self.log_output;
             self.nodes.node_map.entry(name.to_string()).and_modify(|n| {
                 if !n.has_heartbeat && n.tickdown() {
-                    let cl = ChangeList::new(ChangeType::RemNode, SocketNode::new(n.name));
-                    if s.send(cl).is_err() {
-                        send_mess(
-                            LogMessage::ErrorType(
-                                ErrorType::CrossbeamChannelError,
-                                "Channel to rendezvous is broken".to_string(),
-                            ),
-                            log,
-                        )
-                        .unwrap();
+                    let change_list = ChangeList::new(ChangeType::RemNode, SocketNode::new(n.name));
+                    if change_output.send(change_list).is_err() {
+                        let mess = LogMessage::ErrorType(
+                            ErrorType::CrossbeamChannelError,
+                            "Channel to rendezvous is broken".to_string(),
+                        );
+                        send_mess(mess, log_output).unwrap();
                         panic!("Channel to rendezvous is broken!");
                     }
                 } else {
@@ -279,7 +294,7 @@ impl Cluster {
         if request.get_fds()[0].can_write() {
             let beat = self.pulse.beat();
             if beat {
-                self.send_heartbeat(full_address)?;
+                self.send_heartbeat()?;
                 self.tickdown_nodes()?;
             }
         }
@@ -296,13 +311,13 @@ impl Cluster {
         match self.router.nb_read_to_end(&mut buffer) {
             Ok(_) => debug!("Read message {} bytes!", buffer.len()),
             Err(Error::TryAgain) => {
-                self.send_message(LogMessage::ErrorType(
+                self.send_log(LogMessage::ErrorType(
                     ErrorType::NanomsgError,
                     "Nothing to be read".to_string(),
                 ))?;
             }
             Err(err) => {
-                self.send_message(LogMessage::ErrorType(
+                self.send_log(LogMessage::ErrorType(
                     ErrorType::NanomsgError,
                     format!("Error {:?}. Problem while writing", err),
                 ))?;
@@ -335,7 +350,7 @@ impl Cluster {
             let list = match message::read_message(buf) {
                 Some(t) => t,
                 None => {
-                    self.send_message(LogMessage::ErrorType(
+                    self.send_log(LogMessage::ErrorType(
                         ErrorType::HeartbeatError,
                         "NODELIST message is empty".to_string(),
                     ))?;
@@ -348,7 +363,7 @@ impl Cluster {
                         self.add_node(&s, false)?;
                     }
                     Err(e) => {
-                        self.send_message(LogMessage::ErrorType(
+                        self.send_log(LogMessage::ErrorType(
                             ErrorType::AddrParseError,
                             format!("Error {:?}, unable to parse socket address {:?}", e, l),
                         ))?;
@@ -381,8 +396,8 @@ impl Cluster {
             match &msg_body[0].parse::<SocketAddr>() {
                 Ok(sent_address) => {
                     self.add_node(&sent_address, true)?;
-                    let s = &self.sender;
-                    let log = &self.send_log;
+                    let s = &self.node_change_output;
+                    let log = &self.log_output;
                     self.nodes
                         .node_map
                         .entry(sent_address.to_string())
@@ -407,7 +422,7 @@ impl Cluster {
                         });
                 }
                 Err(e) => {
-                    self.send_message(LogMessage::ErrorType(
+                    self.send_log(LogMessage::ErrorType(
                         ErrorType::AddrParseError,
                         format!("Error {:?}, unable to parse socket address", e),
                     ))?;
@@ -444,7 +459,7 @@ impl Cluster {
                 Some(t) => t,
                 None => {
                     error!("Message body is empty. Ignore the message");
-                    self.send_message(LogMessage::ErrorType(
+                    self.send_log(LogMessage::ErrorType(
                         ErrorType::HeartbeatError,
                         "Message body is empty. Ignore the message".to_string(),
                     ))?;
@@ -464,7 +479,7 @@ impl Cluster {
                     debug!("Can read message of type HEARTBEAT");
                     self.heartbeat_heard(&msg_body)?;
                     if !*has_nodelist {
-                        match self.send_getlist(full_address, request) {
+                        match self.send_getlist(request) {
                             Ok(t) => t,
                             Err(e) => {
                                 return Err(e);
@@ -539,7 +554,7 @@ impl Cluster {
             Socket::poll(&mut request, self.pulse.interval as isize)?;
 
             if !*has_nodelist {
-                match self.send_getlist(full_address, &request) {
+                match self.send_getlist(&request) {
                     Ok(t) => t,
                     Err(e) => {
                         error!("Time ran backwards!  Abort! {}", e);
@@ -565,7 +580,7 @@ impl Cluster {
                             "Error: {} Unable to connect to the node at ip address: {}",
                             e, full_address
                         );
-                        self.send_message(LogMessage::Error(e))?;
+                        self.send_log(LogMessage::Error(e))?;
                     }
                 };
             }

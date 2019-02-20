@@ -1,5 +1,5 @@
 //SyncStats
-use crate::error::{ForkliftError, ForkliftResult};
+use crate::error::ForkliftResult;
 use crate::filesystem::*;
 use crate::filesystem_entry::Entry;
 use crate::filesystem_ops::SyncOutcome;
@@ -17,7 +17,7 @@ use rendezvous_hash::{DefaultNodeHasher, RendezvousNodes};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
-#[derive(Default, Debug, Clone)]
+#[derive(Default, Debug, Clone, Copy)]
 pub struct SyncStats {
     /// total number of files in the source
     pub tot_files: u64,

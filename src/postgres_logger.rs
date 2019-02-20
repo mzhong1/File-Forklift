@@ -3,9 +3,11 @@ use crate::tables::*;
 use crate::SyncStats;
 
 use crossbeam::channel::{Receiver, Sender};
+use log::trace;
 use postgres::Connection;
 use std::sync::{Arc, Mutex};
 
+#[derive(Debug)]
 pub enum LogMessage {
     Error(ForkliftError),
     ErrorType(ErrorType, String),
@@ -31,6 +33,7 @@ pub struct PostgresLogger {
 }
 
 pub fn send_mess(log: LogMessage, send_log: &Sender<LogMessage>) -> ForkliftResult<()> {
+    trace!("Sending {:?} to postgres", log);
     if send_log.send(log).is_err() {
         return Err(ForkliftError::CrossbeamChannelError(
             "Unable to send error to postgres_logger".to_string(),
@@ -65,13 +68,13 @@ impl PostgresLogger {
                     post_err(e, r, &conn)?;
                 }
                 LogMessage::File(f) => {
-                    post_update_files(f, &conn)?;
+                    post_update_files(&f, &conn)?;
                 }
                 LogMessage::Nodes(n) => {
-                    post_update_nodes(n, &conn)?;
+                    post_update_nodes(&n, &conn)?;
                 }
                 LogMessage::TotalSync(s) => {
-                    post_update_totalsync(s, &conn)?;
+                    post_update_totalsync(&s, &conn)?;
                 }
                 LogMessage::End => {
                     if self.end_heartbeat.send(EndState::EndProgram).is_err() {

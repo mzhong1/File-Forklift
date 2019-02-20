@@ -275,7 +275,7 @@ fn main() -> ForkliftResult<()> {
     }
 
     trace!("Attempting to get local ip address");
-    let ip_address = match local_ip::get_ip(send_log.clone()) {
+    let ip_address = match local_ip::get_ip(&send_log.clone()) {
         Ok(Some(ip)) => ip.ip(),
         Ok(None) => {
             send_mess(

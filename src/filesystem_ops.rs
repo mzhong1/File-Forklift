@@ -450,7 +450,7 @@ pub fn has_different_permissions(
 /// @return         returns the target link as a vector of ubytes
 ///
 fn make_target(size: i64, readmax: u64) -> ForkliftResult<Vec<u8>> {
-    let mut src_target: Vec<u8>;
+    let src_target: Vec<u8>;
     if size <= readmax as i64 {
         if size > 0 {
             src_target = vec![0; size as usize]
