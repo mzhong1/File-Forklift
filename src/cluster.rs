@@ -15,6 +15,7 @@ use crate::socket_node::*;
 use crate::tables::ErrorType;
 use crate::EndState;
 
+/// An object representing a cluster of nodes
 pub struct Cluster {
     /// the number of seconds a node can live without hearing a heartbeat
     pub lifetime: u64,

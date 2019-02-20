@@ -8,9 +8,11 @@ use crate::rsync::*;
 
 /// Note: Credit to these functions goes to dmerejkowsky's rusync
 
+/// Object used to output statistics to the console
 pub struct ConsoleProgressOutput {}
 
 impl ConsoleProgressOutput {
+    /// create a new console output
     pub fn new() -> ConsoleProgressOutput {
         ConsoleProgressOutput {}
     }
@@ -85,6 +87,11 @@ impl ProgressInfo for ConsoleProgressOutput {
     }
 }
 
+///
+/// get the width of the terminal being printed to
+/// 
+/// @return     the width of the terminal, else default to 80 units
+/// 
 fn get_terminal_width() -> usize {
     if let Some((w, _)) = dimensions() {
         return w;
@@ -93,12 +100,22 @@ fn get_terminal_width() -> usize {
     80
 }
 
+///
+/// remove a line from stdout
+/// 
+/// @return     nothing
+/// 
 fn erase_line() {
     let line_width = get_terminal_width();
     let line = vec![32 as u8; line_width as usize];
     print!("{}\r", String::from_utf8_lossy(&line));
 }
 
+///
+/// convert seconds of time to h:m:s formatted string
+/// 
+/// @return     formatting string
+/// 
 fn human_seconds(s: usize) -> String {
     let hours = s / 3600;
     let minutes = (s / 60) % 60;
