@@ -91,7 +91,7 @@ impl Cluster {
     /// Add a new node to the cluster if it does not previously exist
     ///
     pub fn add_node(&mut self, node_address: &SocketAddr, heartbeat: bool) -> ForkliftResult<()> {
-        if !self.names.contains_full_address(node_address) {
+        if !self.names.contains_address(node_address) {
             debug!("Node names before adding {:?}", self.names.node_list);
             debug!("Node Map before adding {:?}", self.nodes.node_map);
             self.names.add_node_to_list(&node_address);
@@ -112,7 +112,7 @@ impl Cluster {
 
     ///
     /// send a GETLIST message to a node with the socket address of the current node
-    /// 
+    ///
     pub fn send_getlist(&mut self, request: &PollRequest<'_>) -> ForkliftResult<()> {
         if request.get_fds()[0].can_write() && self.pulse.beat() {
             trace!("Send a GETLIST from {}", self.node_address);

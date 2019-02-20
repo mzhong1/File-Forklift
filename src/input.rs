@@ -46,12 +46,15 @@ fn default_workgroup() -> String {
 fn default_lifetime() -> u64 {
     5
 }
+///
+/// Check if given path is an smburl
 /// NOTE: the smburl format is smb://server/share.  Other
 /// smburl syntax, such as smb://username:password@server/share will not
 /// work, though they will pass the is_smb_path test, as whether or not
 /// the url will work depends entirely on the smbclient you are using.
 /// In general, refrain from using additional parts and input them in
 /// the command line as opposed to in the smburl for security at the very least.  
+///
 pub fn is_smb_path(path: &PathBuf) -> bool {
     let p = path.to_string_lossy().into_owned();
     // Why 8?  6 for smb://, + 1 for minimum server name + 1 for /, + 1 for minimum share name

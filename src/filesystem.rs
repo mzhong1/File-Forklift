@@ -16,10 +16,6 @@ use std::path::Path;
 ///
 /// create a CString from a rust String
 ///
-/// @param input    the string to convert
-///
-/// @return         A CString version of the input string
-///
 pub fn create_cstring(input: &str) -> CString {
     //Note, new only returns Err if the input str contains a '/0' character
     match CString::new(input) {
@@ -36,18 +32,7 @@ pub fn create_cstring(input: &str) -> CString {
 }
 
 ///
-/// initialize the Samba contexts
-///
-/// @param wg       The workgroup of the user
-///
-/// @param un       The username of the user
-///
-/// @param pw       The password of the user
-///
-/// @param level    The debug level of the context
-///
-/// @return         A new samba context, or Error
-///                 should the function fail
+/// initialize the Samba context
 ///          
 pub fn init_samba(wg: String, un: String, pw: String, level: u32) -> ForkliftResult<Smbc> {
     Smbc::set_data(wg, un, pw);
@@ -63,11 +48,6 @@ pub fn init_samba(wg: String, un: String, pw: String, level: u32) -> ForkliftRes
 ///
 /// get the thread index or a random number
 ///
-/// @param pool The ThreadPool to get the index from
-///
-/// @return     the index of the current thread in the pool,
-///             otherwise return a random number
-///
 pub fn get_index_or_rand(pool: &ThreadPool) -> usize {
     match pool.current_thread_index() {
         Some(i) => i,
@@ -81,15 +61,6 @@ pub fn get_index_or_rand(pool: &ThreadPool) -> usize {
 
 ///
 /// create a new nfs Network context
-///
-/// @param ip       the server of the NFS share to connect to
-///
-/// @param share    the name of the NFS share to connect to
-///
-/// @param level    the debug level of the context
-///
-/// @return         A new NFS context wrapped in a NetworkContext,
-///                 otherwise an Error should the function fail
 ///     
 pub fn create_nfs_context(ip: &str, share: &str, level: u32) -> ForkliftResult<NetworkContext> {
     let nfs = Nfs::new()?;
@@ -358,38 +329,17 @@ pub trait File {
     ///
     /// read some number of bytes starting at offset from the file
     ///
-    /// @param count    the number of bytes to read
-    ///
-    /// @param offset   the offset from the beginning of the file to read from
-    ///
-    /// @return         A Vec<u8> of the read data bytes, or Error should
-    ///                 the function fail
-    ///
     fn read(&self, count: u64, offset: u64) -> ForkliftResult<Vec<u8>>;
     ///
     /// write something to the file starting at offset
-    ///
-    /// @param buf      the data to write to the file
-    ///
-    /// @param offset   the offset from the beginning of the file to write to
-    ///
-    /// @return         u64 of how many bytes were written, or Error should
-    ///                 the function fail
     ///
     fn write(&self, buf: &[u8], offset: u64) -> ForkliftResult<u64>;
     ///
     /// get this file's metadata
     ///
-    /// @return         A Stat containing the file's metadata, or Error
-    ///                 should the function fail (file does not exist)
-    ///
     fn fstat(&self) -> ForkliftResult<Stat>;
     ///
     /// truncate the file to size
-    ///
-    /// @param size     The size to trim the file to
-    ///
-    /// @return         Nothin on success, Error should the function fail
     ///
     fn truncate(&self, size: u64) -> ForkliftResult<()>;
 }
@@ -414,8 +364,6 @@ impl DirEntryType {
     ///
     /// get the associated path of the directory entry
     ///
-    /// @return     the path of the DirEntry
-    ///
     pub fn path(&self) -> &Path {
         match self {
             DirEntryType::Samba(smbentry) => smbentry.path.as_path(),
@@ -425,8 +373,6 @@ impl DirEntryType {
 
     ///
     /// get the general filetype of the directory entry
-    ///
-    /// @return     the FileType of the DirEntry
     ///
     pub fn filetype(&self) -> GenericFileType {
         match self {
@@ -484,12 +430,6 @@ pub struct Timespec {
 impl Timespec {
     ///
     /// create a new Timespec
-    ///
-    /// @param sec      the number of seconds since the system's EPOCH
-    ///
-    /// @param nsec     the number of nanoseconds since the system's EPOCH - sec
-    ///
-    /// @return         A new Timespec representing the time since the system's EPOCH
     ///
     pub fn new(sec: i64, nsec: i64) -> Self {
         Timespec {
@@ -553,9 +493,6 @@ impl Timespec {
     ///
     /// print the time formatted
     ///
-    /// @return     Nothing. The time represented by Timespec will be printed
-    ///             to the console formatted
-    ///
     pub fn print_timeval_secs(&self) {
         let time = self.num_seconds();
         let naive_datetime = NaiveDateTime::from_timestamp(time, 0);
@@ -598,16 +535,6 @@ pub struct Stat {
 impl Stat {
     ///
     /// create a new Stat
-    ///
-    /// @param stat     the stat values sans the timevalues
-    ///
-    /// @param atime    the access time
-    ///
-    /// @param mtime    the modification time
-    ///
-    /// @param ctime     the status change time
-    ///
-    /// @return         a new Stat object
     ///
     pub fn new(
         stat: (u64, u64, u32, u64, u32, u32, u64, i64, i64, i64),
@@ -690,90 +617,37 @@ pub trait FileSystem {
     ///
     /// create a new FileType with the File trait
     ///
-    /// @param path     path of the file to create
-    ///
-    /// @param flags    flags to create the file with. See libNFS or Samba
-    ///                 for the specific flags to use or MAN(creat)
-    ///
-    /// @param mode     the protection (permissions) of the file
-    ///
-    /// @return         A FileType with the File trait (A generic file
-    ///                 handle) or Error should the function fail
-    ///
     fn create(&mut self, path: &Path, flags: OFlag, mode: Mode) -> ForkliftResult<FileType>;
     ///
     /// change the permissions on a file/directory to mode
-    ///
-    /// @param path     the path of the file/directory to change the permissions of
-    ///
-    /// @param mode     the protection (permissions) to change to
-    ///
-    /// @return         Nothing, or Error should the function fail
     ///
     fn chmod(&self, path: &Path, mode: Mode) -> ForkliftResult<()>;
     ///
     /// get the metadata of a file
     ///
-    /// @param path     the path of the file/directory to get the metadata of
-    ///
-    /// @return         A Stat object containing the metadata of the file/directory,
-    ///                 or Error should the function fail
-    ///
     fn stat(&self, path: &Path) -> ForkliftResult<Stat>;
     ///
     /// make a new directory at path
-    ///
-    /// @param path     the path of the directory to make
-    ///
-    /// @return         nothing on success, or Error should the function fail
     ///
     fn mkdir(&self, path: &Path) -> ForkliftResult<()>;
     ///
     /// open a file at path
     ///
-    /// @param path     the path of the file to open
-    ///
-    /// @param flags    the flags to open the file with (See Linux MAN(open),
-    ///                 libNFS open, and/or Samba open for details on specific flags)
-    ///
-    /// @param mode     the permissions to open the file with
-    ///
-    /// @return         A FileType with the File trait (generic file handle), or Error
-    ///                 should the function fail
-    ///
     fn open(&mut self, path: &Path, flags: OFlag, mode: Mode) -> ForkliftResult<FileType>;
     ///
     /// open a directory at path
-    ///
-    /// @param path     the path of the directory to open
-    ///
-    /// @return         A DirectoryType, or Error should the function fail
     ///
     fn opendir(&mut self, path: &Path) -> ForkliftResult<DirectoryType>;
     ///
     /// rename a file/directory
     ///
-    /// @param oldpath  the old path of a file
-    ///
-    /// @param newpath  the new path of a file
-    ///
-    /// @return         Nothing on success, Error should the function fail
-    ///
     fn rename(&self, oldpath: &Path, newpath: &Path) -> ForkliftResult<()>;
     ///
     /// remove a directory
     ///
-    /// @param path     the path of the directory to remove
-    ///
-    /// @return         Nothing on success, Error should the function fail
-    ///
     fn rmdir(&self, path: &Path) -> ForkliftResult<()>;
     ///
     /// unlink (remove) a file
-    ///
-    /// @param path     the path of the file to remove
-    ///
-    /// @return         Nothing on success, Error should the function fail
     ///
     fn unlink(&self, path: &Path) -> ForkliftResult<()>;
 }

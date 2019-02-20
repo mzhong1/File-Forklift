@@ -14,17 +14,14 @@ use std::time::SystemTimeError;
 pub type ForkliftResult<T> = Result<T, ForkliftError>;
 
 #[derive(Debug)]
-/// String conversion errors
 pub enum ConvertStringError {
-    /// Error converting Vec<u16> to String
     FromUtf16Error(FromUtf16Error),
-    /// Error converting Vec<u8> to String
     FromUtf8Error(FromUtf8Error),
-    
     StringParseError(StringParseError),
 }
 
 #[derive(Debug)]
+/// custom error types for Filesystem Forklift
 pub enum ForkliftError {
     IoError(IoError),
     SystemTimeError(SystemTimeError),

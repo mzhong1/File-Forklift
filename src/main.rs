@@ -139,7 +139,7 @@ fn init_logs(f: &Path, level: simplelog::LevelFilter) -> ForkliftResult<()> {
 
 ///
 /// Main takes in a config file, username, password, debuglevel, and debug path
-/// 
+///
 fn main() -> ForkliftResult<()> {
     let matches = App::new("Heartbeat Logs")
         .author(crate_authors!())

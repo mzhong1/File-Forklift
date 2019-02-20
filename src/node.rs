@@ -7,35 +7,38 @@ use std::hash::{Hash, Hasher};
 use std::net::SocketAddr;
 
 #[derive(Debug, Clone, Eq)]
+/// object storing the information of a node
 pub struct Node {
-    ///name of node
+    /// name of node
     pub name: SocketAddr,
+    /// how long the node can live without a heartbeat
     pub lifetime: u64,
+    /// how long before node dies
     pub liveness: i64,
+    /// a heartbeat was heard
     pub has_heartbeat: bool,
 }
 
 impl Node {
-    pub fn new(n: SocketAddr, lt: u64) -> Self {
+    pub fn new(name: SocketAddr, lifetime: u64) -> Self {
+        /// create a dead node with lifetime lifetimr
         Node {
-            name: n,
-            lifetime: lt,
+            name,
+            lifetime,
             liveness: 0, //Note, new Nodes start as "Dead", so when a heartbeat is heard the list of active nodes is updated
             has_heartbeat: false,
         }
     }
-    pub fn node_new(n: SocketAddr, lt: u64, l: i64, h: bool) -> Self {
+    pub fn node_new(name: SocketAddr, lifetime: u64, liveness: i64, has_heartbeat: bool) -> Self {
         Node {
-            name: n,
-            lifetime: lt,
-            liveness: l,
-            has_heartbeat: h,
+            name,
+            lifetime,
+            liveness,
+            has_heartbeat,
         }
     }
 
-    /**
-     * ENSURES: returns true if the node was "dead" before the heartbeat was called
-     */
+    /// ENSURES: returns true if the node was "dead" before the heartbeat was called
     pub fn heartbeat(&mut self) -> bool {
         trace!(
             "Before Heartbeat: Node {}, liveness {}",
@@ -48,9 +51,8 @@ impl Node {
         debug!("Heartbeat Node {}, liveness {}", self.name, self.liveness);
         prev_liveness <= 0
     }
-    /**
-     * ENSURES: return true if the node "died" in this call to tickdown
-     */
+
+    /// ENSURES: return true if the node "died" in this call to tickdown
     pub fn tickdown(&mut self) -> bool {
         trace!(
             "Before Tickdown: Node {}, liveness {}",
@@ -92,11 +94,13 @@ impl PartialEq for Node {
 }
 
 #[derive(Debug, Clone)]
+/// A list of node socket addresses
 pub struct NodeList {
     pub node_list: Vec<SocketAddr>,
 }
 
 impl NodeList {
+    /// create a new empty nodelist
     pub fn new() -> Self {
         NodeList { node_list: vec![] }
     }
@@ -106,12 +110,8 @@ impl NodeList {
         NodeList { node_list }
     }
 
-    /*
-        get_full_address: &self * &str -> String
-        REQUIRES: ip a valid ip address
-        ENSURES: returns SOME(ip:port) associated with the input ip address
-        that is stored in node_names, otherwise return NONE
-    */
+    /// get the socket address associated with the input ip address
+    /// that is stored in node_names
     pub fn get_full_address(&self, ip: &str) -> Option<SocketAddr> {
         trace!(
             "Attempt to get full address of input ip {} from list of sockets",
@@ -128,42 +128,28 @@ impl NodeList {
         None
     }
 
-    /*
-        contains_full_address &str -> bool
-        REQUIRES: NONE,
-        ENSURES: returns true if the full address is in one of the SocketAddr elements of node_names,
-        false otherwise
-    */
-    pub fn contains_full_address(&self, full_address: &SocketAddr) -> bool {
-        self.node_list.iter().any(|n| n == full_address)
+    /// returns true if the socket address is in node_names,
+    ///    false otherwise
+    pub fn contains_address(&self, socket_address: &SocketAddr) -> bool {
+        self.node_list.iter().any(|n| n == socket_address)
     }
 
-    /**
-     * add_node_to_list: &self * &str -> null
-     * REQUIRES: NONE
-     * ENSURES: adds a new node with the address of full_address to node_names, if not already
-     * in the vector, else it does nothing
-     */
-    pub fn add_node_to_list(&mut self, full_address: &SocketAddr) {
+    /// add a new node to node_names, else do nothing if address already in node_names
+    pub fn add_node_to_list(&mut self, node_address: &SocketAddr) {
         trace!(
             "Attempting to add address {} to list of sockets",
             full_address
         );
-        if !self.contains_full_address(full_address) {
+        if !self.contains_address(node_address) {
             trace!(
                 "Address {} not already in list, attempting to parse to socket",
                 full_address
             );
-            self.node_list.push(full_address.clone());
+            self.node_list.push(node_address.clone());
         }
     }
 
-    /*
-        to_string_vector: &mut Vec<SocketAddr> -> Vec<String>
-        REQUIRES: NONE
-        ENSURES: returns a vector of the fulladdresses stored in node_names,
-        otherwise return an empty vector
-    */
+    /// get the socket addresses stored in node_names as a vector of strings
     pub fn to_string_vector(&self) -> Vec<String> {
         trace!(
             "Attempting to pull the full addresses in socket list {:?} into a vector",
@@ -179,22 +165,20 @@ impl NodeList {
 }
 
 #[derive(Debug, Clone)]
+/// Hashmap of socket addresses to Nodes
 pub struct NodeMap {
     pub node_map: HashMap<String, Node>,
 }
 
 impl NodeMap {
+    /// create a new empty node_map
     pub fn new() -> Self {
         NodeMap {
             node_map: HashMap::new(),
         }
     }
 
-    /*
-        init_nodemap: &Vec<SocketAddr> * &str * i64 -> Hashmap<String, Node>
-        REQUIRES: lifetime > 0
-        ENSURES: returns a HashMap of Nodes referenced by the ip:port address
-    */
+    /// create a HashMap of Nodes referenced by the socket address
     pub fn init_nodemap(
         full_address: &SocketAddr,
         lifetime: u64,
@@ -220,14 +204,10 @@ impl NodeMap {
         Ok(nodes)
     }
 
-    /**
-     * add_node_to_map: &slf * &str * i64 * bool
-     * REQUIRES: lifetime > 0
-     * ENSURES: new full_address node is added to the NodeMap
-     */
+    /// add a new node address to the node_map
     pub fn add_node_to_map(
         &mut self,
-        full_address: &SocketAddr,
+        node_address: &SocketAddr,
         lifetime: u64,
         heartbeat: bool,
     ) -> ForkliftResult<()> {
@@ -238,10 +218,10 @@ impl NodeMap {
             ));
         }
         trace!("Adding node to map");
-        let temp_node = Node::node_new(*full_address, lifetime, 0, heartbeat);
+        let temp_node = Node::node_new(*node_address, lifetime, 0, heartbeat);
         debug!("Node successfully created : {:?}", &temp_node);
         self.node_map
-            .entry(full_address.to_string())
+            .entry(node_address.to_string())
             .or_insert(temp_node);
         Ok(())
     }

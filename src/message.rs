@@ -133,6 +133,7 @@ fn test_get_message_type() {
     assert_eq!(result, expected_result);
 }
 
+/// create a new message to send
 pub fn create_message(m_type: MessageType, message: &[String]) -> Vec<u8> {
     trace!("Creating Message {:?} with body {:?}", m_type, message);
     let mut builder = flatbuffers::FlatBufferBuilder::new();
@@ -156,6 +157,7 @@ pub fn create_message(m_type: MessageType, message: &[String]) -> Vec<u8> {
     builder.finished_data().to_vec()
 }
 
+/// read a serialized message to a vector of string
 pub fn read_message(buf: &[u8]) -> Option<Vec<String>> {
     trace!("Calling get_root_as_message on buffer");
     let mess = get_root_as_message(&buf);
@@ -181,6 +183,7 @@ pub fn read_message(buf: &[u8]) -> Option<Vec<String>> {
     }
 }
 
+/// get the message type of a message
 pub fn get_message_type(buf: &[u8]) -> MessageType {
     trace!("Calling get_root_as_message");
     let mess = get_root_as_message(buf);

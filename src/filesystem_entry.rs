@@ -20,12 +20,6 @@ impl Entry {
     ///
     /// create a new Entry
     ///
-    /// @param epath    path of the Entry
-    ///
-    /// @param context  context of the path
-    ///
-    /// @return         a new Entry
-    ///
     pub fn new(epath: &Path, context: &NetworkContext) -> Self {
         let (metadata, is_link, is_dir) = match context.stat(epath) {
             Ok(stat) => (
