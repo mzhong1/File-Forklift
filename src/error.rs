@@ -10,12 +10,17 @@ use std::net::AddrParseError;
 use std::string::{FromUtf16Error, FromUtf8Error, ParseError as StringParseError};
 use std::time::SystemTimeError;
 
+/// custom Result type for Filesystem Forklift
 pub type ForkliftResult<T> = Result<T, ForkliftError>;
 
 #[derive(Debug)]
+/// String conversion errors
 pub enum ConvertStringError {
+    /// Error converting Vec<u16> to String
     FromUtf16Error(FromUtf16Error),
+    /// Error converting Vec<u8> to String
     FromUtf8Error(FromUtf8Error),
+    
     StringParseError(StringParseError),
 }
 

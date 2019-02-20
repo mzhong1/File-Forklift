@@ -39,18 +39,6 @@ impl Cluster {
     ///
     /// Create a new cluster
     ///
-    /// @param lifetime             the number of seconds a node can live without a heartbeat.  Must be > 0
-    ///
-    /// @param router               router to connect with nodes
-    ///
-    /// @param init                 initial socket address (current machine's address)
-    ///
-    /// @param node_change_output   channel to rendezvous thread
-    ///
-    /// @param log_output           channel to postgres logging
-    ///
-    /// @return                     a new Cluster
-    ///
     pub fn new(
         lifetime: u64,
         router: Socket,
@@ -75,8 +63,6 @@ impl Cluster {
     ///
     /// checks if the Cluster is valid
     ///
-    /// @return     true if the cluster is valid, false otherwise
-    ///
     fn is_valid_cluster(&self) -> ForkliftResult<()> {
         if self.lifetime == 0 {
             return Err(ForkliftError::HeartbeatError(
@@ -94,10 +80,6 @@ impl Cluster {
     ///
     /// connect router to an address
     ///
-    /// @param connect_address  valid socket address to connect to
-    ///    
-    /// @return                 nothing on success, Error on failure
-    ///
     pub fn connect_node(&mut self, connect_address: &SocketAddr) -> ForkliftResult<()> {
         debug!("Try to connect router to {}", connect_address);
         let tcp: String = format!("tcp://{}", connect_address.to_string());
@@ -106,13 +88,7 @@ impl Cluster {
     }
 
     ///
-    /// Add a new node to the cluster if it does not previouslt exist
-    ///
-    /// @param node_address     address of node to add
-    ///
-    /// @param heartbeat        boolean determining node liveness
-    ///
-    /// @return                 nothing on success, Error if fails
+    /// Add a new node to the cluster if it does not previously exist
     ///
     pub fn add_node(&mut self, node_address: &SocketAddr, heartbeat: bool) -> ForkliftResult<()> {
         if !self.names.contains_full_address(node_address) {
@@ -136,10 +112,7 @@ impl Cluster {
 
     ///
     /// send a GETLIST message to a node with the socket address of the current node
-    ///
-    /// @param request          poll of connected sockets (a valid file descriptor)
-    ///
-    /// @return                 nothing on success, else error
+    /// 
     pub fn send_getlist(&mut self, request: &PollRequest<'_>) -> ForkliftResult<()> {
         if request.get_fds()[0].can_write() && self.pulse.beat() {
             trace!("Send a GETLIST from {}", self.node_address);
@@ -153,10 +126,6 @@ impl Cluster {
     ///
     /// send message to postgres
     ///
-    /// @param message  message to send
-    ///
-    /// @return         nothing on success, error on fail
-    ///
     pub fn send_log(&self, message: LogMessage) -> ForkliftResult<()> {
         send_mess(message, &self.log_output)?;
         Ok(())
@@ -165,10 +134,6 @@ impl Cluster {
     ///
     /// send a nodelist message to all connected nodes upon receiving a GETLIST request from a node.
     /// Do nothing if the GETLIST request is empty
-    ///
-    /// @param msg_body     A non-empty message with the socket address of the node requesting a NODELIST
-    ///
-    /// @return             Nothing on success, else error.  
     ///
     pub fn send_nodelist(&mut self, msg_body: &[String]) -> ForkliftResult<()> {
         let address_names = self.names.to_string_vector();
@@ -195,12 +160,6 @@ impl Cluster {
     ///
     /// broadcast a message to the cluster
     ///
-    /// @param msg      the bit-serialized message
-    ///
-    /// @param debug    the debug message upon success
-    ///
-    /// @return         nothing on success, else error
-    ///
     fn send_message(&mut self, msg: &[u8], debug: &str) -> ForkliftResult<()> {
         match self.router.nb_write(msg) {
             Ok(_) => debug!("{}", debug),
@@ -223,8 +182,6 @@ impl Cluster {
     ///
     /// send a HEARTBEAT message to all connected nodes
     ///
-    /// @return     nothing on success, else error
-    ///
     pub fn send_heartbeat(&mut self) -> ForkliftResult<()> {
         debug!("Send a HEARTBEAT!");
         let buffer = vec![self.node_address.to_string()];
@@ -236,8 +193,6 @@ impl Cluster {
     ///
     /// tickdown the liveness of all nodes that have not sent a HEARTBEAT within a second.
     /// reset has_heartbeat to false on all nodes
-    ///
-    /// @return     nothing on success, else error
     ///
     pub fn tickdown_nodes(&mut self) -> ForkliftResult<()> {
         self.is_valid_cluster()?;
@@ -268,10 +223,6 @@ impl Cluster {
     ///
     /// broadcast a heartbeat to the cluster and tick down nodes
     ///
-    /// @param request      the poll of the cluster (a valid file descriptor)
-    ///
-    /// @return             Nothing on success, otherwise error
-    ///
     pub fn send_and_tickdown(&mut self, request: &PollRequest<'_>) -> ForkliftResult<()> {
         self.is_valid_cluster()?;
         if request.get_fds()[0].can_write() && self.pulse.beat() {
@@ -283,8 +234,6 @@ impl Cluster {
 
     ///
     /// get the next message queued to the router
-    ///
-    /// @return     a Vec<u8> bit-serialized message, or error should it fail
     ///
     pub fn read_message_to_u8(&mut self) -> ForkliftResult<Vec<u8>> {
         let mut buffer = Vec::new();
@@ -309,12 +258,6 @@ impl Cluster {
     ///
     /// read serialized message to Vec<String>
     ///
-    /// @param buf      serialized message to read
-    ///     
-    /// @param err      error string on failure
-    ///
-    /// @returns        Vec<String> of the message, else error
-    ///
     fn read_message(&self, buf: &[u8], err: &str) -> ForkliftResult<Vec<String>> {
         match message::read_message(buf) {
             Some(msg) => Ok(msg),
@@ -330,12 +273,6 @@ impl Cluster {
     ///
     /// parse a NODELIST message into a list of nodes and create/add the nodes to the cluster
     /// @note: if has_nodelist is true, then exit without changing anything
-    ///
-    /// @param has_nodelist     boolean determining if node is joining or is a part of a cluster
-    ///
-    /// @param buf              The NODELIST message received
-    ///
-    /// @return                 nothing on success, otherwise error
     ///
     pub fn parse_nodelist_message(
         &mut self,
@@ -378,9 +315,6 @@ impl Cluster {
     /// updates the hashmap to either add a new node if the heartbeat came from a new node,
     /// or updates the liveness of the node
     ///
-    /// @param msg_body     the HEARTBEAT message received
-    ///
-    /// @return             nothing on success, else error
     pub fn heartbeat_heard(&mut self, msg_body: &[String]) -> ForkliftResult<()> {
         self.is_valid_cluster()?;
         if msg_body.is_empty() {
@@ -420,12 +354,6 @@ impl Cluster {
 
     ///
     /// Read incoming messages and send out heartbeats every interval milliseconds.
-    ///
-    /// @param request      the poll of the cluster (a valid file descriptor)
-    ///
-    /// @param has_nodelist boolean determining if node is joining or is a part of a cluster
-    ///
-    /// @return             nothing on success, else error
     ///
     pub fn read_and_heartbeat(
         &mut self,
@@ -477,12 +405,6 @@ impl Cluster {
     /// @note if the nodelist is length 2 (current node and another) query the other node
     /// with GETLIST for a NODELIST of all nodes in the cluster
     ///
-    /// @param has_nodelist         boolean determining if node is joining or is a part of a cluster
-    ///
-    /// @param end_heartbeat_input  channel receiving end heartbeat signals
-    ///
-    /// @return                     nothing on a successful exit, error otherwise
-    ///
     pub fn heartbeat_loop(
         &mut self,
         has_nodelist: &mut bool,
@@ -518,8 +440,6 @@ impl Cluster {
 
     ///
     /// initialize connections with the cluster
-    ///
-    /// @return         nothing on success, else error
     ///
     pub fn init_connect(&mut self) -> ForkliftResult<()> {
         trace!("Initializing connection...");

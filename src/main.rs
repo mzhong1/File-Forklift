@@ -137,14 +137,9 @@ fn init_logs(f: &Path, level: simplelog::LevelFilter) -> ForkliftResult<()> {
     Ok(())
 }
 
-/*
-    main takes in two flags:
-    j: computer is a new node, not a part of the original list
-    d: create debug logs
-    When the 'j' flag is raised, the program takes in the arguments ip_addr:port, otherip_addr:port
-    Without the 'j' flag, the program takes in a file argument of ip_addr:port
-    addresses of all nodes in the graph
-*/
+///
+/// Main takes in a config file, username, password, debuglevel, and debug path
+/// 
 fn main() -> ForkliftResult<()> {
     let matches = App::new("Heartbeat Logs")
         .author(crate_authors!())
