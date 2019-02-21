@@ -637,14 +637,10 @@ fn check_acl_sid_remove(check_sid: &Sid, dest_acls: &mut Vec<SmbcAclValue>) -> O
         {
             trace!("Sid to check {}, dest sid {}", *check_sid, &dest_sid);
             if check_sid == dest_sid {
-                let return_sid = ACE::Numeric(
-                    SidType::Numeric(Some(dest_sid.clone())),
-                    atype.clone(),
-                    *flag,
-                    *mask,
-                );
+                let sid = SidType::Numeric(Some(dest_sid.clone()));
+                let return_ace = ACE::Numeric(sid, atype.clone(), *flag, *mask);
                 dest_acls.remove(count);
-                return Some(return_sid);
+                return Some(return_ace);
             }
         }
     }
@@ -750,16 +746,14 @@ fn replace_acl(
     old_acl: &ACE,
 ) -> ForkliftResult<()> {
     //remove the old acl first
-    match dest_ctx.removexattr(dest_path, &SmbcXAttr::AclAttr(SmbcAclAttr::Acl(old_acl.clone()))) {
-        Ok(_) => trace!("Removed old acl {}", old_acl),
-        Err(e) => {
-            let err = format!(
-                "Error {}, failed to remove the old acl {} from {:?}",
-                e, old_acl, dest_path
-            );
-            return Err(ForkliftError::FSError(err));
-        }
+    if let Err(e) =
+        dest_ctx.removexattr(dest_path, &SmbcXAttr::AclAttr(SmbcAclAttr::Acl(old_acl.clone())))
+    {
+        let err =
+            format!("Error {}, failed to remove the old acl {} from {:?}", e, old_acl, dest_path);
+        return Err(ForkliftError::FSError(err));
     };
+    trace!("Removed old acl {}", old_acl);
     //set new acl
     let xattr = SmbcXAttr::AclAttr(SmbcAclAttr::AclNone);
     let val = SmbcXAttrValue::Ace(new_acl.clone());
@@ -769,18 +763,7 @@ fn replace_acl(
     Ok(())
 }
 
-///
 /// map the named source sid to a numeric destination sid
-///
-/// @param dest_path    the path of the destination file
-///
-/// @param dest_ctx     the Samba context of the destination filesystem
-///
-/// @param sid          the named source sid
-///
-/// @return             return the mapped Sid, or an Error should
-///                     the mapping fail
-///
 fn map_name(dest_path: &Path, dest_ctx: &Smbc, sid: &str) -> ForkliftResult<Sid> {
     let destplus = get_acl_list(dest_path, dest_ctx, true)?;
     match get_mapped_sid(dest_path, dest_ctx, &sid, &destplus) {
@@ -792,20 +775,7 @@ fn map_name(dest_path: &Path, dest_ctx: &Smbc, sid: &str) -> ForkliftResult<Sid>
     }
 }
 
-///
 /// Copy the acl from source to destination if they are different
-///
-/// @param dest_path    The destination filepath
-///
-/// @param dest_ctx     The Samba context of the destination filesystem
-///
-/// @param src          The ACE parts of the source acl
-///
-/// @param dest         The ACE parts of the destination acl
-///
-/// @return bool        return true if an acl was copied, false if not
-///                     otherwise, there was an error in the copy process
-///
 fn copy_if_diff(
     dest_path: &Path,
     dest_ctx: &Smbc,
@@ -826,21 +796,8 @@ fn copy_if_diff(
     Ok(false)
 }
 
-///
 /// check if a source acl needs to be copied to the destination
 /// if yes, copy the file, otherwise do nothing
-///
-/// @param dest_path    The destination filepath
-///
-/// @param dest_ctx     The Samba context of the destination filesystem
-///
-/// @param src          The ACE parts of the source acl
-///
-/// @param dest_acls    The list of destination acls
-///
-/// @return bool        return true if an acl was copied, false if not
-///                     otherwise, there was an error in the copy process
-///
 fn copy_acl(
     dest_path: &Path,
     dest_ctx: &Smbc,
@@ -860,30 +817,15 @@ fn copy_acl(
             trace!("New Acl {:?}", new_acl);
             let xattr_set = SmbcXAttr::AclAttr(SmbcAclAttr::AclNone);
             let val = SmbcXAttrValue::Ace(new_acl);
-            let err = "failed to copy new acl";
-            let suc = "Copied new acl";
+            let (err, suc) = ("failed to copy new acl", "Copied new acl");
             set_xattr(dest_path, dest_ctx, &xattr_set, &val, err, suc)?;
             Ok(true)
         }
     }
 }
 
-///
 /// map named acl Sids from a source file to their destinarion numeric Sids
 /// then replace the incorrect destination acls with the source acls
-///
-/// @param dest_path        The destination filepath
-///
-/// @param dest_ctx         Samba context of destination
-///
-/// @param src_acls         numeric src acls for comparison
-///
-/// @param src_acls_plus    named arc acls for mapping
-///
-/// @param dest_acls        dest acls for mapping
-///
-/// @return                 true if an acl was copied or all dest acls were exhausted
-///
 pub fn map_names_and_copy(
     dest_path: &Path,
     dest_ctx: &Smbc,
@@ -898,8 +840,7 @@ pub fn map_names_and_copy(
         }
     };
     trace!("ACLS:\nSRC: {:?}\n\nDEST {:?}\n", &src_acls_plus, &dest_acls);
-    let (mut copied, mut count) = (false, 0);
-    let mut creator_reached = false;
+    let (mut copied, mut creator_reached, mut count) = (false, false, 0);
     for src_acl in src_acls_plus {
         match (src_acl.clone(), src_acls[count].clone()) {
             (
@@ -916,16 +857,12 @@ pub fn map_names_and_copy(
                 };
                 trace!("Sid: {}, mapped: {}", sid, mapped);
                 //if reached "CREATOR" sids, ignore the rest
+                let temp_ace = (mapped.clone(), atype, aflags, mask);
                 if !creator_reached {
-                    copied = copy_acl(
-                        dest_path,
-                        dest_ctx,
-                        (mapped.clone(), atype, aflags, mask),
-                        dest_acls,
-                    )?;
+                    copied = copy_acl(dest_path, dest_ctx, temp_ace, dest_acls)?;
                 }
             }
-            (_, _) => {
+            (..) => {
                 return Err(ForkliftError::FSError(
                     "input src acls are not formatted correctly!!".to_string(),
                 ));
@@ -939,18 +876,16 @@ pub fn map_names_and_copy(
                 //if not \\CREATOR Owner or Creator Group
                 if !(dest_sid == Sid(vec![3, 0]) || dest_sid == Sid(vec![3, 1])) {
                     let ace = ACE::Numeric(SidType::Numeric(Some(dest_sid)), a, f, m);
-                    match dest_ctx
+                    if let Err(e) = dest_ctx
                         .removexattr(dest_path, &SmbcXAttr::AclAttr(SmbcAclAttr::Acl(ace.clone())))
                     {
-                        Ok(_) => debug!("Removed extra acl {}", ace),
-                        Err(e) => {
-                            let err = format!(
-                                "Error {}, failed to remove the old acl {} from {:?}",
-                                e, ace, dest_path
-                            );
-                            return Err(ForkliftError::FSError(err));
-                        }
+                        let err = format!(
+                            "Error {}, failed to remove the old acl {} from {:?}",
+                            e, ace, dest_path
+                        );
+                        return Err(ForkliftError::FSError(err));
                     }
+                    debug!("Removed extra acl {}", ace);
                 }
             }
             _ => {
@@ -963,31 +898,18 @@ pub fn map_names_and_copy(
     Ok(copied || !dest_acls.is_empty())
 }
 
-///
 /// get list of acl values
-///
-/// @param path the path of the file to grab the xattrs from
-///
-/// @param ctx  the context of the filesystem
-///
-/// @param plus boolean value denoting whether the returned list is named
-///             or numeric
-///
-/// @return     return the list of acls of the input file
-///
+/// plus denotes whether the returned list is named or numeric
 pub fn get_acl_list(path: &Path, fs: &Smbc, plus: bool) -> ForkliftResult<Vec<SmbcAclValue>> {
     let err = format!("unable to get acls from {:?}", path);
     let suc = "acl all get success";
-    let mut acls = {
-        if plus {
-            let acl_plus_xattr = SmbcXAttr::AclAttr(SmbcAclAttr::AclAllPlus);
-            get_xattr(path, fs, &acl_plus_xattr, &err, suc)?
-        } else {
-            let acl_xattr = SmbcXAttr::AclAttr(SmbcAclAttr::AclAll);
-            get_xattr(path, fs, &acl_xattr, &err, &suc)?
-        }
+    let mut acls = if plus {
+        let acl_plus_xattr = SmbcXAttr::AclAttr(SmbcAclAttr::AclAllPlus);
+        get_xattr(path, fs, &acl_plus_xattr, &err, suc)?
+    } else {
+        let acl_xattr = SmbcXAttr::AclAttr(SmbcAclAttr::AclAll);
+        get_xattr(path, fs, &acl_xattr, &err, &suc)?
     };
-
     acls.pop();
     let acl_list = match xattr_parser(CompleteByteSlice(&acls)) {
         Ok((_, acl_list)) => acl_list,
@@ -1003,51 +925,24 @@ pub fn get_acl_list(path: &Path, fs: &Smbc, plus: bool) -> ForkliftResult<Vec<Sm
     }
 }
 
-///
 /// change the destination linux stat mode to that of the source file
-///
-/// @param path     the path to the destination file
-///
-/// @param context  the filesystem context of the destination file
-///
-/// @param mode     the source mode
-///
-/// @return         Nothing if successful, otherwise an error is raised
-///
 /// @note           In a Samba Context, chmod will change the Dos Mode
 ///                 (it's necessary for Normal Dos Mode, otherwise
 ///                 a normal Dos Mode will be treated as an Archive file)
 ///                 However, it may not change the linux stat mode
 ///                 correctly (depends on your config file, see Smbc for
 ///                 details)
-///
 fn change_stat_mode(path: &Path, context: &ProtocolContext, mode: u32) -> ForkliftResult<()> {
-    match context.chmod(path, Mode::from_bits_truncate(mode)) {
-        Ok(_) => {
-            debug!("Chmod of file {:?} to {} ran", path, mode);
-            Ok(())
-        }
-        Err(e) => {
-            let err = format!("Error {}, mode {:?}", e, Mode::from_bits_truncate(mode));
-            Err(ForkliftError::FSError(err))
-        }
+    if let Err(e) = context.chmod(path, Mode::from_bits_truncate(mode)) {
+        let err = format!("Error {}, mode {:?}", e, Mode::from_bits_truncate(mode));
+        return Err(ForkliftError::FSError(err));
     }
+    debug!("Chmod of file {:?} to {} ran", path, mode);
+    Ok(())
 }
 
-///
 /// Copy the source permissions to the destination file and return the
 /// current status of the rsync (specifically of the permissions)
-///
-/// @param src          Source file entry
-///
-/// @param dest         Dest file entry
-///
-/// @param src_context  the context of the source filesystem
-///
-/// @param dest_context the context of the destination filesystem
-///
-/// @return             the outcome of the permission rsync (or a ForkliftError if it fails)
-///
 pub fn copy_permissions(
     src: &Entry,
     dest: &Entry,
@@ -1055,21 +950,14 @@ pub fn copy_permissions(
     dest_context: &ProtocolContext,
 ) -> ForkliftResult<SyncOutcome> {
     let src_mode = match (src.is_link(), src.metadata()) {
-        (Some(true), _) => return Ok(SyncOutcome::UpToDate),
-        (None, _) => {
-            let err = format!("is_link was None for {:?}", src.path());
-            return Err(ForkliftError::FSError(err));
-        }
-        (_, None) => {
-            let err = format!("src file does not exist for {:?}", src.path());
-            return Err(ForkliftError::FSError(err));
-        }
         (Some(false), Some(stat)) => stat.mode(),
+        (Some(true), _) => return Ok(SyncOutcome::UpToDate),
+        (..) => {
+            return Err(ForkliftError::FSError(format!("src {:?} does not exist", src.path())));
+        }
     };
-
     let (src_path, dest_path) = (src.path(), dest.path());
     let outcome;
-
     match (src_context, dest_context) {
         //stat mode diff
         (ProtocolContext::Nfs(_), ProtocolContext::Nfs(_)) => {
@@ -1086,13 +974,10 @@ pub fn copy_permissions(
         }
         //dos mode diff
         (ProtocolContext::Samba(src_ctx), ProtocolContext::Samba(dest_ctx)) => {
-            let copied = map_names_and_copy(
-                dest_path,
-                dest_ctx,
-                &get_acl_list(src_path, src_ctx, false)?,
-                &get_acl_list(src_path, src_ctx, true)?,
-                &mut get_acl_list(dest_path, dest_ctx, false)?,
-            )?;
+            let src_acl = &get_acl_list(src_path, src_ctx, false)?;
+            let src_plus_acl = &get_acl_list(src_path, src_ctx, true)?;
+            let dest_acl = &mut get_acl_list(dest_path, dest_ctx, false)?;
+            let copied = map_names_and_copy(dest_path, dest_ctx, src_acl, src_plus_acl, dest_acl)?;
             match has_different_permissions(src, dest, src_context, dest_context) {
                 Ok(true) => {
                     trace!("src mode {}", src_mode);
@@ -1101,19 +986,18 @@ pub fn copy_permissions(
                     outcome = SyncOutcome::PermissionsUpdated
                 }
                 Ok(false) => {
-                    if copied {
-                        outcome = SyncOutcome::PermissionsUpdated;
+                    outcome = if copied {
+                        SyncOutcome::PermissionsUpdated
                     } else {
-                        outcome = SyncOutcome::UpToDate
-                    }
+                        SyncOutcome::UpToDate
+                    };
                 }
                 Err(e) => {
                     return Err(e);
                 }
             }
         }
-        (_, _) => return Err(ForkliftError::FSError("Different contexts!".to_string())),
+        (..) => return Err(ForkliftError::FSError("Different contexts!".to_string())),
     }
-
     Ok(outcome)
 }
