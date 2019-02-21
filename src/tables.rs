@@ -446,30 +446,23 @@ pub fn update_files(file: &Files, conn: &Connection) -> ForkliftResult<()> {
 }
 
 pub fn post_update_files(file: &Files, conn: &Option<Connection>) -> ForkliftResult<()> {
-    match conn {
-        Some(e) => update_files(&file, &e)?,
-        None => (),
+    if let Some(e) = conn {
+        update_files(&file, &e)?
     }
     Ok(())
 }
 
 pub fn post_update_totalsync(stat: &SyncStats, conn: &Option<Connection>) -> ForkliftResult<()> {
-    match conn {
-        Some(e) => {
-            let tot_stat = TotalSync::new(&stat);
-            update_totalsync(&tot_stat, e)?;
-        }
-        None => (),
+    if let Some(e) = conn {
+        let tot_stat = TotalSync::new(&stat);
+        update_totalsync(&tot_stat, e)?;
     }
     Ok(())
 }
 
 pub fn post_update_nodes(status: &Nodes, conn: &Option<Connection>) -> ForkliftResult<()> {
-    match conn {
-        Some(e) => {
-            update_nodes(&status, &e)?;
-        }
-        None => (),
+    if let Some(e) = conn {
+        update_nodes(&status, &e)?;
     }
     Ok(())
 }
@@ -480,24 +473,18 @@ pub fn post_err(
     conn: &Option<Connection>,
 ) -> ForkliftResult<()> {
     error!("{}", reason);
-    match conn {
-        Some(e) => {
-            let fail = ErrorLog::new(err_type, reason, current_time());
-            log_errorlog(&fail, &e)?;
-        }
-        None => (),
+    if let Some(e) = &conn {
+        let fail = ErrorLog::new(err_type, reason, current_time());
+        log_errorlog(&fail, &e)?;
     }
     Ok(())
 }
 
 pub fn post_forklift_err(e: &ForkliftError, conn: &Option<Connection>) -> ForkliftResult<()> {
     error!("{:?}", e);
-    match &conn {
-        Some(c) => {
-            let fail = ErrorLog::from_err(e, current_time());
-            log_errorlog(&fail, &c)?;
-        }
-        None => (),
+    if let Some(c) = &conn {
+        let fail = ErrorLog::from_err(e, current_time());
+        log_errorlog(&fail, &c)?;
     }
     Ok(())
 }
