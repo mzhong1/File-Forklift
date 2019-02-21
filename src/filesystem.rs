@@ -10,26 +10,7 @@ use rand::*;
 use rayon::*;
 use serde_derive::*;
 
-use std::ffi::CString;
 use std::path::Path;
-
-///
-/// create a CString from a rust String
-///
-pub fn create_cstring(input: &str) -> CString {
-    //Note, new only returns Err if the input str contains a '/0' character
-    match CString::new(input) {
-        Ok(s) => s,
-        Err(e) => {
-            let pos = e.nul_position();
-            let mut v = e.into_vec();
-            unsafe {
-                v.set_len(pos);
-                CString::from_vec_unchecked(v)
-            }
-        }
-    }
-}
 
 ///
 /// initialize the Samba context
