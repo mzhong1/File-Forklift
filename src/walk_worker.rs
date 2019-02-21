@@ -96,7 +96,7 @@ impl WalkWorker {
         &self,
         root_path: &Path,
         path: &Path,
-        contexts: &mut Vec<(NetworkContext, NetworkContext)>,
+        contexts: &mut Vec<(ProtocolContext, ProtocolContext)>,
         pool: &ThreadPool,
     ) -> ForkliftResult<()> {
         rayon::scope(|spawner| {
@@ -193,7 +193,7 @@ impl WalkWorker {
         (num_files, total_size): (&mut u64, &mut u64),
         (this, parent, path, stack): (&Path, &Path, &Path, &mut Vec<PathBuf>),
         (check, check_path, check_paths): (bool, &Path, &mut Vec<PathBuf>),
-        (dir, src_context): (DirectoryType, &mut NetworkContext),
+        (dir, src_context): (DirectoryType, &mut ProtocolContext),
     ) -> ForkliftResult<()> {
         for entrytype in dir {
             let entry = entrytype?;
@@ -243,8 +243,8 @@ impl WalkWorker {
     pub fn s_walk(
         &self,
         root_path: &Path,
-        src_context: &mut NetworkContext,
-        dest_context: &mut NetworkContext,
+        src_context: &mut ProtocolContext,
+        dest_context: &mut ProtocolContext,
     ) -> ForkliftResult<()> {
         let (mut num_files, mut total_size) = (0, 0);
         let mut stack: Vec<PathBuf> = vec![self.source.clone()];
@@ -287,7 +287,7 @@ impl WalkWorker {
     fn check_and_remove(
         &self,
         (check, check_paths): (bool, &mut Vec<PathBuf>),
-        (root_path, source_path, dest_context): (&Path, &Path, &mut NetworkContext),
+        (root_path, source_path, dest_context): (&Path, &Path, &mut ProtocolContext),
         (this, parent): (&Path, &Path),
     ) -> ForkliftResult<()> {
         // check through dest files
@@ -320,7 +320,7 @@ impl WalkWorker {
     fn process_file(
         &self,
         entry: &Path,
-        src_context: &mut NetworkContext,
+        src_context: &mut ProtocolContext,
         nodes: &Arc<Mutex<RendezvousNodes<SocketNode, DefaultNodeHasher>>>,
     ) -> ForkliftResult<Option<Stat>> {
         let n = match nodes.lock() {
@@ -369,11 +369,11 @@ fn contains_and_remove(check_paths: &mut Vec<PathBuf>, check_path: &Path) -> boo
     false
 }
 
-fn remove_extra(path: &Path, dest_context: &mut NetworkContext) -> ForkliftResult<()> {
+fn remove_extra(path: &Path, dest_context: &mut ProtocolContext) -> ForkliftResult<()> {
     dest_context.unlink(path)
 }
 
-fn remove_dir(path: &Path, dest_context: &mut NetworkContext) -> ForkliftResult<()> {
+fn remove_dir(path: &Path, dest_context: &mut ProtocolContext) -> ForkliftResult<()> {
     let (this, parent) = (Path::new("."), Path::new(".."));
     let mut stack: Vec<PathBuf> = vec![(*path).to_path_buf()];
     let mut remove_stack: Vec<PathBuf> = vec![(*path).to_path_buf()];

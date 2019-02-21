@@ -20,7 +20,7 @@ use crate::error::{ForkliftError, ForkliftResult};
 use crate::filesystem::*;
 use crate::filesystem_entry::Entry;
 use crate::progress_message::ProgressMessage;
-use crate::tables::*;
+use crate::tables::current_time;
 
 /// default buffer size
 const BUFF_SIZE: u64 = 1024 * 1000;
@@ -59,29 +59,12 @@ pub enum SyncOutcome {
     ChecksumUpdated(String, Vec<u8>, Vec<u8>, i64, NaiveDateTime),
 }
 
-///
 /// checks if a path is valid
-///
-/// @param path     The path to be checked
-///
-/// @param context  The filesystem context the path is checked against
-///
-/// @return         true if the path exists (is valid), false otherwise
-///
-pub fn exist(path: &Path, context: &mut NetworkContext) -> bool {
+pub fn exist(path: &Path, context: &mut ProtocolContext) -> bool {
     context.stat(path).is_ok()
 }
 
-///
-/// gets the relative path (the parts of the path in common)
-///
-/// @param base_path    the base path
-///
-/// @param comp_path    the comparison path
-///
-/// @return     the relative path between base and comp, error if
-///             a relative path does not exist
-///
+/// gets the relative path (the parts of the path in common) between base and comp
 pub fn get_rel_path(base_path: &Path, comp_path: &Path) -> ForkliftResult<PathBuf> {
     match diff_paths(&base_path, &comp_path) {
         None => {
@@ -199,8 +182,8 @@ pub fn get_xattr(
 pub fn make_dir(
     src_path: &Path,
     dest_path: &Path,
-    src_context: &mut NetworkContext,
-    dest_context: &mut NetworkContext,
+    src_context: &mut ProtocolContext,
+    dest_context: &mut ProtocolContext,
 ) -> ForkliftResult<SyncOutcome> {
     let outcome: SyncOutcome;
     let exists = exist(dest_path, dest_context);
@@ -259,8 +242,8 @@ pub fn make_dir_all(
     dest_path: &Path,
     src_path: &Path,
     root: &Path,
-    src_context: &mut NetworkContext,
-    dest_context: &mut NetworkContext,
+    src_context: &mut ProtocolContext,
+    dest_context: &mut ProtocolContext,
 ) -> ForkliftResult<()> {
     let (mut stack, mut src_stack) = (vec![], vec![]);
     let (mut dest_parent, mut src_parent) = (dest_path.parent(), src_path.parent());
@@ -394,8 +377,8 @@ pub fn is_more_recent(src: &Entry, dest: &Entry) -> ForkliftResult<bool> {
 pub fn has_different_permissions(
     src: &Entry,
     dest: &Entry,
-    src_context: &NetworkContext,
-    dest_context: &NetworkContext,
+    src_context: &ProtocolContext,
+    dest_context: &ProtocolContext,
 ) -> ForkliftResult<bool> {
     //check file existence
     let (src_mode, dest_mode) = match (src.metadata(), dest.metadata()) {
@@ -413,11 +396,11 @@ pub fn has_different_permissions(
     };
 
     match (src_context, dest_context) {
-        (NetworkContext::Nfs(_), NetworkContext::Nfs(_)) => {
+        (ProtocolContext::Nfs(_), ProtocolContext::Nfs(_)) => {
             trace!("src mode {:?}, dest mode {:?}", src_mode, dest_mode);
             Ok(src_mode != dest_mode)
         }
-        (NetworkContext::Samba(ctx), NetworkContext::Samba(dctx)) => {
+        (ProtocolContext::Samba(ctx), ProtocolContext::Samba(dctx)) => {
             let xattr = SmbcXAttr::DosAttr(SmbcDosAttr::Mode);
             let err = "get the dos mode failed";
             let suc = "dos mode retrieved!";
@@ -503,12 +486,12 @@ fn read_link(path: &Path, context: &Nfs, size: i64) -> ForkliftResult<String> {
 pub fn copy_link(
     src: &Entry,
     dest: &Entry,
-    src_context: &mut NetworkContext,
-    dest_context: &mut NetworkContext,
+    src_context: &mut ProtocolContext,
+    dest_context: &mut ProtocolContext,
 ) -> ForkliftResult<SyncOutcome> {
     //Check if correct Filesytem
     let (context, dcontext) = match (src_context.clone(), dest_context.clone()) {
-        (NetworkContext::Nfs(ctx), NetworkContext::Nfs(dctx)) => (ctx, dctx),
+        (ProtocolContext::Nfs(ctx), ProtocolContext::Nfs(dctx)) => (ctx, dctx),
         (_, _) => {
             return Err(ForkliftError::FSError(
                 "Samba does not support symlinks".to_string(),
@@ -625,7 +608,7 @@ fn read_chunk(path: &Path, file: &FileType, offset: u64) -> ForkliftResult<Vec<u
 ///
 fn open_file(
     path: &Path,
-    context: &mut NetworkContext,
+    context: &mut ProtocolContext,
     flags: OFlag,
     error: &str,
 ) -> ForkliftResult<FileType> {
@@ -694,8 +677,8 @@ pub fn checksum_copy(
     progress_sender: &Sender<ProgressMessage>,
     src: &Entry,
     dest: &Entry,
-    src_context: &mut NetworkContext,
-    dest_context: &mut NetworkContext,
+    src_context: &mut ProtocolContext,
+    dest_context: &mut ProtocolContext,
     is_copy: bool,
 ) -> ForkliftResult<SyncOutcome> {
     let (src_path, dest_path) = (src.path(), dest.path());
@@ -844,8 +827,8 @@ pub fn sync_entry(
     progress_sender: &Sender<ProgressMessage>,
     src: &Entry,
     dest: &Entry,
-    src_context: &mut NetworkContext,
-    dest_context: &mut NetworkContext,
+    src_context: &mut ProtocolContext,
+    dest_context: &mut ProtocolContext,
 ) -> ForkliftResult<SyncOutcome> {
     let description = src.path().to_string_lossy().into_owned();
     if progress_sender
@@ -1385,7 +1368,7 @@ pub fn get_acl_list(path: &Path, fs: &Smbc, plus: bool) -> ForkliftResult<Vec<Sm
 ///                 correctly (depends on your config file, see Smbc for
 ///                 details)
 ///
-fn change_stat_mode(path: &Path, context: &NetworkContext, mode: u32) -> ForkliftResult<()> {
+fn change_stat_mode(path: &Path, context: &ProtocolContext, mode: u32) -> ForkliftResult<()> {
     match context.chmod(path, Mode::from_bits_truncate(mode)) {
         Ok(_) => {
             debug!("Chmod of file {:?} to {} ran", path, mode);
@@ -1415,8 +1398,8 @@ fn change_stat_mode(path: &Path, context: &NetworkContext, mode: u32) -> Forklif
 pub fn copy_permissions(
     src: &Entry,
     dest: &Entry,
-    src_context: &NetworkContext,
-    dest_context: &NetworkContext,
+    src_context: &ProtocolContext,
+    dest_context: &ProtocolContext,
 ) -> ForkliftResult<SyncOutcome> {
     let src_mode = match (src.is_link(), src.metadata()) {
         (Some(true), _) => return Ok(SyncOutcome::UpToDate),
@@ -1436,7 +1419,7 @@ pub fn copy_permissions(
 
     match (src_context, dest_context) {
         //stat mode diff
-        (NetworkContext::Nfs(_), NetworkContext::Nfs(_)) => {
+        (ProtocolContext::Nfs(_), ProtocolContext::Nfs(_)) => {
             match has_different_permissions(src, dest, src_context, dest_context) {
                 Ok(true) => {
                     change_stat_mode(dest_path, dest_context, src_mode)?;
@@ -1449,7 +1432,7 @@ pub fn copy_permissions(
             }
         }
         //dos mode diff
-        (NetworkContext::Samba(src_ctx), NetworkContext::Samba(dest_ctx)) => {
+        (ProtocolContext::Samba(src_ctx), ProtocolContext::Samba(dest_ctx)) => {
             let copied = map_names_and_copy(
                 dest_path,
                 dest_ctx,

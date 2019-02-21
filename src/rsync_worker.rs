@@ -36,7 +36,7 @@ impl RsyncWorker {
 
     pub fn start(
         self,
-        contexts: &mut Vec<(NetworkContext, NetworkContext)>,
+        contexts: &mut Vec<(ProtocolContext, ProtocolContext)>,
         pool: &ThreadPool,
     ) -> ForkliftResult<()> {
         let id = get_index_or_rand(pool);
@@ -81,8 +81,8 @@ impl RsyncWorker {
     fn sync(
         &self,
         src_entry: &Entry,
-        src_context: &mut NetworkContext,
-        dest_context: &mut NetworkContext,
+        src_context: &mut ProtocolContext,
+        dest_context: &mut ProtocolContext,
     ) -> ForkliftResult<SyncOutcome> {
         let rel_path = get_rel_path(&src_entry.path(), &self.source)?;
         let dest_path = &self.destination.join(&rel_path);

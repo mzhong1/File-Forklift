@@ -87,9 +87,7 @@ impl ProgressInfo for ConsoleProgressOutput {
     }
 }
 
-///
 /// get the width of the terminal being printed to
-///
 fn get_terminal_width() -> usize {
     if let Some((w, _)) = dimensions() {
         return w;
@@ -98,21 +96,17 @@ fn get_terminal_width() -> usize {
     80
 }
 
-///
 /// remove a line from stdout
-///
 fn erase_line() {
     let line_width = get_terminal_width();
     let line = vec![32 as u8; line_width as usize];
     print!("{}\r", String::from_utf8_lossy(&line));
 }
 
-///
 /// convert seconds of time to h:m:s formatted string
-///
-fn human_seconds(s: usize) -> String {
-    let hours = s / 3600;
-    let minutes = (s / 60) % 60;
-    let seconds = s % 60;
+fn human_seconds(seconds: usize) -> String {
+    let hours = seconds / 3600;
+    let minutes = (seconds / 60) % 60;
+    let seconds = seconds % 60;
     return format!("{:02}:{:02}:{:02}", hours, minutes, seconds);
 }

@@ -1,5 +1,4 @@
 use crate::filesystem::*;
-use log::*;
 use nix::sys::stat::SFlag;
 use std::path::{Path, PathBuf};
 
@@ -17,18 +16,15 @@ pub struct Entry {
 }
 
 impl Entry {
-    ///
     /// create a new Entry
-    ///
-    pub fn new(epath: &Path, context: &NetworkContext) -> Self {
+    pub fn new(epath: &Path, context: &ProtocolContext) -> Self {
         let (metadata, is_link, is_dir) = match context.stat(epath) {
             Ok(stat) => (
                 Some(stat),
                 Some(stat.mode() & SFlag::S_IFMT.bits() == SFlag::S_IFLNK.bits()),
                 Some(stat.mode() & SFlag::S_IFMT.bits() == SFlag::S_IFDIR.bits()),
             ),
-            Err(e) => {
-                trace!("Error {:?}", e);
+            Err(_) => {
                 (None, None, None) // note: file DNE
             }
         };

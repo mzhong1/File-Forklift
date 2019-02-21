@@ -62,11 +62,11 @@ pub fn get_index_or_rand(pool: &ThreadPool) -> usize {
 ///
 /// create a new nfs Network context
 ///     
-pub fn create_nfs_context(ip: &str, share: &str, level: u32) -> ForkliftResult<NetworkContext> {
+pub fn create_nfs_context(ip: &str, share: &str, level: u32) -> ForkliftResult<ProtocolContext> {
     let nfs = Nfs::new()?;
     nfs.set_debug(level as i32)?;
     nfs.mount(ip, share)?;
-    Ok(NetworkContext::Nfs(nfs))
+    Ok(ProtocolContext::Nfs(nfs))
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -78,19 +78,19 @@ pub enum FileSystemType {
 
 #[derive(Clone)]
 /// a generic wrapper for filesystem contexts
-pub enum NetworkContext {
+pub enum ProtocolContext {
     Samba(Box<Smbc>),
     Nfs(Nfs),
 }
 
-impl FileSystem for NetworkContext {
+impl FileSystem for ProtocolContext {
     fn create(&mut self, path: &Path, flags: OFlag, mode: Mode) -> ForkliftResult<FileType> {
         match self {
-            NetworkContext::Nfs(nfs) => {
+            ProtocolContext::Nfs(nfs) => {
                 let file = nfs.create(path, flags, mode)?;
                 Ok(FileType::Nfs(file))
             }
-            NetworkContext::Samba(smbc) => {
+            ProtocolContext::Samba(smbc) => {
                 let file = smbc.create(path, mode)?;
                 Ok(FileType::Samba(file))
             }
@@ -101,10 +101,10 @@ impl FileSystem for NetworkContext {
     /// use setxattr, since samba uses DOS permissions
     fn chmod(&self, path: &Path, mode: Mode) -> ForkliftResult<()> {
         match self {
-            NetworkContext::Nfs(nfs) => {
+            ProtocolContext::Nfs(nfs) => {
                 nfs.lchmod(path, mode)?;
             }
-            NetworkContext::Samba(smbc) => {
+            ProtocolContext::Samba(smbc) => {
                 smbc.chmod(path, mode)?;
             }
         }
@@ -112,7 +112,7 @@ impl FileSystem for NetworkContext {
     }
     fn stat(&self, path: &Path) -> ForkliftResult<Stat> {
         match self {
-            NetworkContext::Nfs(nfile) => {
+            ProtocolContext::Nfs(nfile) => {
                 let stat = nfile.lstat64(path)?;
                 let atime = Timespec::new(stat.nfs_atime as i64, stat.nfs_atime_nsec as i64);
                 let mtime = Timespec::new(stat.nfs_mtime as i64, stat.nfs_mtime_nsec as i64);
@@ -131,7 +131,7 @@ impl FileSystem for NetworkContext {
                 );
                 Ok(Stat::new(s, atime, mtime, ctime))
             }
-            NetworkContext::Samba(sfile) => {
+            ProtocolContext::Samba(sfile) => {
                 let stat = sfile.stat(path)?;
                 let atime = Timespec::new(stat.st_atim.tv_sec as i64, stat.st_atim.tv_nsec as i64);
                 let ctime = Timespec::new(stat.st_ctim.tv_sec as i64, stat.st_ctim.tv_nsec as i64);
@@ -154,10 +154,10 @@ impl FileSystem for NetworkContext {
     }
     fn mkdir(&self, path: &Path) -> ForkliftResult<()> {
         match self {
-            NetworkContext::Nfs(nfs) => {
+            ProtocolContext::Nfs(nfs) => {
                 nfs.mkdir(path)?;
             }
-            NetworkContext::Samba(smbc) => {
+            ProtocolContext::Samba(smbc) => {
                 smbc.mkdir(path, Mode::S_IRWXU | Mode::S_IRWXO | Mode::S_IRWXG)?;
             }
         }
@@ -170,11 +170,11 @@ impl FileSystem for NetworkContext {
     ///
     fn open(&mut self, path: &Path, flags: OFlag, mode: Mode) -> ForkliftResult<FileType> {
         match self {
-            NetworkContext::Nfs(nfs) => {
+            ProtocolContext::Nfs(nfs) => {
                 let file = nfs.open(path, flags)?;
                 Ok(FileType::Nfs(file))
             }
-            NetworkContext::Samba(smbc) => {
+            ProtocolContext::Samba(smbc) => {
                 let file = smbc.open(path, flags, mode)?;
                 Ok(FileType::Samba(file))
             }
@@ -182,11 +182,11 @@ impl FileSystem for NetworkContext {
     }
     fn opendir(&mut self, path: &Path) -> ForkliftResult<DirectoryType> {
         match self {
-            NetworkContext::Nfs(nfs) => {
+            ProtocolContext::Nfs(nfs) => {
                 let dir = nfs.opendir(path)?;
                 Ok(DirectoryType::Nfs(dir))
             }
-            NetworkContext::Samba(smbc) => {
+            ProtocolContext::Samba(smbc) => {
                 let dir = smbc.opendir(path)?;
                 Ok(DirectoryType::Samba(dir))
             }
@@ -194,10 +194,10 @@ impl FileSystem for NetworkContext {
     }
     fn rename(&self, oldpath: &Path, newpath: &Path) -> ForkliftResult<()> {
         match self {
-            NetworkContext::Nfs(nfs) => {
+            ProtocolContext::Nfs(nfs) => {
                 nfs.rename(oldpath, newpath)?;
             }
-            NetworkContext::Samba(smbc) => {
+            ProtocolContext::Samba(smbc) => {
                 smbc.rename(oldpath, newpath)?;
             }
         }
@@ -206,10 +206,10 @@ impl FileSystem for NetworkContext {
 
     fn rmdir(&self, path: &Path) -> ForkliftResult<()> {
         match self {
-            NetworkContext::Nfs(nfs) => {
+            ProtocolContext::Nfs(nfs) => {
                 nfs.rmdir(path)?;
             }
-            NetworkContext::Samba(smbc) => {
+            ProtocolContext::Samba(smbc) => {
                 smbc.rmdir(path)?;
             }
         }
@@ -218,10 +218,10 @@ impl FileSystem for NetworkContext {
 
     fn unlink(&self, path: &Path) -> ForkliftResult<()> {
         match self {
-            NetworkContext::Nfs(nfs) => {
+            ProtocolContext::Nfs(nfs) => {
                 nfs.unlink(path)?;
             }
-            NetworkContext::Samba(smbc) => {
+            ProtocolContext::Samba(smbc) => {
                 smbc.unlink(path)?;
             }
         }

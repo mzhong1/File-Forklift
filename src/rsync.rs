@@ -135,20 +135,20 @@ impl Rsyncer {
                 sync_progress,
             ));
         }
-        let mut contexts: Vec<(NetworkContext, NetworkContext)> = Vec::new();
-        let mut sync_contexts: Vec<(NetworkContext, NetworkContext)> = Vec::new();
+        let mut contexts: Vec<(ProtocolContext, ProtocolContext)> = Vec::new();
+        let mut sync_contexts: Vec<(ProtocolContext, ProtocolContext)> = Vec::new();
         let s = init_samba(workgroup, username, password, level)?;
         for _ in 0..num_threads {
             match self.filesystem_type {
                 FileSystemType::Samba => {
                     let (sctx, dctx) = (
-                        NetworkContext::Samba(Box::new(s.clone())),
-                        NetworkContext::Samba(Box::new(s.clone())),
+                        ProtocolContext::Samba(Box::new(s.clone())),
+                        ProtocolContext::Samba(Box::new(s.clone())),
                     );
                     contexts.push((sctx, dctx));
                     let (sctx, dctx) = (
-                        NetworkContext::Samba(Box::new(s.clone())),
-                        NetworkContext::Samba(Box::new(s.clone())),
+                        ProtocolContext::Samba(Box::new(s.clone())),
+                        ProtocolContext::Samba(Box::new(s.clone())),
                     );
                     sync_contexts.push((sctx, dctx));
                 }

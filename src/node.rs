@@ -138,12 +138,12 @@ impl NodeList {
     pub fn add_node_to_list(&mut self, node_address: &SocketAddr) {
         trace!(
             "Attempting to add address {} to list of sockets",
-            full_address
+            node_address
         );
         if !self.contains_address(node_address) {
             trace!(
                 "Address {} not already in list, attempting to parse to socket",
-                full_address
+                node_address
             );
             self.node_list.push(node_address.clone());
         }
@@ -273,7 +273,7 @@ fn test_get_full_address() {
 }
 
 #[test]
-fn test_contains_full_address() {
+fn test_contains_address() {
     let mut names = NodeList::new();
     names.node_list = vec![
         SocketAddr::new(
@@ -295,14 +295,14 @@ fn test_contains_full_address() {
     ];
     assert_eq!(
         true,
-        names.contains_full_address(&SocketAddr::new(
+        names.contains_address(&SocketAddr::new(
             ::std::net::IpAddr::V4(::std::net::Ipv4Addr::new(172, 17, 0, 3)),
             1234,
         ))
     );
     assert_eq!(
         false,
-        names.contains_full_address(&SocketAddr::new(
+        names.contains_address(&SocketAddr::new(
             ::std::net::IpAddr::V4(::std::net::Ipv4Addr::new(122, 22, 3, 4)),
             1234,
         ))
@@ -329,7 +329,7 @@ fn test_add_node_to_list() {
     ));
     assert_eq!(2, names.node_list.len());
     assert_ne!(names.node_list, compare_names);
-    assert!(names.contains_full_address(&SocketAddr::new(
+    assert!(names.contains_address(&SocketAddr::new(
         ::std::net::IpAddr::V4(::std::net::Ipv4Addr::new(122, 22, 3, 5)),
         1234,
     )));
