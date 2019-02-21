@@ -2,6 +2,7 @@ use log::*;
 use std::time::{Duration, Instant};
 
 #[derive(Debug, Clone)]
+///  the pulse of the heartbeat protocol, determining when to beat
 pub struct Pulse {
     pub interval: u64,
     c_time: Instant,
@@ -9,16 +10,12 @@ pub struct Pulse {
 }
 
 impl Pulse {
+    /// create a new Pulse
     pub fn new(i: u64) -> Self {
         Pulse { interval: i, c_time: Instant::now(), timeout: Duration::from_millis(i) }
     }
 
-    /**
-     * beat: &self -> bool
-     * REQUIRES: Self not null
-     * ENSURES: returns true if it is time to heartbeat (if the time elapsed it more than the timeout duration)
-     * otherwise, it returns false
-     */
+    /// tell if it is time to heartbeat (if the time elapsed is more than timeout duration)
     pub fn beat(&mut self) -> bool {
         let elapsed = self.c_time.elapsed();
         trace!(

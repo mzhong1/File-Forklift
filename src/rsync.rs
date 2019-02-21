@@ -18,6 +18,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 #[derive(Default, Debug, Clone, Copy)]
+/// Hold the total stats of all files synced
 pub struct SyncStats {
     /// total number of files in the source
     pub tot_files: u64,
@@ -48,6 +49,7 @@ pub struct SyncStats {
 }
 
 impl SyncStats {
+    /// create a new zeroed SyncStats
     pub fn new() -> SyncStats {
         SyncStats {
             tot_files: 0,
@@ -64,6 +66,7 @@ impl SyncStats {
             directory_updated: 0,
         }
     }
+    /// Add a SyncOutcome to the stats
     pub fn add_outcome(&mut self, outcome: &SyncOutcome) {
         self.num_synced += 1;
         match outcome {
@@ -80,30 +83,33 @@ impl SyncStats {
     }
 }
 
+/// Struct to build and run Rsync
 pub struct Rsyncer {
+    /// source root path
+    source: PathBuf,
+    /// destination root path,
+    destination: PathBuf,
     /// share protocol to usize
     filesystem_type: FileSystemType,
     /// console ouput functions
     progress_info: Box<ProgressInfo + Send + Sync>,
     /// channe to send postgres logs
     log_output: Sender<LogMessage>,
-    /// source root path
-    source: PathBuf,
-    /// destination root path,
-    destination: PathBuf,
 }
 
 impl Rsyncer {
+    /// create a new Rsyncer
     pub fn new(
+        source: PathBuf,
+        destination: PathBuf,
         filesystem_type: FileSystemType,
         progress_info: Box<ProgressInfo + Send + Sync>,
         log_output: Sender<LogMessage>,
-        source: PathBuf,
-        destination: PathBuf,
     ) -> Rsyncer {
-        Rsyncer { filesystem_type, progress_info, log_output, source, destination }
+        Rsyncer { source, destination, filesystem_type, progress_info, log_output }
     }
 
+    /// run the rsync protocol
     pub fn sync(
         self,
         (src_ip, dest_ip): (&str, &str),
@@ -114,9 +120,7 @@ impl Rsyncer {
         my_node: SocketNode,
     ) -> ForkliftResult<()> {
         let mut send_handles: Vec<Sender<Option<Entry>>> = Vec::new();
-
         let mut syncers: Vec<RsyncWorker> = Vec::new();
-
         let (send_prog, rec_prog) = channel::unbounded::<ProgressMessage>();
         for _ in 0..num_threads {
             let (send_e, rec_e) = channel::unbounded();
@@ -152,7 +156,6 @@ impl Rsyncer {
                         create_nfs_context(src_ip, src_share, level)?,
                         create_nfs_context(dest_ip, dest_share, level)?,
                     );
-
                     contexts.push((sctx.clone(), dctx.clone()));
                     sync_contexts.push((sctx, dctx));
                 }
@@ -160,9 +163,9 @@ impl Rsyncer {
         }
         let send_prog_thread = send_prog.clone();
         let walk_worker =
-            WalkWorker::new(self.source.as_path(), send_handles, send_prog, nodelist, my_node);
+            WalkWorker::new(self.source.as_path(), my_node, nodelist, send_handles, send_prog);
         let progress_worker =
-            ProgressWorker::new(rec_prog, self.progress_info, src_share.to_string());
+            ProgressWorker::new(src_share.to_string(), self.progress_info, rec_prog);
         let c = self.log_output.clone();
         rayon::spawn(move || {
             progress_worker.start(&c).unwrap();
@@ -182,32 +185,24 @@ impl Rsyncer {
         let dest_path = self.destination.as_path();
         pool.install(|| {
             if num_threads > 1 {
-                match walk_worker.t_walk(dest_path, src_path, &mut contexts, &pool) {
-                    Ok(_) => {}
-                    Err(e) => {
-                        return Err(e);
-                    }
+                if let Err(e) = walk_worker.t_walk(dest_path, src_path, &mut contexts, &pool) {
+                    return Err(e);
                 }
                 walk_worker.stop()?;
             }
-
             rayon::scope(|spawner| {
                 for syncer in syncers {
                     spawner.spawn(|_| {
                         let input = syncer.input.clone();
-                        match syncer.start(&mut sync_contexts.clone(), &pool) {
-                            Ok(_) => {
-                                debug!(
-                                    "Syncer Stopped, Thread {:?}, num left {:?}",
-                                    pool.current_thread_index(),
-                                    input.len()
-                                );
-                            }
-                            Err(e) => {
-                                let mess = ProgressMessage::SendError(e);
-                                send_prog_thread.send(mess).unwrap();
-                            }
+                        if let Err(e) = syncer.start(&mut sync_contexts.clone(), &pool) {
+                            let mess = ProgressMessage::SendError(e);
+                            send_prog_thread.send(mess).unwrap();
                         };
+                        debug!(
+                            "Syncer Stopped, Thread {:?}, num left {:?}",
+                            pool.current_thread_index(),
+                            input.len()
+                        );
                     });
                 }
             });

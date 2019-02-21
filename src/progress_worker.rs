@@ -8,22 +8,28 @@ use crate::progress_message::*;
 use crate::rsync::SyncStats;
 use crate::tables::*;
 
+/// threaded worker handling progress messages
 pub struct ProgressWorker {
-    input: Receiver<ProgressMessage>,
-    progress_info: Box<ProgressInfo + Send>,
+    /// source share name
     src_share: String,
+    /// output printing program
+    progress_info: Box<ProgressInfo + Send>,
+    /// channel input for ProgressMessages
+    input: Receiver<ProgressMessage>,
 }
 
 impl ProgressWorker {
+    /// create a new ProgressWorker
     pub fn new(
-        input: Receiver<ProgressMessage>,
-        progress_info: Box<ProgressInfo + Send>,
         src_share: String,
+        progress_info: Box<ProgressInfo + Send>,
+        input: Receiver<ProgressMessage>,
     ) -> ProgressWorker {
-        ProgressWorker { input, progress_info, src_share }
+        ProgressWorker { src_share, input, progress_info }
     }
 
-    //NOte: Figure out a way to send off postgres in this function
+    /// Process ProgressMessages, sending logs to postgres_logger, and track current progress through
+    /// progress_info
     pub fn start(&self, send_log: &Sender<LogMessage>) -> ForkliftResult<SyncStats> {
         let mut stats = SyncStats::new();
         let mut file_done;
@@ -67,9 +73,7 @@ impl ProgressWorker {
                         }
                         _ => {}
                     }
-
                     stats.add_outcome(&x);
-                    //file_done = 0;
                 }
                 ProgressMessage::SendError(error) => {
                     send_mess(LogMessage::Error(error), send_log)?;

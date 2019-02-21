@@ -8,12 +8,19 @@ use postgres::Connection;
 use std::sync::{Arc, Mutex};
 
 #[derive(Debug)]
+/// Enum holding Postgres Log Values
 pub enum LogMessage {
+    /// wrapper for ForkliftError
     Error(ForkliftError),
+    /// wrapper for non-ForkliftError Error
     ErrorType(ErrorType, String),
+    /// wrapper for File
     File(Files),
+    /// wrapper for total stats
     TotalSync(SyncStats),
+    /// wrapper for node change
     Nodes(Nodes),
+    /// end signal
     End,
 }
 pub enum EndState {
@@ -24,7 +31,9 @@ pub enum EndState {
 }
 
 pub struct PostgresLogger {
+    /// postgres connection
     conn: Arc<Mutex<Option<Connection>>>,
+    /// channel to receive LogMessages
     input: Receiver<LogMessage>,
     /// channel to send heartbeat end signal
     end_heartbeat: Sender<EndState>,
@@ -32,6 +41,7 @@ pub struct PostgresLogger {
     end_rendezvous: Sender<EndState>,
 }
 
+/// Send a message to PostgresLogger input
 pub fn send_mess(log: LogMessage, send_log: &Sender<LogMessage>) -> ForkliftResult<()> {
     trace!("Sending {:?} to postgres", log);
     if send_log.send(log).is_err() {
@@ -43,6 +53,7 @@ pub fn send_mess(log: LogMessage, send_log: &Sender<LogMessage>) -> ForkliftResu
 }
 
 impl PostgresLogger {
+    /// Create new PostgresLogger
     pub fn new(
         conn: &Arc<Mutex<Option<Connection>>>,
         input: Receiver<LogMessage>,
@@ -51,7 +62,7 @@ impl PostgresLogger {
     ) -> Self {
         PostgresLogger { conn: Arc::clone(conn), input, end_heartbeat, end_rendezvous }
     }
-
+    /// Start logging messages to postgres
     pub fn start(&self) -> ForkliftResult<()> {
         let conn = self.conn.lock().unwrap();
         for log in self.input.iter() {

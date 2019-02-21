@@ -12,6 +12,7 @@ use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::Mutex;
 
 lazy_static! {
+    /// hold the current machine's Socket Address
     pub static ref CURRENT_SOCKET: Mutex<Vec<SocketNode>> = {
         Mutex::new(vec![SocketNode::new(SocketAddr::new(
             IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
@@ -22,6 +23,7 @@ lazy_static! {
 
 #[derive(Debug, ToSql, FromSql, Clone, PartialEq)]
 #[postgres(name = "ErrorType")]
+/// Usable ErrorTypes logged in Postgres
 pub enum ErrorType {
     #[postgres(name = "IoError")]
     IoError,
@@ -58,21 +60,25 @@ pub enum ErrorType {
     HeartbeatError,
 }
 #[derive(Debug, Clone)]
+/// an ErrorLog table entry
 pub struct ErrorLog {
     failure_id: ErrorType,
     reason: String,
     timestamp: NaiveDateTime,
 }
 
+/// get the current time
 pub fn current_time() -> NaiveDateTime {
     let now = Utc::now();
     NaiveDateTime::from_timestamp(now.timestamp(), now.timestamp_subsec_nanos())
 }
 
 impl ErrorLog {
+    /// create a new ErrorLog
     pub fn new(failure_id: ErrorType, reason: String, timestamp: NaiveDateTime) -> Self {
         ErrorLog { failure_id, reason, timestamp }
     }
+    /// create a new ErrorLog from a ForkliftError
     pub fn from_err(err: &ForkliftError, timestamp: NaiveDateTime) -> Self {
         let failure_id = match err {
             ForkliftError::AddrParseError(_) => ErrorType::AddrParseError,
@@ -106,6 +112,7 @@ impl ErrorLog {
     }
 }
 #[derive(Debug, Clone, ToSql, FromSql)]
+/// Node table entry
 pub struct Nodes {
     node_ip: String, //as inet?
     node_port: i32,  //since u16 is not available in postgres
@@ -114,6 +121,7 @@ pub struct Nodes {
 }
 
 impl Nodes {
+    /// create a new Nodes
     pub fn new_all(
         node_ip: String,
         node_port: i32,
@@ -122,7 +130,7 @@ impl Nodes {
     ) -> Self {
         Nodes { node_ip, node_port, node_status, last_updated }
     }
-
+    /// create a new Nodes from a NodeStatus
     pub fn new(node_status: NodeStatus) -> ForkliftResult<Self> {
         let socket = get_current_node()?;
         let last_updated = current_time();
@@ -136,6 +144,7 @@ impl Nodes {
 }
 
 #[derive(Debug, Clone, ToSql, FromSql)]
+/// The current state of a node
 pub enum NodeStatus {
     NodeAdded,
     NodeDied,
@@ -143,8 +152,8 @@ pub enum NodeStatus {
 }
 
 #[derive(Debug, Clone, ToSql, FromSql)]
+/// entry for TotalSync table
 pub struct TotalSync {
-    //node_id: Nodes,
     total_files: i64,
     total_size: i64,
     num_synced: i64,
@@ -160,6 +169,7 @@ pub struct TotalSync {
 }
 
 impl TotalSync {
+    /// create a new TotalSync from SyncStats
     pub fn new(
         //node_id: Nodes,
         stats: &SyncStats
@@ -183,9 +193,10 @@ impl TotalSync {
 }
 
 #[derive(Debug, Clone, ToSql, FromSql)]
+/// entry to Files table
 pub struct Files {
+    /// path of File in the format src_share/path
     path: String, //Share/Path
-    // node_id: Nodes,
     src_checksum: Vec<u8>,
     dest_checksum: Vec<u8>,
     size: i64,
@@ -193,6 +204,7 @@ pub struct Files {
 }
 
 impl Files {
+    /// create a new Files
     pub fn new(
         path: String,
         src_checksum: Vec<u8>,
@@ -238,6 +250,7 @@ pub fn init_errortypes(conn: &Connection) -> ForkliftResult<()> {
     Ok(())
 }
 
+/// create Nodes table
 pub fn init_nodetable(conn: &Connection) -> ForkliftResult<()> {
     conn.execute(
         "DO $$
@@ -263,6 +276,7 @@ pub fn init_nodetable(conn: &Connection) -> ForkliftResult<()> {
     Ok(())
 }
 
+/// create ErrorLog table
 pub fn init_errorlog(conn: &Connection) -> ForkliftResult<()> {
     let state = "CREATE TABLE IF NOT EXISTS ErrorLog (
         entry_num BIGSERIAL UNIQUE PRIMARY KEY,
@@ -274,6 +288,7 @@ pub fn init_errorlog(conn: &Connection) -> ForkliftResult<()> {
     Ok(())
 }
 
+/// create Files table
 pub fn init_files(conn: &Connection) -> ForkliftResult<()> {
     let state = "CREATE TABLE IF NOT EXISTS Files (
         path text UNIQUE PRIMARY KEY,
@@ -286,6 +301,7 @@ pub fn init_files(conn: &Connection) -> ForkliftResult<()> {
     Ok(())
 }
 
+/// create TotalSync table
 pub fn init_totalsync(conn: &Connection) -> ForkliftResult<()> {
     let state = "CREATE TABLE IF NOT EXISTS TotalSync(
         node_id BIGINT UNIQUE PRIMARY KEY REFERENCES Nodes(node_id),
@@ -306,6 +322,7 @@ pub fn init_totalsync(conn: &Connection) -> ForkliftResult<()> {
     Ok(())
 }
 
+/// initialize connection to postgres database and initialize all tables
 pub fn init_connection(path: String) -> ForkliftResult<Connection> {
     let conn = Connection::connect(path, TlsMode::None).expect("Cannot connect to database");
     init_errortypes(&conn)?;
@@ -321,6 +338,7 @@ pub fn init_connection(path: String) -> ForkliftResult<Connection> {
     Ok(conn)
 }
 
+/// set the current node to this machine's socket address
 pub fn set_current_node(node: &SocketNode) -> ForkliftResult<()> {
     let mut n = match CURRENT_SOCKET.lock() {
         Ok(list) => list,
@@ -336,6 +354,7 @@ pub fn set_current_node(node: &SocketNode) -> ForkliftResult<()> {
     Ok(())
 }
 
+/// get the current node's socket address
 pub fn get_current_node() -> ForkliftResult<SocketNode> {
     let n = match CURRENT_SOCKET.lock() {
         Ok(list) => list,
@@ -381,6 +400,7 @@ pub fn update_nodes(node: &Nodes, conn: &Connection) -> ForkliftResult<()> {
     Ok(())
 }
 
+/// given a socketNode, get the matching node_id from the Nodes table
 pub fn get_node_id(node: &SocketNode, conn: &Connection) -> ForkliftResult<i64> {
     let mut val = -1;
     let ip = node.get_ip().to_string();
@@ -445,6 +465,7 @@ pub fn update_files(file: &Files, conn: &Connection) -> ForkliftResult<()> {
     Ok(())
 }
 
+/// wrapper for update_files
 pub fn post_update_files(file: &Files, conn: &Option<Connection>) -> ForkliftResult<()> {
     if let Some(e) = conn {
         update_files(&file, &e)?
@@ -452,6 +473,7 @@ pub fn post_update_files(file: &Files, conn: &Option<Connection>) -> ForkliftRes
     Ok(())
 }
 
+/// wrapper for update_totalsync
 pub fn post_update_totalsync(stat: &SyncStats, conn: &Option<Connection>) -> ForkliftResult<()> {
     if let Some(e) = conn {
         let tot_stat = TotalSync::new(&stat);
@@ -460,6 +482,7 @@ pub fn post_update_totalsync(stat: &SyncStats, conn: &Option<Connection>) -> For
     Ok(())
 }
 
+/// wrapper for update_nodes
 pub fn post_update_nodes(status: &Nodes, conn: &Option<Connection>) -> ForkliftResult<()> {
     if let Some(e) = conn {
         update_nodes(&status, &e)?;
@@ -467,6 +490,7 @@ pub fn post_update_nodes(status: &Nodes, conn: &Option<Connection>) -> ForkliftR
     Ok(())
 }
 
+/// post an ErrorType error
 pub fn post_err(
     err_type: ErrorType,
     reason: String,
@@ -480,6 +504,7 @@ pub fn post_err(
     Ok(())
 }
 
+/// post a ForkliftError
 pub fn post_forklift_err(e: &ForkliftError, conn: &Option<Connection>) -> ForkliftResult<()> {
     error!("{:?}", e);
     if let Some(c) = &conn {

@@ -29,10 +29,12 @@ impl Node {
             has_heartbeat: false,
         }
     }
+    /// create a new node
     pub fn node_new(name: SocketAddr, lifetime: u64, liveness: i64, has_heartbeat: bool) -> Self {
         Node { name, lifetime, liveness, has_heartbeat }
     }
 
+    /// beats the heart of a node, resetting liveness to lifetime.
     /// ENSURES: returns true if the node was "dead" before the heartbeat was called
     pub fn heartbeat(&mut self) -> bool {
         trace!("Before Heartbeat: Node {}, liveness {}", self.name, self.liveness);
@@ -43,7 +45,8 @@ impl Node {
         prev_liveness <= 0
     }
 
-    /// ENSURES: return true if the node "died" in this call to tickdown
+    /// if a heartbeat is missed, tickdown the liveness of a node
+    /// ENSURES: return true if the node "died", reaching liveness 0 in this call to tickdown
     pub fn tickdown(&mut self) -> bool {
         trace!("Before Tickdown: Node {}, liveness {}", self.name, self.liveness);
         let prev_liveness = self.liveness;
@@ -114,8 +117,8 @@ impl NodeList {
 
     /// returns true if the socket address is in node_names,
     ///    false otherwise
-    pub fn contains_address(&self, socket_address: &SocketAddr) -> bool {
-        self.node_list.iter().any(|n| n == socket_address)
+    pub fn contains_address(&self, node_address: &SocketAddr) -> bool {
+        self.node_list.iter().any(|n| n == node_address)
     }
 
     /// add a new node to node_names, else do nothing if address already in node_names
@@ -156,7 +159,7 @@ impl NodeMap {
 
     /// create a HashMap of Nodes referenced by the socket address
     pub fn init_nodemap(
-        full_address: &SocketAddr,
+        node_address: &SocketAddr,
         lifetime: u64,
         node_names: &[SocketAddr],
     ) -> ForkliftResult<Self> {
@@ -164,11 +167,11 @@ impl NodeMap {
             error!("Lifetime is trivial (less than or equal to zero)!");
             return Err(ForkliftError::InvalidConfigError("Lifetime is trivial".to_string()));
         }
-        debug! {"Initialize hashmap of nodes with lifetime {} from socket list {:?} not including {}", lifetime, node_names, full_address};
+        debug! {"Initialize hashmap of nodes with lifetime {} from socket list {:?} not including {}", lifetime, node_names, node_address};
         let mut nodes = NodeMap::new();
         nodes.node_map = HashMap::new();
         for node_ip in node_names {
-            if node_ip != full_address {
+            if node_ip != node_address {
                 debug!("node ip addresses and port: {:?}", node_ip);
                 let temp_node = Node::new(*node_ip, lifetime);
                 debug!("Node successfully created : {:?}", &temp_node);

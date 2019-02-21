@@ -316,11 +316,11 @@ fn main() -> ForkliftResult<()> {
     let active_nodes = Arc::new(Mutex::new(send_nodes));
 
     let syncer = Rsyncer::new(
+        input.src_path,
+        input.dest_path,
         system,
         Box::new(console_info),
         send_log.clone(),
-        input.src_path,
-        input.dest_path,
     );
 
     let (src_server, dest_server) = (input.src_server, input.dest_server);

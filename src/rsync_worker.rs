@@ -13,15 +13,22 @@ use crate::postgres_logger::LogMessage;
 use crate::progress_message::ProgressMessage;
 
 #[derive(Clone)]
+/// threaded worker handling Entry Processing for the rsync
 pub struct RsyncWorker {
-    pub input: Receiver<Option<Entry>>,
-    progress_output: Sender<ProgressMessage>,
-    pub log_output: Sender<LogMessage>,
+    /// source root path
     source: PathBuf,
+    /// destination root path
     destination: PathBuf,
+    /// input channel from WalkWorker
+    pub input: Receiver<Option<Entry>>,
+    /// channel to send progress
+    progress_output: Sender<ProgressMessage>,
+    /// channel to send logs to postgres
+    pub log_output: Sender<LogMessage>,
 }
 
 impl RsyncWorker {
+    /// create a new RsyncWorker
     pub fn new(
         source: &Path,
         destination: &Path,
@@ -38,6 +45,7 @@ impl RsyncWorker {
         }
     }
 
+    /// Process the entries sent through input channel
     pub fn start(
         self,
         contexts: &mut Vec<(ProtocolContext, ProtocolContext)>,
@@ -66,20 +74,18 @@ impl RsyncWorker {
                 self.input.len(),
             );
             let progress = ProgressMessage::DoneSyncing(sync_outcome);
-            match self.progress_output.send(progress) {
-                Ok(_) => {}
-                Err(e) => {
-                    return Err(ForkliftError::CrossbeamChannelError(format!(
-                        "Error: {:?}, unable to send progress",
-                        e
-                    )));
-                }
+            if let Err(e) = self.progress_output.send(progress) {
+                return Err(ForkliftError::CrossbeamChannelError(format!(
+                    "Error: {:?}, unable to send progress",
+                    e
+                )));
             };
             trace!("rec len {:?}", self.input.len());
         }
         Ok(())
     }
 
+    /// process an Entry according to rsync rules
     fn sync(
         &self,
         src_entry: &Entry,
@@ -118,7 +124,7 @@ impl RsyncWorker {
                 (SyncOutcome::UpToDate, SyncOutcome::PermissionsUpdated) => {
                     SyncOutcome::PermissionsUpdated
                 }
-                (_, _) => c,
+                (..) => c,
             }
         }
         Ok(outcome)

@@ -5,6 +5,7 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+/// Config File Input
 pub struct Input {
     /// Socket addresses of either all nodes in the cluster or this program's ip and another node
     pub nodes: Vec<SocketAddr>,
@@ -38,15 +39,14 @@ pub struct Input {
     /// format is probably postgresql://postgres:password@ip:port
     pub database_url: Option<String>,
 }
-
+/// default workgroup helper
 fn default_workgroup() -> String {
     "WORKGROUP".to_string()
 }
-
+/// default lifetime helper
 fn default_lifetime() -> u64 {
     5
 }
-///
 /// Check if given path is an smburl
 /// NOTE: the smburl format is smb://server/share.  Other
 /// smburl syntax, such as smb://username:password@server/share will not
@@ -54,7 +54,6 @@ fn default_lifetime() -> u64 {
 /// the url will work depends entirely on the smbclient you are using.
 /// In general, refrain from using additional parts and input them in
 /// the command line as opposed to in the smburl for security at the very least.  
-///
 pub fn is_smb_path(path: &PathBuf) -> bool {
     let p = path.to_string_lossy().into_owned();
     // Why 8?  6 for smb://, + 1 for minimum server name + 1 for /, + 1 for minimum share name
@@ -72,6 +71,7 @@ pub fn is_smb_path(path: &PathBuf) -> bool {
 
 impl Input {
     //NOTE, send invalid config error when panicking
+    /// create new Input object from config file
     pub fn new(input: &str) -> Self {
         let i: Input = match serde_json::from_str(input) {
             Ok(e) => e,
