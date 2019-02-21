@@ -91,16 +91,12 @@ pub fn set_xattr(
     error: &str,
     success: &str,
 ) -> ForkliftResult<()> {
-    match context.setxattr(path, attribute, value, XAttrFlags::SMBC_XATTR_FLAG_CREATE) {
-        Ok(_) => {
-            trace!("set success! {}", success);
-            Ok(())
-        }
-        Err(e) => {
-            let err = format!("Error {}, {}", e, error);
-            Err(ForkliftError::FSError(err))
-        }
+    if let Err(e) = context.setxattr(path, attribute, value, XAttrFlags::SMBC_XATTR_FLAG_CREATE) {
+        let err = format!("Error {}, {}", e, error);
+        return Err(ForkliftError::FSError(err));
     }
+    trace!("set success! {}", success);
+    Ok(())
 }
 
 /// get the external attribute of a destination file on a Samba server
@@ -167,7 +163,7 @@ pub fn make_dir(
     match (exists, copy_outcome) {
         (false, _) => outcome = SyncOutcome::DirectoryCreated,
         (_, SyncOutcome::PermissionsUpdated) => outcome = SyncOutcome::DirectoryUpdated,
-        (_, _) => outcome = SyncOutcome::UpToDate,
+        (..) => outcome = SyncOutcome::UpToDate,
     }
     Ok(outcome)
 }
@@ -201,7 +197,7 @@ pub fn make_dir_all(
                 dest_parent = destination_parent.parent();
                 src_parent = source_parent.parent();
             }
-            (_, _) => {
+            (..) => {
                 return Err(ForkliftError::FSError(
                     "While loop invariant in make_dir_all failed".to_string(),
                 ));
@@ -213,7 +209,7 @@ pub fn make_dir_all(
         trace!("stack not empty");
         let (path, srcpath) = match (stack.pop(), src_stack.pop()) {
             (Some(p), Some(sp)) => (p, sp),
-            (_, _) => {
+            (..) => {
                 return Err(ForkliftError::FSError("Loop invariant failed".to_string()));
             }
         };
@@ -295,7 +291,7 @@ pub fn has_different_permissions(
             trace!("src dos mode {:?}, dest dos mode {:?}", src_mod_values, dest_mod_values);
             Ok(src_mod_values != dest_mod_values)
         }
-        (_, _) => Err(ForkliftError::FSError("Filesystems do not match!".to_string())),
+        (..) => Err(ForkliftError::FSError("Filesystems do not match!".to_string())),
     }
 }
 
@@ -326,6 +322,17 @@ fn read_link(path: &Path, nfs_context: &Nfs, size: i64) -> ForkliftResult<String
     Ok(link)
 }
 
+/// helper for copy_link; unlink a symlink in order to update it
+pub fn unlink_outdated_link(path: &Path, nfs_context: &Nfs) -> ForkliftResult<()> {
+    if let Err(e) = nfs_context.unlink(path) {
+        return Err(ForkliftError::FSError(format!(
+            "Could not remove {:?} while updating link, {}",
+            path, e
+        )));
+    }
+    Ok(())
+}
+
 /// check if the destination symlink links to the same file as the source, copy if not
 ///
 /// @note Samba does not support symlinks, so copy_link will immediately return
@@ -340,12 +347,12 @@ pub fn copy_link(
     //Check if correct Filesytem
     let (src_nfs_context, dest_nfs_context) = match (src_context.clone(), dest_context.clone()) {
         (ProtocolContext::Nfs(ctx), ProtocolContext::Nfs(dctx)) => (ctx, dctx),
-        (_, _) => {
+        (..) => {
             return Err(ForkliftError::FSError("Samba does not support symlinks".to_string()));
         }
     };
     //Check if files exist and get size
-    let (src_size, dest_size) = match (src.metadata(), dest.metadata()) {
+    let (size, dest_size) = match (src.metadata(), dest.metadata()) {
         (None, _) => {
             return Err(ForkliftError::FSError("Source File does not exist!".to_string()));
         }
@@ -353,23 +360,14 @@ pub fn copy_link(
         (Some(src_stat), Some(dest_stat)) => (src_stat.size() + 1, dest_stat.size() + 1),
     };
     let (src_path, dest_path) = (src.path(), dest.path());
-    let src_target = read_link(src_path, &src_nfs_context, src_size)?;
+    let src_target = read_link(src_path, &src_nfs_context, size)?;
     let mut outcome: SyncOutcome;
     match dest.is_link() {
         Some(true) => {
             let dest_target = read_link(dest_path, &dest_nfs_context, dest_size)?;
             if dest_target != src_target {
-                match dest_nfs_context.unlink(dest_path) {
-                    Ok(_) => {
-                        outcome = SyncOutcome::SymlinkUpdated;
-                    }
-                    Err(e) => {
-                        return Err(ForkliftError::FSError(format!(
-                            "Could not remove {:?} while updating link, {}",
-                            dest_path, e
-                        )));
-                    }
-                }
+                unlink_outdated_link(dest_path, &dest_nfs_context)?;
+                outcome = SyncOutcome::SymlinkUpdated;
             } else {
                 return Ok(SyncOutcome::UpToDate);
             }
@@ -385,7 +383,7 @@ pub fn copy_link(
             outcome = SyncOutcome::SymlinkCreated;
         }
     }
-    //create update symlink, if creation fails, skip
+    //create/update symlink, if creation fails, skip
     if let Err(e) = dest_nfs_context.symlink(Path::new(&src_target), dest_path) {
         let mess = LogMessage::ErrorType(
             ErrorType::FSError,
@@ -397,23 +395,13 @@ pub fn copy_link(
     Ok(outcome)
 }
 
-///
 /// read as much data from a file from the offset as possible in one pass
-///
-/// @param path     the path of the file
-///
-/// @param file     The file to be read
-///
-/// @param offset   The location where the read will start
-///
-/// @return         a vector of ubytes containing the data in the file
 ///
 /// @note           while this function will attempt to read BUFF_SIZE
 ///                 bytes from the file starting from offset, it is
 ///                 still possible that the actual number of bytes read is
 ///                 smaller.  Be sure to check the length of the returned
 ///                 vector for the true number of bytes read
-///
 fn read_chunk(path: &Path, file: &FileType, offset: u64) -> ForkliftResult<Vec<u8>> {
     match file.read(BUFF_SIZE, offset) {
         Ok(buf) => Ok(buf),
@@ -424,21 +412,9 @@ fn read_chunk(path: &Path, file: &FileType, offset: u64) -> ForkliftResult<Vec<u
     }
 }
 
-///
 /// open the file at path in context.
 ///
-/// @param path     the path of the file to be opened
-///
-/// @param context  the filesystem context of the file
-///
-/// @param flags    the flags used when opening the file
-///
-/// @param error    the error message should the file fail to open
-///
-/// @return         a FileType containing the opened file
-///
-/// @note           since mode is never used, we can set mode to be anything
-///
+/// @note since mode is never used, we can set mode to be anything
 fn open_file(
     path: &Path,
     context: &mut ProtocolContext,
@@ -454,27 +430,12 @@ fn open_file(
     }
 }
 
-///
 /// write buffer to the file at path starting at the offset
-///
-/// @param path     the path of the file to be written to
-///
-/// @param file     the FileType holding the file to be
-///                 written to
-///
-/// @param buffer   the vector containing the bytes to be
-///                 written
-///
-/// @param offset   the place in file where the write starts
-///
-/// @return         the number of bytes written to the file
-///                 is returned
 ///
 /// @note           sometimes the size of the input buffer is too
 ///                 big to write, so we can check the num written
 ///                 against the size of the buffer to see if we
 ///                 need to write again
-///
 fn write_file(path: &Path, file: &FileType, buffer: &[u8], offset: u64) -> ForkliftResult<u64> {
     match file.write(buffer, offset) {
         Ok(n) => Ok(n),
@@ -484,82 +445,77 @@ fn write_file(path: &Path, file: &FileType, buffer: &[u8], offset: u64) -> Forkl
         }
     }
 }
+/// helper for checksum copy; creates a new file at path
+fn file_create(path: &Path, context: &mut ProtocolContext, err: &str) -> ForkliftResult<FileType> {
+    match context.create(&path, OFlag::O_CREAT, Mode::S_IRWXU | Mode::S_IRWXO | Mode::S_IRWXG) {
+        Ok(f) => Ok(f),
+        Err(e) => Err(ForkliftError::FSError(format!("Error {}, {}", e, err))),
+    }
+}
 
-///
-/// checksums a destination file, copying over the data from the src file in the chunks
-/// where checksum fails
-///
-/// @param progress_out  Channel to set progress to progress_worker
-///
-/// @param src              Source file entry
-///
-/// @param dest             Dest file entry
-///
-/// @param src_context      the context of the source filesystem
-///
-/// @param dest_context     the context of the destination filesystem
-///
-/// @param is_copy          boolean to determine if file copy or checksum copy
-///
-/// @return                 the sync outcome Checksum Updated or Up To Date,
-///                         otherwise an error occured
-///
-pub fn checksum_copy(
+/// helper for checksum copy; hash a buffer of bytes to a checksum vec of bytes
+fn hash(buf: &[u8], hasher: &mut MeowHasher) -> Vec<u8> {
+    hasher.input(buf);
+    hasher.result_reset().as_slice().to_vec()
+}
+
+/// helper for checksum copy; trucate a buffer to the number written and append to total
+fn update_buffer(buf: &mut Vec<u8>, total_buf: &mut Vec<u8>, num_written: u64) {
+    buf.truncate(num_written as usize);
+    total_buf.append(buf);
+}
+/// Send progress and log errors
+fn send_progress(
+    progress: ProgressMessage,
     progress_out: &Sender<ProgressMessage>,
+    log_out: &Sender<LogMessage>,
+) -> ForkliftResult<()> {
+    if progress_out.send(progress).is_err() {
+        let mess = LogMessage::ErrorType(
+            ErrorType::CrossbeamChannelError,
+            "Unable to send progress".to_string(),
+        );
+        send_mess(mess, log_out)?;
+    }
+    Ok(())
+}
+/// checksums a destination file, copying over the data from the src file in the chunks
+/// where checksum fails. is_copy is used to determine if file copy or checksum copy
+pub fn checksum_copy(
     src: &Entry,
     dest: &Entry,
     src_context: &mut ProtocolContext,
     dest_context: &mut ProtocolContext,
     is_copy: bool,
+    progress_out: &Sender<ProgressMessage>,
     log_out: &Sender<LogMessage>,
 ) -> ForkliftResult<SyncOutcome> {
     let (src_path, dest_path) = (src.path(), dest.path());
-    //check if src exists (which it should...)
-    let src_meta = match src.metadata() {
+    let size = match src.metadata() {
+        Some(m) => m.size(),
         None => {
-            let err = format!("Source file {:?} should exist!", src_path);
-            return Err(ForkliftError::FSError(err));
+            return Err(ForkliftError::FSError(format!("Source file {:?} should exist!", src_path)));
         }
-        Some(m) => m,
     };
     // open src and dest files
-    let err = format!("Could not open {:?} for reading", src_path);
-    let src_file = open_file(src_path, src_context, OFlag::empty(), &err)?;
-    let flags = OFlag::O_CREAT;
-    let dest_file;
-    if is_copy {
-        dest_file = match dest_context.create(
-            &dest_path,
-            flags,
-            Mode::S_IRWXU | Mode::S_IRWXO | Mode::S_IRWXG,
-        ) {
-            Ok(f) => f,
-            Err(e) => {
-                trace!("Error {:?}", e);
-                let err = format!("Error {:?} Could not open {:?} for writing", e, dest_path);
-                return Err(ForkliftError::FSError(err));
-            }
-        };
+    let src_err = format!("Could not open {:?} for reading", src_path);
+    let dest_err = format!("could not open {:?} for writing", dest_path);
+    let src_file = open_file(src_path, src_context, OFlag::empty(), &src_err)?;
+    let dest_file = if is_copy {
+        file_create(&dest_path, dest_context, &dest_err)?
     } else {
-        let err = format!("Could not open {:?} for writing", dest_path);
-        dest_file = open_file(dest_path, dest_context, flags, &err)?;
-    }
-
+        open_file(dest_path, dest_context, OFlag::O_CREAT, &dest_err)?
+    };
     //loop until end, count the number of times we needed to update the file
+    let (mut src_total, mut dest_total): (Vec<u8>, Vec<u8>) = (vec![], vec![]);
     let (mut offset, mut counter) = (0, 0);
-    let mut meowhash = MeowHasher::new();
-    let mut end = false;
-    let mut src_file_buf: Vec<u8> = vec![];
-    let mut dest_file_buf: Vec<u8> = vec![];
-    while { !end } {
+    let mut hasher = MeowHasher::new();
+    let path = src_path.to_string_lossy().to_string();
+    loop {
         let mut num_written = 0;
         let mut src_buf = read_chunk(src_path, &src_file, offset)?;
-        meowhash.input(&src_buf);
-        let hash_src = meowhash.result_reset();
         let mut dest_buf = read_chunk(dest_path, &dest_file, offset)?;
-        meowhash.input(&dest_buf);
-        let hash_dest = meowhash.result_reset();
-
+        let (hash_src, hash_dest) = (hash(&src_buf, &mut hasher), hash(&dest_buf, &mut hasher));
         if hash_src != hash_dest {
             if src_buf.len() < dest_buf.len() {
                 dest_file.truncate(src_buf.len() as u64)?;
@@ -571,93 +527,47 @@ pub fn checksum_copy(
         }
         //update offset, add bytes to file_bufs and check if num_written > 0
         if num_written > 0 {
-            src_buf.truncate(num_written as usize);
-            src_file_buf.append(&mut src_buf);
-            dest_buf.truncate(num_written as usize);
-            dest_file_buf.append(&mut dest_buf);
+            update_buffer(&mut src_buf, &mut src_total, num_written);
+            update_buffer(&mut dest_buf, &mut dest_total, num_written);
             offset += num_written - 1;
         } else {
-            src_file_buf.append(&mut src_buf);
-            dest_file_buf.append(&mut dest_buf);
+            update_buffer(&mut src_buf, &mut src_total, num_written);
             offset += src_buf.len() as u64;
         }
         if src_buf.is_empty() {
-            end = true;
+            break;
         }
         //send progress
         let progress = ProgressMessage::CheckSyncing {
-            description: src.path().to_string_lossy().into_owned(),
-            size: src_meta.size() as usize,
+            description: path.clone(),
+            size: size as usize,
             done: offset as usize,
         };
-        if progress_out.send(progress).is_err() {
-            let mess = LogMessage::ErrorType(
-                ErrorType::CrossbeamChannelError,
-                "Unable to send progress".to_string(),
-            );
-            send_mess(mess, log_out)?;
-        }
+        send_progress(progress, progress_out, log_out)?;
     }
-    meowhash.input(&src_file_buf);
-    // NOTE: send this value for final check
-    let whole_checksum = meowhash.result_reset();
-    meowhash.input(&dest_file_buf);
-    let test_checksum = meowhash.result();
-    if whole_checksum != test_checksum {
-        //error.......
-        let err = format!(
-            "File {:?} had checksum {:?} on source, but has checksum {:?} on destination.",
-            src.path(),
-            whole_checksum,
-            test_checksum
-        );
-        return Err(ForkliftError::ChecksumError(err));
+    let (src_check, dest_check) = (hash(&src_total, &mut hasher), hash(&dest_total, &mut hasher));
+    if src_check != dest_check {
+        return Err(ForkliftError::ChecksumError(format!(
+            "{} has source checksum {:?}, destination checksum {:?}",
+            path, src_check, dest_check
+        )));
     }
-    let whole_checksum = whole_checksum.as_slice().to_vec();
-    let test_checksum = test_checksum.as_slice().to_vec();
     if counter == 0 {
         return Ok(SyncOutcome::UpToDate);
     }
     if is_copy {
-        Ok(SyncOutcome::FileCopied(
-            src.path().to_string_lossy().to_string(),
-            whole_checksum,
-            test_checksum,
-            src_meta.size(),
-            current_time(),
-        ))
+        Ok(SyncOutcome::FileCopied(path, src_check, dest_check, size, current_time()))
     } else {
-        Ok(SyncOutcome::ChecksumUpdated(
-            src.path().to_string_lossy().to_string(),
-            whole_checksum,
-            test_checksum,
-            src_meta.size(),
-            current_time(),
-        ))
+        Ok(SyncOutcome::ChecksumUpdated(path, src_check, dest_check, size, current_time()))
     }
 }
 
-///
 /// syncs the src and dest files.  It also sends the current progress
 /// of the rsync of the entry.
-///
-/// @param progress_out  Channel to send progress to progress_worker
-///
-/// @param src              Source file entry
-///
-/// @param dest             Dest file entry
-///
-/// @param src_context      the context of the source filesystem
-///
-/// @param dest_context     the context of the destination filesystem
-///
-/// @return                 the outcome of the entry rsync (or a ForkliftError if it fails)
 ///
 /// @note                   no destination => FileCopied, diff size => File Copied
 ///                         diff srctime more recent => File Copied
 ///                         Otherwise, checksum copy
-///                         
-///
 pub fn sync_entry(
     src: &Entry,
     dest: &Entry,
@@ -667,13 +577,7 @@ pub fn sync_entry(
     log_out: &Sender<LogMessage>,
 ) -> ForkliftResult<SyncOutcome> {
     let description = src.path().to_string_lossy().into_owned();
-    if progress_out.send(ProgressMessage::StartSync(description)).is_err() {
-        let mess = LogMessage::ErrorType(
-            ErrorType::CrossbeamChannelError,
-            "Unable to send progress".to_string(),
-        );
-        send_mess(mess, log_out)?;
-    }
+    send_progress(ProgressMessage::StartSync(description), progress_out, log_out)?;
     match src.is_link() {
         Some(true) => {
             trace!("Is link!");
@@ -700,14 +604,14 @@ pub fn sync_entry(
     match (dest.metadata(), has_different_size(src, dest), is_more_recent(src, dest)) {
         (None, _, _) => {
             debug!("Destination does not exist yet!");
-            checksum_copy(progress_out, src, dest, src_context, dest_context, true, log_out)
+            checksum_copy(src, dest, src_context, dest_context, true, progress_out, log_out)
         }
         (Some(_), Ok(size_dif), Ok(recent)) => {
             debug!("Is different!!! size {}  recent {}", size_dif, recent);
             if size_dif || recent {
-                checksum_copy(progress_out, src, dest, src_context, dest_context, true, log_out)
+                checksum_copy(src, dest, src_context, dest_context, true, progress_out, log_out)
             } else {
-                checksum_copy(progress_out, src, dest, src_context, dest_context, false, log_out)
+                checksum_copy(src, dest, src_context, dest_context, false, progress_out, log_out)
             }
         }
         (_, Err(e), _) => Err(e),
@@ -715,19 +619,13 @@ pub fn sync_entry(
     }
 }
 
-///
 /// given a source sid, check through a list of destination acls for the acl
 /// with the matching destination sid, remove it from the list and return it
-///
-/// @param check_sid    the source sid to check for
-///
-/// @param dest_acls    the list of destination acls
 ///
 /// @return             return Some<ACE>, where ACE is the acl in the list
 ///                     of destination acls with the same sid as check_sid
 ///                     otherwise if dest_acls does not have an acl with the
 ///                     input sid
-///
 fn check_acl_sid_remove(check_sid: &Sid, dest_acls: &mut Vec<SmbcAclValue>) -> Option<ACE> {
     for (count, dest_acl) in dest_acls.iter().enumerate() {
         if let SmbcAclValue::Acl(ACE::Numeric(
@@ -739,35 +637,22 @@ fn check_acl_sid_remove(check_sid: &Sid, dest_acls: &mut Vec<SmbcAclValue>) -> O
         {
             trace!("Sid to check {}, dest sid {}", *check_sid, &dest_sid);
             if check_sid == dest_sid {
-                let ret = ACE::Numeric(
+                let return_sid = ACE::Numeric(
                     SidType::Numeric(Some(dest_sid.clone())),
                     atype.clone(),
                     *flag,
                     *mask,
                 );
                 dest_acls.remove(count);
-                return Some(ret);
+                return Some(return_sid);
             }
         }
     }
     None
 }
 
-///
 /// Change the Dos Mode Attribute of the destination file to match
 /// the source Dos Mode Attribute
-///
-/// @param src_path     the path to the source file
-///
-/// @param dest_path    the path to the destination file
-///
-/// @param src_ctx      the Samba context of the source filesystem
-///
-/// @param dest_ctx     the Samba context of the destination filesystem
-///
-/// @return             Nothing, or an error should any of the xattr
-///                     functions fail.
-///
 fn change_mode(
     src_path: &Path,
     dest_path: &Path,
@@ -795,21 +680,8 @@ fn change_mode(
     Ok(())
 }
 
-///
 /// get the numeric destination SID corresponding to a named
 /// source SID.
-///
-/// @param dest_path The path of the file whose acl's you are checking
-///
-/// @param sid  The named source SID
-///
-/// @param dest_acls_plus A vector of all of the destination acls named
-///
-/// @param dest_ctx The filesystem context of the destination filesystem
-///
-/// @return Option<Sid>  Some(SID) if a matching SID was found, NONE if
-///                      the file does not have a named equivalent ACL.
-///
 fn get_mapped_sid(
     dest_path: &Path,
     dest_ctx: &Smbc,
@@ -834,21 +706,9 @@ fn get_mapped_sid(
     Ok(None)
 }
 
-///
 /// Temporarily map a named acl from the source filesystem to a file at dest_path
 /// in order to determine the numeric equivalent of the mapped sid in the destination
 /// file, then remove the temporary acl
-///
-/// @param dest_apth    the path do the destination file
-///
-/// @param dest_ctx     the Samba context of the destination filesystem
-///
-/// @param sid          the named source acl to map
-///
-/// @return             the numeric sid of the mapped source sid
-///                     return a forklift error should any of the xattr
-///                     functions fail.
-///
 fn map_temp_acl(dest_path: &Path, dest_ctx: &Smbc, sid: &str) -> ForkliftResult<Sid> {
     let temp_ace = ACE::Named(
         SidType::Named(Some(sid.to_string())),
@@ -863,7 +723,7 @@ fn map_temp_acl(dest_path: &Path, dest_ctx: &Smbc, sid: &str) -> ForkliftResult<
     set_xattr(dest_path, dest_ctx, &xattr_set, &val, &err, &suc)?;
 
     let dest_acls = get_acl_list(dest_path, dest_ctx, true)?;
-    let ret = match get_mapped_sid(dest_path, dest_ctx, &sid, &dest_acls) {
+    let return_sid = match get_mapped_sid(dest_path, dest_ctx, &sid, &dest_acls) {
         Ok(Some(dest_sid)) => dest_sid,
         Ok(None) => {
             let err = format!("Unsucessful in mapping sid {}", &sid);
@@ -871,30 +731,18 @@ fn map_temp_acl(dest_path: &Path, dest_ctx: &Smbc, sid: &str) -> ForkliftResult<
         }
         Err(e) => return Err(e),
     };
-    match dest_ctx.removexattr(dest_path, &SmbcXAttr::AclAttr(SmbcAclAttr::AclPlus(temp_ace))) {
-        Ok(_) => debug!("removing temp acl success"),
-        Err(e) => {
-            let err = format!("Error {}, failed to remove temp acl", e);
-            return Err(ForkliftError::FSError(err));
-        }
+    if let Err(e) =
+        dest_ctx.removexattr(dest_path, &SmbcXAttr::AclAttr(SmbcAclAttr::AclPlus(temp_ace)))
+    {
+        let err = format!("Error {}, failed to remove temp acl", e);
+        return Err(ForkliftError::FSError(err));
     }
-    Ok(ret)
+    debug!("removing temp acl success");
+    Ok(return_sid)
 }
 
-///
 /// remove the old acl from the destiation file and set a new one to replace
 /// it with a new acl
-///
-/// @param dest_path    the destination file we are replacing the acls of
-///
-/// @param dest_ctx     the destination Samba context of the filesystem
-///
-/// @param new_acl      the acl we are replace the old one with
-///
-/// @param old_acl      the acl we are replacing
-///
-/// @return             nothing, or an error should remove or set xattr fail
-///
 fn replace_acl(
     dest_path: &Path,
     dest_ctx: &Smbc,

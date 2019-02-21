@@ -20,8 +20,8 @@ pub struct Node {
 }
 
 impl Node {
+    /// create a dead node with lifetime lifetime
     pub fn new(name: SocketAddr, lifetime: u64) -> Self {
-        /// create a dead node with lifetime lifetimr
         Node {
             name,
             lifetime,

@@ -9,34 +9,35 @@ extern crate flatbuffers;
 #[repr(u8)]
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum ResultType {
-    Ok = 0,
-    Err = 1,
+  Ok = 0,
+  Err = 1,
+
 }
 
 const ENUM_MIN_RESULT_TYPE: u8 = 0;
 const ENUM_MAX_RESULT_TYPE: u8 = 1;
 
 impl<'a> flatbuffers::Follow<'a> for ResultType {
-    type Inner = Self;
-    #[inline]
-    fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
-        flatbuffers::read_scalar_at::<Self>(buf, loc)
-    }
+  type Inner = Self;
+  #[inline]
+  fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
+    flatbuffers::read_scalar_at::<Self>(buf, loc)
+  }
 }
 
 impl flatbuffers::EndianScalar for ResultType {
-    #[inline]
-    fn to_little_endian(self) -> Self {
-        let n = u8::to_le(self as u8);
-        let p = &n as *const u8 as *const ResultType;
-        unsafe { *p }
-    }
-    #[inline]
-    fn from_little_endian(self) -> Self {
-        let n = u8::from_le(self as u8);
-        let p = &n as *const u8 as *const ResultType;
-        unsafe { *p }
-    }
+  #[inline]
+  fn to_little_endian(self) -> Self {
+    let n = u8::to_le(self as u8);
+    let p = &n as *const u8 as *const ResultType;
+    unsafe { *p }
+  }
+  #[inline]
+  fn from_little_endian(self) -> Self {
+    let n = u8::from_le(self as u8);
+    let p = &n as *const u8 as *const ResultType;
+    unsafe { *p }
+  }
 }
 
 impl flatbuffers::Push for ResultType {
@@ -48,49 +49,56 @@ impl flatbuffers::Push for ResultType {
 }
 
 #[allow(non_camel_case_types)]
-const ENUM_VALUES_RESULT_TYPE: [ResultType; 2] = [ResultType::Ok, ResultType::Err];
+const ENUM_VALUES_RESULT_TYPE:[ResultType; 2] = [
+  ResultType::Ok,
+  ResultType::Err
+];
 
 #[allow(non_camel_case_types)]
-const ENUM_NAMES_RESULT_TYPE: [&'static str; 2] = ["Ok", "Err"];
+const ENUM_NAMES_RESULT_TYPE:[&'static str; 2] = [
+    "Ok",
+    "Err"
+];
 
 pub fn enum_name_result_type(e: ResultType) -> &'static str {
-    let index: usize = e as usize;
-    ENUM_NAMES_RESULT_TYPE[index]
+  let index: usize = e as usize;
+  ENUM_NAMES_RESULT_TYPE[index]
 }
 
 #[allow(non_camel_case_types)]
 #[repr(u8)]
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum MessageType {
-    GETLIST = 0,
-    NODELIST = 1,
-    HEARTBEAT = 2,
+  GETLIST = 0,
+  NODELIST = 1,
+  HEARTBEAT = 2,
+
 }
 
 const ENUM_MIN_MESSAGE_TYPE: u8 = 0;
 const ENUM_MAX_MESSAGE_TYPE: u8 = 2;
 
 impl<'a> flatbuffers::Follow<'a> for MessageType {
-    type Inner = Self;
-    #[inline]
-    fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
-        flatbuffers::read_scalar_at::<Self>(buf, loc)
-    }
+  type Inner = Self;
+  #[inline]
+  fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
+    flatbuffers::read_scalar_at::<Self>(buf, loc)
+  }
 }
 
 impl flatbuffers::EndianScalar for MessageType {
-    #[inline]
-    fn to_little_endian(self) -> Self {
-        let n = u8::to_le(self as u8);
-        let p = &n as *const u8 as *const MessageType;
-        unsafe { *p }
-    }
-    #[inline]
-    fn from_little_endian(self) -> Self {
-        let n = u8::from_le(self as u8);
-        let p = &n as *const u8 as *const MessageType;
-        unsafe { *p }
-    }
+  #[inline]
+  fn to_little_endian(self) -> Self {
+    let n = u8::to_le(self as u8);
+    let p = &n as *const u8 as *const MessageType;
+    unsafe { *p }
+  }
+  #[inline]
+  fn from_little_endian(self) -> Self {
+    let n = u8::from_le(self as u8);
+    let p = &n as *const u8 as *const MessageType;
+    unsafe { *p }
+  }
 }
 
 impl flatbuffers::Push for MessageType {
@@ -102,129 +110,130 @@ impl flatbuffers::Push for MessageType {
 }
 
 #[allow(non_camel_case_types)]
-const ENUM_VALUES_MESSAGE_TYPE: [MessageType; 3] =
-    [MessageType::GETLIST, MessageType::NODELIST, MessageType::HEARTBEAT];
+const ENUM_VALUES_MESSAGE_TYPE:[MessageType; 3] = [
+  MessageType::GETLIST,
+  MessageType::NODELIST,
+  MessageType::HEARTBEAT
+];
 
 #[allow(non_camel_case_types)]
-const ENUM_NAMES_MESSAGE_TYPE: [&'static str; 3] = ["GETLIST", "NODELIST", "HEARTBEAT"];
+const ENUM_NAMES_MESSAGE_TYPE:[&'static str; 3] = [
+    "GETLIST",
+    "NODELIST",
+    "HEARTBEAT"
+];
 
 pub fn enum_name_message_type(e: MessageType) -> &'static str {
-    let index: usize = e as usize;
-    ENUM_NAMES_MESSAGE_TYPE[index]
+  let index: usize = e as usize;
+  ENUM_NAMES_MESSAGE_TYPE[index]
 }
 
 pub enum MessageOffset {}
 #[derive(Copy, Clone, Debug, PartialEq)]
 
 pub struct Message<'a> {
-    pub _tab: flatbuffers::Table<'a>,
+  pub _tab: flatbuffers::Table<'a>,
 }
 
 impl<'a> flatbuffers::Follow<'a> for Message<'a> {
     type Inner = Message<'a>;
     #[inline]
     fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
-        Self { _tab: flatbuffers::Table { buf, loc } }
+        Self {
+            _tab: flatbuffers::Table { buf: buf, loc: loc },
+        }
     }
 }
 
 impl<'a> Message<'a> {
     #[inline]
     pub fn init_from_table(table: flatbuffers::Table<'a>) -> Self {
-        Message { _tab: table }
+        Message {
+            _tab: table,
+        }
     }
     #[allow(unused_mut)]
     pub fn create<'bldr: 'args, 'args: 'mut_bldr, 'mut_bldr>(
         _fbb: &'mut_bldr mut flatbuffers::FlatBufferBuilder<'bldr>,
-        args: &'args MessageArgs<'args>,
-    ) -> flatbuffers::WIPOffset<Message<'bldr>> {
-        let mut builder = MessageBuilder::new(_fbb);
-        if let Some(x) = args.members {
-            builder.add_members(x);
-        }
-        builder.add_mtype(args.mtype);
-        builder.finish()
+        args: &'args MessageArgs<'args>) -> flatbuffers::WIPOffset<Message<'bldr>> {
+      let mut builder = MessageBuilder::new(_fbb);
+      if let Some(x) = args.members { builder.add_members(x); }
+      builder.add_mtype(args.mtype);
+      builder.finish()
     }
 
     pub const VT_MTYPE: flatbuffers::VOffsetT = 4;
     pub const VT_MEMBERS: flatbuffers::VOffsetT = 6;
 
-    #[inline]
-    pub fn mtype(&self) -> MessageType {
-        self._tab.get::<MessageType>(Message::VT_MTYPE, Some(MessageType::GETLIST)).unwrap()
-    }
-    #[inline]
-    pub fn members(&self) -> Option<flatbuffers::Vector<flatbuffers::ForwardsUOffset<&'a str>>> {
-        self._tab.get::<flatbuffers::ForwardsUOffset<
-            flatbuffers::Vector<flatbuffers::ForwardsUOffset<&'a str>>,
-        >>(Message::VT_MEMBERS, None)
-    }
+  #[inline]
+  pub fn mtype(&self) -> MessageType {
+    self._tab.get::<MessageType>(Message::VT_MTYPE, Some(MessageType::GETLIST)).unwrap()
+  }
+  #[inline]
+  pub fn members(&self) -> Option<flatbuffers::Vector<flatbuffers::ForwardsUOffset<&'a str>>> {
+    self._tab.get::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<flatbuffers::ForwardsUOffset<&'a str>>>>(Message::VT_MEMBERS, None)
+  }
 }
 
 pub struct MessageArgs<'a> {
     pub mtype: MessageType,
-    pub members: Option<
-        flatbuffers::WIPOffset<flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<&'a str>>>,
-    >,
+    pub members: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a , flatbuffers::ForwardsUOffset<&'a  str>>>>,
 }
 impl<'a> Default for MessageArgs<'a> {
     #[inline]
     fn default() -> Self {
-        MessageArgs { mtype: MessageType::GETLIST, members: None }
+        MessageArgs {
+            mtype: MessageType::GETLIST,
+            members: None,
+        }
     }
 }
 pub struct MessageBuilder<'a: 'b, 'b> {
-    fbb_: &'b mut flatbuffers::FlatBufferBuilder<'a>,
-    start_: flatbuffers::WIPOffset<flatbuffers::TableUnfinishedWIPOffset>,
+  fbb_: &'b mut flatbuffers::FlatBufferBuilder<'a>,
+  start_: flatbuffers::WIPOffset<flatbuffers::TableUnfinishedWIPOffset>,
 }
 impl<'a: 'b, 'b> MessageBuilder<'a, 'b> {
-    #[inline]
-    pub fn add_mtype(&mut self, mtype: MessageType) {
-        self.fbb_.push_slot::<MessageType>(Message::VT_MTYPE, mtype, MessageType::GETLIST);
+  #[inline]
+  pub fn add_mtype(&mut self, mtype: MessageType) {
+    self.fbb_.push_slot::<MessageType>(Message::VT_MTYPE, mtype, MessageType::GETLIST);
+  }
+  #[inline]
+  pub fn add_members(&mut self, members: flatbuffers::WIPOffset<flatbuffers::Vector<'b , flatbuffers::ForwardsUOffset<&'b  str>>>) {
+    self.fbb_.push_slot_always::<flatbuffers::WIPOffset<_>>(Message::VT_MEMBERS, members);
+  }
+  #[inline]
+  pub fn new(_fbb: &'b mut flatbuffers::FlatBufferBuilder<'a>) -> MessageBuilder<'a, 'b> {
+    let start = _fbb.start_table();
+    MessageBuilder {
+      fbb_: _fbb,
+      start_: start,
     }
-    #[inline]
-    pub fn add_members(
-        &mut self,
-        members: flatbuffers::WIPOffset<
-            flatbuffers::Vector<'b, flatbuffers::ForwardsUOffset<&'b str>>,
-        >,
-    ) {
-        self.fbb_.push_slot_always::<flatbuffers::WIPOffset<_>>(Message::VT_MEMBERS, members);
-    }
-    #[inline]
-    pub fn new(_fbb: &'b mut flatbuffers::FlatBufferBuilder<'a>) -> MessageBuilder<'a, 'b> {
-        let start = _fbb.start_table();
-        MessageBuilder { fbb_: _fbb, start_: start }
-    }
-    #[inline]
-    pub fn finish(self) -> flatbuffers::WIPOffset<Message<'a>> {
-        let o = self.fbb_.end_table(self.start_);
-        flatbuffers::WIPOffset::new(o.value())
-    }
+  }
+  #[inline]
+  pub fn finish(self) -> flatbuffers::WIPOffset<Message<'a>> {
+    let o = self.fbb_.end_table(self.start_);
+    flatbuffers::WIPOffset::new(o.value())
+  }
 }
 
 #[inline]
 pub fn get_root_as_message<'a>(buf: &'a [u8]) -> Message<'a> {
-    flatbuffers::get_root::<Message<'a>>(buf)
+  flatbuffers::get_root::<Message<'a>>(buf)
 }
 
 #[inline]
 pub fn get_size_prefixed_root_as_message<'a>(buf: &'a [u8]) -> Message<'a> {
-    flatbuffers::get_size_prefixed_root::<Message<'a>>(buf)
+  flatbuffers::get_size_prefixed_root::<Message<'a>>(buf)
 }
 
 #[inline]
 pub fn finish_message_buffer<'a, 'b>(
     fbb: &'b mut flatbuffers::FlatBufferBuilder<'a>,
-    root: flatbuffers::WIPOffset<Message<'a>>,
-) {
-    fbb.finish(root, None);
+    root: flatbuffers::WIPOffset<Message<'a>>) {
+  fbb.finish(root, None);
 }
 
 #[inline]
-pub fn finish_size_prefixed_message_buffer<'a, 'b>(
-    fbb: &'b mut flatbuffers::FlatBufferBuilder<'a>,
-    root: flatbuffers::WIPOffset<Message<'a>>,
-) {
-    fbb.finish_size_prefixed(root, None);
+pub fn finish_size_prefixed_message_buffer<'a, 'b>(fbb: &'b mut flatbuffers::FlatBufferBuilder<'a>, root: flatbuffers::WIPOffset<Message<'a>>) {
+  fbb.finish_size_prefixed(root, None);
 }
