@@ -9,12 +9,14 @@ use crate::error::*;
 use crate::filesystem::*;
 use crate::filesystem_entry::Entry;
 use crate::filesystem_ops::*;
+use crate::postgres_logger::LogMessage;
 use crate::progress_message::ProgressMessage;
 
 #[derive(Clone)]
 pub struct RsyncWorker {
     pub input: Receiver<Option<Entry>>,
-    output: Sender<ProgressMessage>,
+    progress_output: Sender<ProgressMessage>,
+    pub log_output: Sender<LogMessage>,
     source: PathBuf,
     destination: PathBuf,
 }
@@ -24,13 +26,15 @@ impl RsyncWorker {
         source: &Path,
         destination: &Path,
         input: Receiver<Option<Entry>>,
-        output: Sender<ProgressMessage>,
+        progress_output: Sender<ProgressMessage>,
+        log_output: Sender<LogMessage>,
     ) -> RsyncWorker {
         RsyncWorker {
             source: source.to_path_buf(),
             destination: destination.to_path_buf(),
             input,
-            output,
+            progress_output,
+            log_output,
         }
     }
 
@@ -45,9 +49,7 @@ impl RsyncWorker {
             Some((s, d)) => (s.clone(), d.clone()),
             None => {
                 error!("unable to retrieve contexts");
-                return Err(ForkliftError::FSError(
-                    "Unable to retrieve contexts".to_string(),
-                ));
+                return Err(ForkliftError::FSError("Unable to retrieve contexts".to_string()));
             }
         };
 
@@ -64,7 +66,7 @@ impl RsyncWorker {
                 self.input.len(),
             );
             let progress = ProgressMessage::DoneSyncing(sync_outcome);
-            match self.output.send(progress) {
+            match self.progress_output.send(progress) {
                 Ok(_) => {}
                 Err(e) => {
                     return Err(ForkliftError::CrossbeamChannelError(format!(
@@ -89,19 +91,20 @@ impl RsyncWorker {
         let mut src_context = src_context;
         let mut dest_context = dest_context;
         make_dir_all(
-            &dest_path,
             &src_entry.path(),
+            &dest_path,
             &self.destination,
             &mut src_context,
             &mut dest_context,
         )?;
         let dest_entry = Entry::new(&dest_path, &dest_context);
         let mut outcome = sync_entry(
-            &self.output,
             &src_entry,
             &dest_entry,
             src_context,
             dest_context,
+            &self.progress_output,
+            &self.log_output,
         )?;
         let dir = match src_entry.is_dir() {
             Some(d) => d,

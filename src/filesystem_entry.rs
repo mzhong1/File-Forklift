@@ -17,8 +17,8 @@ pub struct Entry {
 
 impl Entry {
     /// create a new Entry
-    pub fn new(epath: &Path, context: &ProtocolContext) -> Self {
-        let (metadata, is_link, is_dir) = match context.stat(epath) {
+    pub fn new(path: &Path, context: &ProtocolContext) -> Self {
+        let (metadata, is_link, is_dir) = match context.stat(path) {
             Ok(stat) => (
                 Some(stat),
                 Some(stat.mode() & SFlag::S_IFMT.bits() == SFlag::S_IFLNK.bits()),
@@ -28,12 +28,7 @@ impl Entry {
                 (None, None, None) // note: file DNE
             }
         };
-        Entry {
-            path: epath.to_path_buf(),
-            metadata,
-            is_link,
-            is_dir,
-        }
+        Entry { path: path.to_path_buf(), metadata, is_link, is_dir }
     }
 
     /// return the path of the Entry

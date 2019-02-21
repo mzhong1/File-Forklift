@@ -17,10 +17,7 @@ fn test_create_message() {
         0, 0, 0,
     ];
 
-    let result = create_message(
-        MessageType::HEARTBEAT,
-        &vec!["192.168.1.1:5250".to_string()],
-    );
+    let result = create_message(MessageType::HEARTBEAT, &vec!["192.168.1.1:5250".to_string()]);
     println!("{:?}", result);
     assert_eq!(result, expected_result);
 
@@ -140,18 +137,10 @@ pub fn create_message(m_type: MessageType, message: &[String]) -> Vec<u8> {
     let v: Vec<&str> = message.iter().map(|x| &**x).collect();
     trace!("Converting message vector {:?} to flatbuffer vector", v);
     let nodes = builder.create_vector_of_strings(&v);
-    trace!(
-        "Successfully converted messagebody to flatbuffer vector {:?}",
-        nodes
-    );
+    trace!("Successfully converted messagebody to flatbuffer vector {:?}", nodes);
 
-    let create = Message::create(
-        &mut builder,
-        &MessageArgs {
-            mtype: m_type,
-            members: Some(nodes),
-        },
-    );
+    let create =
+        Message::create(&mut builder, &MessageArgs { mtype: m_type, members: Some(nodes) });
     trace!("Successfully created Message {:?}", create);
     builder.finish_minimal(create);
     builder.finished_data().to_vec()

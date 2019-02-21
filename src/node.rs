@@ -30,21 +30,12 @@ impl Node {
         }
     }
     pub fn node_new(name: SocketAddr, lifetime: u64, liveness: i64, has_heartbeat: bool) -> Self {
-        Node {
-            name,
-            lifetime,
-            liveness,
-            has_heartbeat,
-        }
+        Node { name, lifetime, liveness, has_heartbeat }
     }
 
     /// ENSURES: returns true if the node was "dead" before the heartbeat was called
     pub fn heartbeat(&mut self) -> bool {
-        trace!(
-            "Before Heartbeat: Node {}, liveness {}",
-            self.name,
-            self.liveness
-        );
+        trace!("Before Heartbeat: Node {}, liveness {}", self.name, self.liveness);
         let prev_liveness = self.liveness;
         self.liveness = self.lifetime as i64;
         self.has_heartbeat = true;
@@ -54,11 +45,7 @@ impl Node {
 
     /// ENSURES: return true if the node "died" in this call to tickdown
     pub fn tickdown(&mut self) -> bool {
-        trace!(
-            "Before Tickdown: Node {}, liveness {}",
-            self.name,
-            self.liveness
-        );
+        trace!("Before Tickdown: Node {}, liveness {}", self.name, self.liveness);
         let prev_liveness = self.liveness;
         if self.liveness > 0 {
             self.liveness -= 1;
@@ -113,10 +100,7 @@ impl NodeList {
     /// get the socket address associated with the input ip address
     /// that is stored in node_names
     pub fn get_full_address(&self, ip: &str) -> Option<SocketAddr> {
-        trace!(
-            "Attempt to get full address of input ip {} from list of sockets",
-            ip
-        );
+        trace!("Attempt to get full address of input ip {} from list of sockets", ip);
         for n in &self.node_list {
             trace!("current loop address is {:?}", n);
             if n.ip().to_string() == ip {
@@ -136,15 +120,9 @@ impl NodeList {
 
     /// add a new node to node_names, else do nothing if address already in node_names
     pub fn add_node_to_list(&mut self, node_address: &SocketAddr) {
-        trace!(
-            "Attempting to add address {} to list of sockets",
-            node_address
-        );
+        trace!("Attempting to add address {} to list of sockets", node_address);
         if !self.contains_address(node_address) {
-            trace!(
-                "Address {} not already in list, attempting to parse to socket",
-                node_address
-            );
+            trace!("Address {} not already in list, attempting to parse to socket", node_address);
             self.node_list.push(node_address.clone());
         }
     }
@@ -173,9 +151,7 @@ pub struct NodeMap {
 impl NodeMap {
     /// create a new empty node_map
     pub fn new() -> Self {
-        NodeMap {
-            node_map: HashMap::new(),
-        }
+        NodeMap { node_map: HashMap::new() }
     }
 
     /// create a HashMap of Nodes referenced by the socket address
@@ -186,9 +162,7 @@ impl NodeMap {
     ) -> ForkliftResult<Self> {
         if lifetime == 0 {
             error!("Lifetime is trivial (less than or equal to zero)!");
-            return Err(ForkliftError::InvalidConfigError(
-                "Lifetime is trivial".to_string(),
-            ));
+            return Err(ForkliftError::InvalidConfigError("Lifetime is trivial".to_string()));
         }
         debug! {"Initialize hashmap of nodes with lifetime {} from socket list {:?} not including {}", lifetime, node_names, full_address};
         let mut nodes = NodeMap::new();
@@ -220,9 +194,7 @@ impl NodeMap {
         trace!("Adding node to map");
         let temp_node = Node::node_new(*node_address, lifetime, 0, heartbeat);
         debug!("Node successfully created : {:?}", &temp_node);
-        self.node_map
-            .entry(node_address.to_string())
-            .or_insert(temp_node);
+        self.node_map.entry(node_address.to_string()).or_insert(temp_node);
         Ok(())
     }
 }
@@ -230,10 +202,7 @@ impl NodeMap {
 #[test]
 fn test_heartbeat() {
     let mut n = Node::node_new(
-        SocketAddr::new(
-            ::std::net::IpAddr::V4(::std::net::Ipv4Addr::new(123, 45, 67, 89)),
-            1111,
-        ),
+        SocketAddr::new(::std::net::IpAddr::V4(::std::net::Ipv4Addr::new(123, 45, 67, 89)), 1111),
         5,
         3,
         false,
@@ -247,27 +216,13 @@ fn test_heartbeat() {
 fn test_get_full_address() {
     let mut names = NodeList::new();
     names.node_list = vec![
-        SocketAddr::new(
-            ::std::net::IpAddr::V4(::std::net::Ipv4Addr::new(172, 17, 0, 2)),
-            5671,
-        ),
-        SocketAddr::new(
-            ::std::net::IpAddr::V4(::std::net::Ipv4Addr::new(172, 17, 0, 3)),
-            1234,
-        ),
-        SocketAddr::new(
-            ::std::net::IpAddr::V4(::std::net::Ipv4Addr::new(172, 17, 0, 4)),
-            5555,
-        ),
-        SocketAddr::new(
-            ::std::net::IpAddr::V4(::std::net::Ipv4Addr::new(172, 17, 0, 1)),
-            7654,
-        ),
+        SocketAddr::new(::std::net::IpAddr::V4(::std::net::Ipv4Addr::new(172, 17, 0, 2)), 5671),
+        SocketAddr::new(::std::net::IpAddr::V4(::std::net::Ipv4Addr::new(172, 17, 0, 3)), 1234),
+        SocketAddr::new(::std::net::IpAddr::V4(::std::net::Ipv4Addr::new(172, 17, 0, 4)), 5555),
+        SocketAddr::new(::std::net::IpAddr::V4(::std::net::Ipv4Addr::new(172, 17, 0, 1)), 7654),
     ];
-    let expected_result = SocketAddr::new(
-        ::std::net::IpAddr::V4(::std::net::Ipv4Addr::new(172, 17, 0, 2)),
-        5555,
-    );
+    let expected_result =
+        SocketAddr::new(::std::net::IpAddr::V4(::std::net::Ipv4Addr::new(172, 17, 0, 2)), 5555);
     assert_eq!(Some(expected_result), names.get_full_address("172.17.0.4"));
     assert_eq!(None, names.get_full_address("172.17.5.4"))
 }
@@ -276,22 +231,10 @@ fn test_get_full_address() {
 fn test_contains_address() {
     let mut names = NodeList::new();
     names.node_list = vec![
-        SocketAddr::new(
-            ::std::net::IpAddr::V4(::std::net::Ipv4Addr::new(172, 17, 0, 2)),
-            5671,
-        ),
-        SocketAddr::new(
-            ::std::net::IpAddr::V4(::std::net::Ipv4Addr::new(172, 17, 0, 3)),
-            1234,
-        ),
-        SocketAddr::new(
-            ::std::net::IpAddr::V4(::std::net::Ipv4Addr::new(172, 17, 0, 4)),
-            5555,
-        ),
-        SocketAddr::new(
-            ::std::net::IpAddr::V4(::std::net::Ipv4Addr::new(172, 17, 0, 1)),
-            7654,
-        ),
+        SocketAddr::new(::std::net::IpAddr::V4(::std::net::Ipv4Addr::new(172, 17, 0, 2)), 5671),
+        SocketAddr::new(::std::net::IpAddr::V4(::std::net::Ipv4Addr::new(172, 17, 0, 3)), 1234),
+        SocketAddr::new(::std::net::IpAddr::V4(::std::net::Ipv4Addr::new(172, 17, 0, 4)), 5555),
+        SocketAddr::new(::std::net::IpAddr::V4(::std::net::Ipv4Addr::new(172, 17, 0, 1)), 7654),
     ];
     assert_eq!(
         true,
@@ -369,55 +312,32 @@ fn test_init_nodemap() {
     expected_result.insert(
         "172.17.0.2:5671".to_string(),
         Node::new(
-            SocketAddr::new(
-                ::std::net::IpAddr::V4(::std::net::Ipv4Addr::new(172, 17, 0, 2)),
-                5671,
-            ),
+            SocketAddr::new(::std::net::IpAddr::V4(::std::net::Ipv4Addr::new(172, 17, 0, 2)), 5671),
             5,
         ),
     );
     expected_result.insert(
         "172.17.0.3:1234".to_string(),
         Node::new(
-            SocketAddr::new(
-                ::std::net::IpAddr::V4(::std::net::Ipv4Addr::new(172, 17, 0, 3)),
-                1234,
-            ),
+            SocketAddr::new(::std::net::IpAddr::V4(::std::net::Ipv4Addr::new(172, 17, 0, 3)), 1234),
             5,
         ),
     );
     expected_result.insert(
         "172.17.0.4:5555".to_string(),
         Node::new(
-            SocketAddr::new(
-                ::std::net::IpAddr::V4(::std::net::Ipv4Addr::new(172, 17, 0, 4)),
-                5555,
-            ),
+            SocketAddr::new(::std::net::IpAddr::V4(::std::net::Ipv4Addr::new(172, 17, 0, 4)), 5555),
             5,
         ),
     );
     let mut names = vec![
-        SocketAddr::new(
-            ::std::net::IpAddr::V4(::std::net::Ipv4Addr::new(172, 17, 0, 2)),
-            5671,
-        ),
-        SocketAddr::new(
-            ::std::net::IpAddr::V4(::std::net::Ipv4Addr::new(172, 17, 0, 3)),
-            1234,
-        ),
-        SocketAddr::new(
-            ::std::net::IpAddr::V4(::std::net::Ipv4Addr::new(172, 17, 0, 4)),
-            5555,
-        ),
-        SocketAddr::new(
-            ::std::net::IpAddr::V4(::std::net::Ipv4Addr::new(172, 17, 0, 1)),
-            7654,
-        ),
+        SocketAddr::new(::std::net::IpAddr::V4(::std::net::Ipv4Addr::new(172, 17, 0, 2)), 5671),
+        SocketAddr::new(::std::net::IpAddr::V4(::std::net::Ipv4Addr::new(172, 17, 0, 3)), 1234),
+        SocketAddr::new(::std::net::IpAddr::V4(::std::net::Ipv4Addr::new(172, 17, 0, 4)), 5555),
+        SocketAddr::new(::std::net::IpAddr::V4(::std::net::Ipv4Addr::new(172, 17, 0, 1)), 7654),
     ];
-    let my_full_address = SocketAddr::new(
-        ::std::net::IpAddr::V4(::std::net::Ipv4Addr::new(172, 17, 0, 1)),
-        7654,
-    );
+    let my_full_address =
+        SocketAddr::new(::std::net::IpAddr::V4(::std::net::Ipv4Addr::new(172, 17, 0, 1)), 7654);
     let map = NodeMap::init_nodemap(&my_full_address, 5, &mut names).unwrap();
     println!("Expected Map {:?}", expected_result);
     println!("My Map: {:?}", map.node_map);
@@ -431,30 +351,21 @@ fn test_add_node_to_map() {
     map.node_map.insert(
         "172.17.0.2:5671".to_string(),
         Node::new(
-            SocketAddr::new(
-                ::std::net::IpAddr::V4(::std::net::Ipv4Addr::new(172, 17, 0, 2)),
-                5671,
-            ),
+            SocketAddr::new(::std::net::IpAddr::V4(::std::net::Ipv4Addr::new(172, 17, 0, 2)), 5671),
             5,
         ),
     );
     map.node_map.insert(
         "172.17.0.3:1234".to_string(),
         Node::new(
-            SocketAddr::new(
-                ::std::net::IpAddr::V4(::std::net::Ipv4Addr::new(172, 17, 0, 3)),
-                1234,
-            ),
+            SocketAddr::new(::std::net::IpAddr::V4(::std::net::Ipv4Addr::new(172, 17, 0, 3)), 1234),
             5,
         ),
     );
     map.node_map.insert(
         "172.17.0.4:5555".to_string(),
         Node::new(
-            SocketAddr::new(
-                ::std::net::IpAddr::V4(::std::net::Ipv4Addr::new(172, 17, 0, 4)),
-                5555,
-            ),
+            SocketAddr::new(::std::net::IpAddr::V4(::std::net::Ipv4Addr::new(172, 17, 0, 4)), 5555),
             5,
         ),
     );
@@ -463,39 +374,27 @@ fn test_add_node_to_map() {
     expected_result.insert(
         "172.17.0.2:5671".to_string(),
         Node::new(
-            SocketAddr::new(
-                ::std::net::IpAddr::V4(::std::net::Ipv4Addr::new(172, 17, 0, 2)),
-                5671,
-            ),
+            SocketAddr::new(::std::net::IpAddr::V4(::std::net::Ipv4Addr::new(172, 17, 0, 2)), 5671),
             5,
         ),
     );
     expected_result.insert(
         "172.17.0.3:1234".to_string(),
         Node::new(
-            SocketAddr::new(
-                ::std::net::IpAddr::V4(::std::net::Ipv4Addr::new(172, 17, 0, 3)),
-                1234,
-            ),
+            SocketAddr::new(::std::net::IpAddr::V4(::std::net::Ipv4Addr::new(172, 17, 0, 3)), 1234),
             5,
         ),
     );
     expected_result.insert(
         "172.17.0.4:5555".to_string(),
         Node::new(
-            SocketAddr::new(
-                ::std::net::IpAddr::V4(::std::net::Ipv4Addr::new(172, 17, 0, 4)),
-                5555,
-            ),
+            SocketAddr::new(::std::net::IpAddr::V4(::std::net::Ipv4Addr::new(172, 17, 0, 4)), 5555),
             5,
         ),
     );
 
     map.add_node_to_map(
-        &SocketAddr::new(
-            ::std::net::IpAddr::V4(::std::net::Ipv4Addr::new(172, 17, 0, 3)),
-            1234,
-        ),
+        &SocketAddr::new(::std::net::IpAddr::V4(::std::net::Ipv4Addr::new(172, 17, 0, 3)), 1234),
         5,
         false,
     )
@@ -506,49 +405,34 @@ fn test_add_node_to_map() {
     expected_result.insert(
         "172.17.0.2:5671".to_string(),
         Node::new(
-            SocketAddr::new(
-                ::std::net::IpAddr::V4(::std::net::Ipv4Addr::new(172, 17, 0, 2)),
-                5671,
-            ),
+            SocketAddr::new(::std::net::IpAddr::V4(::std::net::Ipv4Addr::new(172, 17, 0, 2)), 5671),
             5,
         ),
     );
     expected_result.insert(
         "172.17.0.3:1234".to_string(),
         Node::new(
-            SocketAddr::new(
-                ::std::net::IpAddr::V4(::std::net::Ipv4Addr::new(172, 17, 0, 3)),
-                1234,
-            ),
+            SocketAddr::new(::std::net::IpAddr::V4(::std::net::Ipv4Addr::new(172, 17, 0, 3)), 1234),
             5,
         ),
     );
     expected_result.insert(
         "172.17.0.4:5555".to_string(),
         Node::new(
-            SocketAddr::new(
-                ::std::net::IpAddr::V4(::std::net::Ipv4Addr::new(172, 17, 0, 4)),
-                5555,
-            ),
+            SocketAddr::new(::std::net::IpAddr::V4(::std::net::Ipv4Addr::new(172, 17, 0, 4)), 5555),
             5,
         ),
     );
     expected_result.insert(
         "172.17.0.1:7654".to_string(),
         Node::new(
-            SocketAddr::new(
-                ::std::net::IpAddr::V4(::std::net::Ipv4Addr::new(172, 17, 0, 1)),
-                7654,
-            ),
+            SocketAddr::new(::std::net::IpAddr::V4(::std::net::Ipv4Addr::new(172, 17, 0, 1)), 7654),
             5,
         ),
     );
 
     map.add_node_to_map(
-        &SocketAddr::new(
-            ::std::net::IpAddr::V4(::std::net::Ipv4Addr::new(172, 17, 0, 1)),
-            7654,
-        ),
+        &SocketAddr::new(::std::net::IpAddr::V4(::std::net::Ipv4Addr::new(172, 17, 0, 1)), 7654),
         5,
         false,
     )

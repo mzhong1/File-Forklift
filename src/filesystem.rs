@@ -59,9 +59,7 @@ pub fn get_index_or_rand(pool: &ThreadPool) -> usize {
     }
 }
 
-///
-/// create a new nfs Network context
-///     
+/// create a new nfs Protocol context
 pub fn create_nfs_context(ip: &str, share: &str, level: u32) -> ForkliftResult<ProtocolContext> {
     let nfs = Nfs::new()?;
     nfs.set_debug(level as i32)?;
@@ -432,10 +430,7 @@ impl Timespec {
     /// create a new Timespec
     ///
     pub fn new(sec: i64, nsec: i64) -> Self {
-        Timespec {
-            tv_sec: sec,
-            tv_nsec: nsec,
-        }
+        Timespec { tv_sec: sec, tv_nsec: nsec }
     }
 
     ///

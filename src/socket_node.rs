@@ -81,9 +81,6 @@ pub struct ChangeList {
 
 impl ChangeList {
     pub fn new(ct: ChangeType, sn: SocketNode) -> Self {
-        ChangeList {
-            change_type: ct,
-            socket_node: sn,
-        }
+        ChangeList { change_type: ct, socket_node: sn }
     }
 }

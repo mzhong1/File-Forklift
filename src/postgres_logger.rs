@@ -49,12 +49,7 @@ impl PostgresLogger {
         end_heartbeat: Sender<EndState>,
         end_rendezvous: Sender<EndState>,
     ) -> Self {
-        PostgresLogger {
-            conn: Arc::clone(conn),
-            input,
-            end_heartbeat,
-            end_rendezvous,
-        }
+        PostgresLogger { conn: Arc::clone(conn), input, end_heartbeat, end_rendezvous }
     }
 
     pub fn start(&self) -> ForkliftResult<()> {

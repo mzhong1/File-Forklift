@@ -20,11 +20,7 @@ impl ProgressWorker {
         progress_info: Box<ProgressInfo + Send>,
         src_share: String,
     ) -> ProgressWorker {
-        ProgressWorker {
-            input,
-            progress_info,
-            src_share,
-        }
+        ProgressWorker { input, progress_info, src_share }
     }
 
     //NOte: Figure out a way to send off postgres in this function
@@ -37,10 +33,7 @@ impl ProgressWorker {
         let now = Instant::now();
         for progress in self.input.iter() {
             match progress {
-                ProgressMessage::Todo {
-                    num_files,
-                    total_size,
-                } => {
+                ProgressMessage::Todo { num_files, total_size } => {
                     stats.tot_files += num_files;
                     stats.tot_size += total_size;
                 }
@@ -85,12 +78,11 @@ impl ProgressWorker {
                     file_done = done;
                     total_done = done;
                     let elapsed = now.elapsed().as_secs() as usize;
-                    let eta =
-                        if total_done == 0 || ((elapsed * stats.tot_size) / total_done) < elapsed {
-                            elapsed
-                        } else {
-                            ((elapsed * stats.tot_size) / total_done) - elapsed
-                        };
+                    let eta = if total_done == 0 {
+                        elapsed
+                    } else {
+                        ((elapsed * stats.tot_size) / total_done) - elapsed
+                    };
                     let detailed_progress = Progress {
                         current_file: current_file.clone(),
                         file_done,

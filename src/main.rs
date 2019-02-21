@@ -196,9 +196,7 @@ fn main() -> ForkliftResult<()> {
     let path = match dirs::home_dir() {
         Some(path) => path.join(logfile),
         None => {
-            return Err(ForkliftError::CLIError(
-                "Home directory not found".to_string(),
-            ));
+            return Err(ForkliftError::CLIError("Home directory not found".to_string()));
         }
     };
     let username = match matches.value_of("username") {
@@ -373,12 +371,7 @@ fn main() -> ForkliftResult<()> {
                 Ok(_) => Ok(()),
                 Err(e) => send_mess(LogMessage::Error(e), &send_log.clone()),
             },
-            || match rendezvous(
-                &mut active_nodes.clone(),
-                &recv,
-                &recv_rend,
-                &send_log.clone(),
-            ) {
+            || match rendezvous(&mut active_nodes.clone(), &recv, &recv_rend, &send_log.clone()) {
                 Ok(_) => Ok(()),
                 Err(e) => send_mess(LogMessage::Error(e), &send_log.clone()),
             },

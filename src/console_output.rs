@@ -48,20 +48,14 @@ impl ProgressInfo for ConsoleProgressOutput {
         let file_width = line_width - widgets_width - num_separators - 1;
         let mut current_file = progress.current_file.clone();
         current_file.truncate(file_width as usize);
-        let current_file = format!(
-            "{filename:<pad$}",
-            pad = file_width as usize,
-            filename = current_file
-        );
+        let current_file =
+            format!("{filename:<pad$}", pad = file_width as usize, filename = current_file);
         let file_percent = if progress.file_size == 0 {
             100
         } else {
             ((progress.file_done * 100) as usize) / progress.file_size
         };
-        print!(
-            "{:>3}% {}/{} {} {:<}\r",
-            file_percent, index, num_files, current_file, eta_str
-        );
+        print!("{:>3}% {}/{} {} {:<}\r", file_percent, index, num_files, current_file, eta_str);
         let _ = io::stdout().flush();
     }
 

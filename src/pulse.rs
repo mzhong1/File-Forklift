@@ -10,11 +10,7 @@ pub struct Pulse {
 
 impl Pulse {
     pub fn new(i: u64) -> Self {
-        Pulse {
-            interval: i,
-            c_time: Instant::now(),
-            timeout: Duration::from_millis(i),
-        }
+        Pulse { interval: i, c_time: Instant::now(), timeout: Duration::from_millis(i) }
     }
 
     /**

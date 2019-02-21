@@ -87,8 +87,7 @@ impl Cluster {
             debug!("Node names before adding {:?}", self.names.node_list);
             debug!("Node Map before adding {:?}", self.nodes.node_map);
             self.names.add_node_to_list(&node_address);
-            self.nodes
-                .add_node_to_map(&node_address, self.lifetime, heartbeat)?;
+            self.nodes.add_node_to_map(&node_address, self.lifetime, heartbeat)?;
             match self.connect_node(&node_address) {
                 Ok(t) => t,
                 Err(e) => {
@@ -236,10 +235,7 @@ impl Cluster {
         match message::read_message(msg) {
             Some(buf) => Ok(buf),
             None => {
-                self.send_log(LogMessage::ErrorType(
-                    ErrorType::HeartbeatError,
-                    err.to_string(),
-                ))?;
+                self.send_log(LogMessage::ErrorType(ErrorType::HeartbeatError, err.to_string()))?;
                 Ok(vec![])
             }
         }
@@ -267,10 +263,7 @@ impl Cluster {
                 Err(e) => {
                     let mess = LogMessage::ErrorType(
                         ErrorType::AddrParseError,
-                        format!(
-                            "Error {:?}, unable to parse socket address {:?}",
-                            e, address
-                        ),
+                        format!("Error {:?}, unable to parse socket address {:?}", e, address),
                     );
                     self.send_log(mess)?;
                     ignored_address = true
@@ -295,21 +288,18 @@ impl Cluster {
                 self.add_node(&sent_address, true)?;
                 let node_change_output = &self.node_change_output;
                 let log_output = &self.log_output;
-                self.nodes
-                    .node_map
-                    .entry(sent_address.to_string())
-                    .and_modify(|n| {
-                        let change_list =
-                            ChangeList::new(ChangeType::AddNode, SocketNode::new(*sent_address));
-                        if n.heartbeat() && node_change_output.send(change_list).is_err() {
-                            let mess = LogMessage::ErrorType(
-                                ErrorType::CrossbeamChannelError,
-                                "Channel to rendezvous is broken".to_string(),
-                            );
-                            send_mess(mess, log_output).unwrap();
-                            panic!("Channel to rendezvous is broken!");
-                        }
-                    });
+                self.nodes.node_map.entry(sent_address.to_string()).and_modify(|n| {
+                    let change_list =
+                        ChangeList::new(ChangeType::AddNode, SocketNode::new(*sent_address));
+                    if n.heartbeat() && node_change_output.send(change_list).is_err() {
+                        let mess = LogMessage::ErrorType(
+                            ErrorType::CrossbeamChannelError,
+                            "Channel to rendezvous is broken".to_string(),
+                        );
+                        send_mess(mess, log_output).unwrap();
+                        panic!("Channel to rendezvous is broken!");
+                    }
+                });
             }
             Err(e) => {
                 self.send_log(LogMessage::ErrorType(

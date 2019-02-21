@@ -71,11 +71,7 @@ pub fn current_time() -> NaiveDateTime {
 
 impl ErrorLog {
     pub fn new(failure_id: ErrorType, reason: String, timestamp: NaiveDateTime) -> Self {
-        ErrorLog {
-            failure_id,
-            reason,
-            timestamp,
-        }
+        ErrorLog { failure_id, reason, timestamp }
     }
     pub fn from_err(err: &ForkliftError, timestamp: NaiveDateTime) -> Self {
         let failure_id = match err {
@@ -106,11 +102,7 @@ impl ErrorLog {
             ForkliftError::CLIError(_) => ErrorType::InvalidConfigError,
         };
         let reason = format!("{:?}", err);
-        ErrorLog {
-            failure_id,
-            reason,
-            timestamp,
-        }
+        ErrorLog { failure_id, reason, timestamp }
     }
 }
 #[derive(Debug, Clone, ToSql, FromSql)]
@@ -128,12 +120,7 @@ impl Nodes {
         node_status: NodeStatus,
         last_updated: NaiveDateTime,
     ) -> Self {
-        Nodes {
-            node_ip,
-            node_port,
-            node_status,
-            last_updated,
-        }
+        Nodes { node_ip, node_port, node_status, last_updated }
     }
 
     pub fn new(node_status: NodeStatus) -> ForkliftResult<Self> {
@@ -213,13 +200,7 @@ impl Files {
         size: i64,
         last_modified_time: NaiveDateTime,
     ) -> Self {
-        Files {
-            path,
-            src_checksum,
-            dest_checksum,
-            size,
-            last_modified_time,
-        }
+        Files { path, src_checksum, dest_checksum, size, last_modified_time }
     }
 }
 
@@ -404,10 +385,9 @@ pub fn get_node_id(node: &SocketNode, conn: &Connection) -> ForkliftResult<i64> 
     let mut val = -1;
     let ip = node.get_ip().to_string();
     let port = i32::from(node.get_port());
-    for row in &conn.query(
-        "SELECT node_id FROM Nodes WHERE nodes.ip = $1 AND nodes.port = $2",
-        &[&ip, &port],
-    )? {
+    for row in &conn
+        .query("SELECT node_id FROM Nodes WHERE nodes.ip = $1 AND nodes.port = $2", &[&ip, &port])?
+    {
         val = row.get(0);
     }
     Ok(val)
@@ -419,12 +399,7 @@ pub fn log_errorlog(failure: &ErrorLog, conn: &Connection) -> ForkliftResult<()>
     let node_id = get_node_id(&socket, conn)?;
     conn.execute(
         "INSERT INTO ErrorLog(node_id, failure_id, reason, timestamp) VALUES ($1, $2, $3, $4)",
-        &[
-            &node_id,
-            &failure.failure_id,
-            &failure.reason,
-            &failure.timestamp,
-        ],
+        &[&node_id, &failure.failure_id, &failure.reason, &failure.timestamp],
     )?;
     Ok(())
 }

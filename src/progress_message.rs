@@ -5,16 +5,9 @@ use crate::rsync::SyncStats;
 pub enum ProgressMessage {
     DoneSyncing(SyncOutcome),
     StartSync(String),
-    Todo {
-        num_files: u64,
-        total_size: usize,
-    },
+    Todo { num_files: u64, total_size: usize },
     SendError(ForkliftError),
-    CheckSyncing {
-        description: String,
-        size: usize,
-        done: usize,
-    },
+    CheckSyncing { description: String, size: usize, done: usize },
 }
 
 pub struct Progress {

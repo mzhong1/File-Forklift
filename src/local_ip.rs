@@ -64,9 +64,7 @@ pub fn get_ip(send_log: &Sender<LogMessage>) -> ForkliftResult<Option<SocketAddr
             }
         }
     }
-    Err(ForkliftError::IpLocalError(
-        "Could not determine local ip address".to_string(),
-    ))
+    Err(ForkliftError::IpLocalError("Could not determine local ip address".to_string()))
 }
 
 //get the ip in ipv6.
@@ -88,17 +86,12 @@ pub fn get_ipv6() -> ForkliftResult<Option<SocketAddr>> {
                     }
                 }
                 None => {
-                    error!(
-                        "interface {} with unsupported address family",
-                        ifaddr.interface_name
-                    );
+                    error!("interface {} with unsupported address family", ifaddr.interface_name);
                 }
             }
         }
     }
-    Err(ForkliftError::IpLocalError(
-        "Could not determine local ip address".to_string(),
-    ))
+    Err(ForkliftError::IpLocalError("Could not determine local ip address".to_string()))
 }
 
 #[test]

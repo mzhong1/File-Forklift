@@ -33,13 +33,7 @@ impl WalkWorker {
         nodes: Arc<Mutex<RendezvousNodes<SocketNode, DefaultNodeHasher>>>,
         node: SocketNode,
     ) -> WalkWorker {
-        WalkWorker {
-            entry_outputs,
-            progress_output,
-            source: source.to_path_buf(),
-            nodes,
-            node,
-        }
+        WalkWorker { entry_outputs, progress_output, source: source.to_path_buf(), nodes, node }
     }
 
     pub fn stop(&self) -> ForkliftResult<()> {
@@ -107,9 +101,7 @@ impl WalkWorker {
             let (mut src_context, mut dest_context) = match contexts.get(index) {
                 Some((s, d)) => (s.clone(), d.clone()),
                 None => {
-                    return Err(ForkliftError::FSError(
-                        "Unable to retrieve contexts".to_string(),
-                    ));
+                    return Err(ForkliftError::FSError("Unable to retrieve contexts".to_string()));
                 }
             };
             let (this, parent) = (Path::new("."), Path::new(".."));
@@ -326,11 +318,7 @@ impl WalkWorker {
         let n = match nodes.lock() {
             Ok(e) => {
                 let mut list = e;
-                trace!(
-                    "{:?}",
-                    list.calc_candidates(&entry.to_string_lossy())
-                        .collect::<Vec<_>>()
-                );
+                trace!("{:?}", list.calc_candidates(&entry.to_string_lossy()).collect::<Vec<_>>());
                 match list.calc_candidates(&entry.to_string_lossy()).nth(0) {
                     Some(p) => p.clone(),
                     None => {
@@ -410,9 +398,7 @@ fn remove_dir(path: &Path, dest_context: &mut ProtocolContext) -> ForkliftResult
         let dir = match remove_stack.pop() {
             Some(e) => e,
             None => {
-                return Err(ForkliftError::FSError(
-                    "remove stack should not be empty!".to_string(),
-                ));
+                return Err(ForkliftError::FSError("remove stack should not be empty!".to_string()));
             }
         };
         dest_context.rmdir(&dir)?;

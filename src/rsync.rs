@@ -86,7 +86,7 @@ pub struct Rsyncer {
     /// console ouput functions
     progress_info: Box<ProgressInfo + Send + Sync>,
     /// channe to send postgres logs
-    postgres_output: Sender<LogMessage>,
+    log_output: Sender<LogMessage>,
     /// source root path
     source: PathBuf,
     /// destination root path,
@@ -97,17 +97,11 @@ impl Rsyncer {
     pub fn new(
         filesystem_type: FileSystemType,
         progress_info: Box<ProgressInfo + Send + Sync>,
-        postgres_output: Sender<LogMessage>,
+        log_output: Sender<LogMessage>,
         source: PathBuf,
         destination: PathBuf,
     ) -> Rsyncer {
-        Rsyncer {
-            filesystem_type,
-            progress_info,
-            postgres_output,
-            source,
-            destination,
-        }
+        Rsyncer { filesystem_type, progress_info, log_output, source, destination }
     }
 
     pub fn sync(
@@ -133,6 +127,7 @@ impl Rsyncer {
                 self.destination.as_path(),
                 rec_e,
                 sync_progress,
+                self.log_output.clone(),
             ));
         }
         let mut contexts: Vec<(ProtocolContext, ProtocolContext)> = Vec::new();
@@ -164,16 +159,11 @@ impl Rsyncer {
             }
         }
         let send_prog_thread = send_prog.clone();
-        let walk_worker = WalkWorker::new(
-            self.source.as_path(),
-            send_handles,
-            send_prog,
-            nodelist,
-            my_node,
-        );
+        let walk_worker =
+            WalkWorker::new(self.source.as_path(), send_handles, send_prog, nodelist, my_node);
         let progress_worker =
             ProgressWorker::new(rec_prog, self.progress_info, src_share.to_string());
-        let c = self.postgres_output.clone();
+        let c = self.log_output.clone();
         rayon::spawn(move || {
             progress_worker.start(&c).unwrap();
         });
@@ -214,7 +204,6 @@ impl Rsyncer {
                                 );
                             }
                             Err(e) => {
-                                error!("Error: {:?}", e);
                                 let mess = ProgressMessage::SendError(e);
                                 send_prog_thread.send(mess).unwrap();
                             }
