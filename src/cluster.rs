@@ -1,4 +1,4 @@
-use self::api::service_generated::*;
+use self::api::service::*;
 use api;
 
 use crossbeam::channel::{Receiver, Sender};
@@ -232,13 +232,7 @@ impl Cluster {
 
     /// read serialized message to Vec<String>
     fn read_message(&self, msg: &[u8], err: &str) -> ForkliftResult<Vec<String>> {
-        match message::read_message(msg) {
-            Some(buf) => Ok(buf),
-            None => {
-                self.send_log(LogMessage::ErrorType(ErrorType::HeartbeatError, err.to_string()))?;
-                Ok(vec![])
-            }
-        }
+        message::read_message(msg)
     }
 
     /// parse a NODELIST message into a list of nodes and create/add the nodes to the cluster
@@ -322,7 +316,7 @@ impl Cluster {
         if request.get_fds()[0].can_read() {
             //check message type
             let msg = self.read_message_to_u8()?;
-            let msgtype = message::get_message_type(&msg);
+            let msgtype = message::get_message_type(&msg)?;
             let msg_body = self.read_message(&msg, "Message body is empty, Ifnore the message")?;
             match msgtype {
                 MessageType::NODELIST => {

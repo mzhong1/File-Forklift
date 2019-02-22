@@ -1,0 +1,18 @@
+syntax = "proto2";
+option optimize_for = SPEED;
+
+enum ResultType {
+    OK = 0;
+    ERR = 1;
+}
+
+enum MessageType{
+    GETLIST = 0;
+    NODELIST = 1;
+    HEARTBEAT = 2;
+}
+
+message Message{
+    required MessageType mtype = 1;
+    repeated string members = 2;
+}
