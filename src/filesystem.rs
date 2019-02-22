@@ -13,9 +13,18 @@ use serde_derive::*;
 use std::path::Path;
 
 /// initialize the Samba context
-pub fn init_samba(wg: String, un: String, pw: String, level: u32) -> ForkliftResult<Smbc> {
+pub fn init_samba(wg: String, un: String, pw: String, level: DebugLevel) -> ForkliftResult<Smbc> {
+    let debug_level = match level {
+        DebugLevel::OFF => 0,
+        DebugLevel::FATAL => 1,
+        DebugLevel::ERROR => 1,
+        DebugLevel::WARN => 2,
+        DebugLevel::INFO => 2,
+        DebugLevel::DEBUG => 3,
+        DebugLevel::ALL => 10,
+    };
     Smbc::set_data(wg, un, pw);
-    match Smbc::new_with_auth(level) {
+    match Smbc::new_with_auth(debug_level) {
         Ok(e) => Ok(e),
         Err(e) => Err(ForkliftError::SmbcError(e)),
     }
@@ -34,7 +43,11 @@ pub fn get_index_or_rand(pool: &ThreadPool) -> usize {
 }
 
 /// create a new nfs Protocol context
-pub fn create_nfs_context(ip: &str, share: &str, level: u32) -> ForkliftResult<ProtocolContext> {
+pub fn create_nfs_context(
+    ip: &str,
+    share: &str,
+    level: DebugLevel,
+) -> ForkliftResult<ProtocolContext> {
     let nfs = Nfs::new()?;
     nfs.set_debug(level as i32)?;
     nfs.mount(ip, share)?;
@@ -46,6 +59,26 @@ pub fn create_nfs_context(ip: &str, share: &str, level: u32) -> ForkliftResult<P
 pub enum FileSystemType {
     Samba,
     Nfs,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Debug Level of a Context;
+/// Note, it is not recommended to set the log level above 3 for Samba, as it will cause
+/// significant server slowdown
+pub enum DebugLevel {
+    /// Samba level 0
+    OFF = 0,
+    /// Samba level 1
+    FATAL,
+    /// Samba level 1
+    ERROR,
+    /// Samba level 2
+    WARN,
+    /// Samba level 2
+    INFO,
+    /// Samba level 3
+    DEBUG,
+    /// Samba level 10
+    ALL,
 }
 
 #[derive(Clone)]

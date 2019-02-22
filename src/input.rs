@@ -1,5 +1,5 @@
 use crate::error::{ForkliftError, ForkliftResult};
-use crate::filesystem::FileSystemType;
+use crate::filesystem::{DebugLevel, FileSystemType};
 
 use serde_derive::*;
 use std::net::SocketAddr;
@@ -24,7 +24,7 @@ pub struct Input {
     /// Share type (Nfs or Samba)
     pub system: FileSystemType,
     /// The debug level of the filesystem context
-    pub debug_level: u32,
+    pub debug_level: DebugLevel,
     /// The number of threads used in the processing
     pub num_threads: u32,
     /// The workgroup of the user (Please default to WORKGROUP if not using Samba)

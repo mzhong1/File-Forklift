@@ -114,7 +114,7 @@ impl Rsyncer {
         self,
         (src_ip, dest_ip): (&str, &str),
         (src_share, dest_share): (&str, &str),
-        (level, num_threads): (u32, u32),
+        (level, num_threads): (DebugLevel, u32),
         (workgroup, username, password): (String, String, String),
         nodelist: Arc<Mutex<RendezvousNodes<SocketNode, DefaultNodeHasher>>>,
         my_node: SocketNode,
@@ -136,25 +136,25 @@ impl Rsyncer {
         }
         let mut contexts: Vec<(ProtocolContext, ProtocolContext)> = Vec::new();
         let mut sync_contexts: Vec<(ProtocolContext, ProtocolContext)> = Vec::new();
-        let s = init_samba(workgroup, username, password, level)?;
+        let smbc = init_samba(workgroup, username, password, level.clone())?;
         for _ in 0..num_threads {
             match self.filesystem_type {
                 FileSystemType::Samba => {
                     let (src_context, dest_context) = (
-                        ProtocolContext::Samba(Box::new(s.clone())),
-                        ProtocolContext::Samba(Box::new(s.clone())),
+                        ProtocolContext::Samba(Box::new(smbc.clone())),
+                        ProtocolContext::Samba(Box::new(smbc.clone())),
                     );
                     contexts.push((src_context, dest_context));
                     let (src_context, dest_context) = (
-                        ProtocolContext::Samba(Box::new(s.clone())),
-                        ProtocolContext::Samba(Box::new(s.clone())),
+                        ProtocolContext::Samba(Box::new(smbc.clone())),
+                        ProtocolContext::Samba(Box::new(smbc.clone())),
                     );
                     sync_contexts.push((src_context, dest_context));
                 }
                 FileSystemType::Nfs => {
                     let (src_context, dest_context) = (
-                        create_nfs_context(src_ip, src_share, level)?,
-                        create_nfs_context(dest_ip, dest_share, level)?,
+                        create_nfs_context(src_ip, src_share, level.clone())?,
+                        create_nfs_context(dest_ip, dest_share, level.clone())?,
                     );
                     contexts.push((src_context.clone(), dest_context.clone()));
                     sync_contexts.push((src_context, dest_context));

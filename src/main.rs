@@ -137,7 +137,7 @@ fn init_logs(path: &Path, level: simplelog::LevelFilter) -> ForkliftResult<()> {
 /// Main takes in a config file, username, password, debuglevel, and debug path. the 'v' flag
 /// is used to determine debug level of the program
 fn main() -> ForkliftResult<()> {
-    let matches = App::new("Heartbeat Logs")
+    let matches = App::new(crate_name!())
         .author(crate_authors!())
         .about("NFS and Samba filesystem migration program")
         .version(crate_version!())
@@ -195,30 +195,14 @@ fn main() -> ForkliftResult<()> {
             return Err(ForkliftError::CLIError("Home directory not found".to_string()));
         }
     };
-    let username = match matches.value_of("username") {
-        Some(e) => {
-            if e.is_empty() {
-                "guest"
-            } else {
-                e
-            }
-        }
-        None => {
-            return Err(ForkliftError::CLIError("username not found".to_string()));
-        }
-    };
-    let password = match matches.value_of("password") {
-        Some(e) => {
-            if e.is_empty() {
-                "\n"
-            } else {
-                e
-            }
-        }
-        None => {
-            return Err(ForkliftError::CLIError("password not found".to_string()));
-        }
-    };
+    let mut username = matches.value_of("username").unwrap();
+    if username.is_empty() {
+        username = "guest";
+    }
+    let mut password = matches.value_of("password").unwrap();
+    if password.is_empty() {
+        password = "\n";
+    }
     init_logs(&path, level)?;
     debug!("Log path: {:?}", logfile);
     info!("Logs made");
