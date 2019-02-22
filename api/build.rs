@@ -1,5 +1,3 @@
-use protobuf_codegen_pure::*;
-
 fn main() {
     // call flatc
     protobuf_codegen_pure::run(protobuf_codegen_pure::Args {
