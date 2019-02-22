@@ -56,14 +56,8 @@ fn test_init_router() {
     };
 }
 
-/**
- * init_router: &str -> ForkliftResult<Socket>
- * REQUIRES: full_address a string in the form ip:port, where
- * ip is your local ip and port is the port your node will bind to
- * ENSURES: returns a Result<Socket,Err> where if successful, returns
- * a new socket with the Bus Protocol bound to the input port.  Otherwise,
- * return the associated ForkliftError
- */
+/// Given a socket address, create a new socket with the Bus Protocol bound to the
+/// input address
 fn init_router(full_address: &SocketAddr) -> ForkliftResult<Socket> {
     debug!("Initializing router");
     let mut router = Socket::new(Protocol::Bus)?;
@@ -74,6 +68,7 @@ fn init_router(full_address: &SocketAddr) -> ForkliftResult<Socket> {
     Ok(router)
 }
 
+/// parse the command line entry for the config file.  
 fn parse_matches(matches: &clap::ArgMatches<'_>) -> ForkliftResult<Input> {
     let path = match matches.value_of("config") {
         None => Path::new(""),
@@ -89,25 +84,26 @@ fn parse_matches(matches: &clap::ArgMatches<'_>) -> ForkliftResult<Input> {
             )));
         }
     };
-    Ok(Input::new(&input))
+    Ok(Input::new_input(&input)?)
 }
 
+/// run the heartbeat protocol
 fn heartbeat(
     lifetime: u64,
     node_names: NodeList,
     joined: &mut bool,
-    full_address: SocketAddr,
-    s: Sender<ChangeList>,
-    recv_end: &Receiver<EndState>,
-    send_log: Sender<LogMessage>,
+    node_address: SocketAddr,
+    heartbeat_input: &Receiver<EndState>,
+    node_change_output: Sender<ChangeList>,
+    log_output: Sender<LogMessage>,
 ) -> ForkliftResult<()> {
-    let mess = ChangeList::new(ChangeType::AddNode, SocketNode::new(full_address));
-    if s.send(mess).is_err() {
+    let mess = ChangeList::new(ChangeType::AddNode, SocketNode::new(node_address));
+    if node_change_output.send(mess).is_err() {
         return Err(ForkliftError::CrossbeamChannelError(
             "Channel to rendezvous is broken!".to_string(),
         ));
     }
-    let router = match init_router(&full_address) {
+    let router = match init_router(&node_address) {
         Ok(t) => t,
         Err(e) => {
             error!("Error {:?}, Unable to connect router!", e);
@@ -115,31 +111,31 @@ fn heartbeat(
         }
     }; //Make the node
     std::thread::sleep(std::time::Duration::from_millis(10));
-    let mut cluster = Cluster::new(lifetime, router, &full_address, s, send_log);
-    cluster.nodes = NodeMap::init_nodemap(&full_address, cluster.lifetime, &node_names.node_list)?; //create mutable hashmap of nodes
+    let mut cluster = Cluster::new(lifetime, router, &node_address, node_change_output, log_output);
+    cluster.nodes = NodeMap::init_nodemap(&node_address, cluster.lifetime, &node_names.node_list)?; //create mutable hashmap of nodes
                                                                                                     //sleep for a bit to let other nodes start up
     cluster.names = node_names;
     cluster.init_connect()?;
-    cluster.heartbeat_loop(joined, &recv_end)
+    cluster.heartbeat_loop(joined, &heartbeat_input)
 }
 
-fn init_logs(f: &Path, level: simplelog::LevelFilter) -> ForkliftResult<()> {
-    if !f.exists() {
-        File::create(f)?;
+/// initialize Loggers to console and file
+fn init_logs(path: &Path, level: simplelog::LevelFilter) -> ForkliftResult<()> {
+    if !path.exists() {
+        File::create(path)?;
     }
     let mut loggers: Vec<Box<dyn SharedLogger>> = vec![];
     if let Some(term_logger) = TermLogger::new(level, Config::default()) {
         loggers.push(term_logger);
     }
-    loggers.push(WriteLogger::new(level, Config::default(), File::create(f)?));
+    loggers.push(WriteLogger::new(level, Config::default(), File::create(path)?));
     let _ = CombinedLogger::init(loggers);
 
     Ok(())
 }
 
-///
-/// Main takes in a config file, username, password, debuglevel, and debug path
-///
+/// Main takes in a config file, username, password, debuglevel, and debug path. the 'v' flag
+/// is used to determine debug level of the program
 fn main() -> ForkliftResult<()> {
     let matches = App::new("Heartbeat Logs")
         .author(crate_authors!())
@@ -227,39 +223,38 @@ fn main() -> ForkliftResult<()> {
     debug!("Log path: {:?}", logfile);
     info!("Logs made");
 
-    let (send, recv) = channel::unbounded::<ChangeList>();
-    let (send_end, recv_end) = channel::unbounded::<EndState>();
-    let (send_rend, recv_rend) = channel::unbounded::<EndState>();
+    let (node_change_output, node_change_input) = channel::unbounded::<ChangeList>();
+    let (end_heartbeat, heartbeat_input) = channel::unbounded::<EndState>();
+    let (end_rendezvous, rendezvous_input) = channel::unbounded::<EndState>();
+    let (log_output, log_input) = channel::unbounded::<LogMessage>();
 
     let input = parse_matches(&matches)?;
     //get database url and check if we are logging anything to database
     //SOME if yes, NONE if not logging to DB
-    let database = match input.database_url {
+    let database_url = match input.database_url {
         Some(e) => e,
         None => String::new(),
     };
 
-    let (send_log, recv_log) = channel::unbounded::<LogMessage>();
-
-    let conn = if !database.is_empty() {
+    let conn = if !database_url.is_empty() {
         //init databases;
-        Some(init_connection(database.clone())?)
+        Some(init_connection(database_url.clone())?)
     } else {
         None
     };
-    let p_logger = PostgresLogger::new(
+    let postgres_logger = PostgresLogger::new(
         &Arc::new(Mutex::new(conn)),
-        recv_log,
-        send_end.clone(),
-        send_rend.clone(),
+        log_input,
+        end_heartbeat.clone(),
+        end_rendezvous.clone(),
     );
-    rayon::spawn(move || p_logger.start().unwrap());
+    rayon::spawn(move || postgres_logger.start().unwrap());
     if input.nodes.len() < 2 {
         let mess = LogMessage::ErrorType(
             ErrorType::InvalidConfigError,
             "Not enough input nodes.  Need at least 2".to_string(),
         );
-        send_mess(mess, &send_log.clone())?;
+        send_mess(mess, &log_output.clone())?;
         return Err(ForkliftError::InvalidConfigError(
             "No input nodes!  Please have at least 2 node in the nodes section of your
         config file"
@@ -268,19 +263,19 @@ fn main() -> ForkliftResult<()> {
     }
 
     trace!("Attempting to get local ip address");
-    let ip_address = match local_ip::get_ip(&send_log.clone()) {
+    let ip_address = match local_ip::get_ip(&log_output.clone()) {
         Ok(Some(ip)) => ip.ip(),
         Ok(None) => {
             send_mess(
                 LogMessage::ErrorType(ErrorType::IpLocalError, "No local ip".to_string()),
-                &send_log.clone(),
+                &log_output.clone(),
             )?;
             return Err(ForkliftError::IpLocalError("No local ip".to_string()));
         }
         Err(e) => {
             send_mess(
                 LogMessage::ErrorType(ErrorType::IpLocalError, "No local ip".to_string()),
-                &send_log.clone(),
+                &log_output.clone(),
             )?;
             return Err(e);
         }
@@ -290,13 +285,11 @@ fn main() -> ForkliftResult<()> {
     let full_address = match node_names.get_full_address(&ip_address.to_string()) {
         Some(a) => a,
         None => {
-            send_mess(
-                LogMessage::ErrorType(
-                    ErrorType::IpLocalError,
-                    format!("Ip Address {} not in the node_list", ip_address),
-                ),
-                &send_log.clone(),
-            )?;
+            let mess = LogMessage::ErrorType(
+                ErrorType::IpLocalError,
+                format!("Ip Address {} not in the node_list", ip_address),
+            );
+            send_mess(mess, &log_output.clone())?;
             return Err(ForkliftError::IpLocalError(format!(
                 "ip address {} not in the node list",
                 ip_address
@@ -304,9 +297,9 @@ fn main() -> ForkliftResult<()> {
         }
     };
     debug!("current full address: {:?}", full_address);
-    let mine = SocketNode::new(full_address);
-    if let Err(e) = set_current_node(&mine) {
-        send_mess(LogMessage::Error(e), &send_log.clone())?;
+    let current_address = SocketNode::new(full_address);
+    if let Err(e) = set_current_node(&current_address) {
+        send_mess(LogMessage::Error(e), &log_output.clone())?;
     };
     let mut joined = input.nodes.len() != 2;
     let console_info = ConsoleProgressOutput::new();
@@ -320,7 +313,7 @@ fn main() -> ForkliftResult<()> {
         input.dest_path,
         system,
         Box::new(console_info),
-        send_log.clone(),
+        log_output.clone(),
     );
 
     let (src_server, dest_server) = (input.src_server, input.dest_server);
@@ -330,29 +323,26 @@ fn main() -> ForkliftResult<()> {
     let lifetime = input.lifetime;
     rayon::scope(|s| {
         s.spawn(|_| {
-            println!("Started Sync");
-            match syncer.sync(
+            debug!("Started Sync");
+            if let Err(e) = syncer.sync(
                 (&src_server, &dest_server),
                 (&src_share, &dest_share),
                 (debug_level, num_threads),
                 (workgroup, username.to_string(), password.to_string()),
                 active_nodes.clone(),
-                mine,
+                current_address,
             ) {
-                Ok(_) => (),
-                Err(e) => {
-                    // Note, only Errors if there IS a database and query/execution fails
-                    send_mess(LogMessage::Error(e), &send_log.clone()).unwrap();
-                    if send_mess(LogMessage::End, &send_log.clone()).is_err() {
-                        error!("Channel to postgres_logger is broken, attempting to manually end program");
-                        if send_end.clone().send(EndState::EndProgram).is_err()
-                        {
-                            panic!("Unable to end heartbeat");
-                        }
-                        if send_rend.clone().send(EndState::EndProgram).is_err()
-                        {
-                            panic!("Unable to end rendezvous");
-                        }
+                // Note, only Errors if there IS a database and query/execution fails
+                send_mess(LogMessage::Error(e), &log_output.clone()).unwrap();
+                if send_mess(LogMessage::End, &log_output.clone()).is_err() {
+                    error!(
+                        "Channel to postgres_logger is broken, attempting to manually end program"
+                    );
+                    if end_heartbeat.clone().send(EndState::EndProgram).is_err() {
+                        panic!("Unable to end heartbeat");
+                    }
+                    if end_rendezvous.clone().send(EndState::EndProgram).is_err() {
+                        panic!("Unable to end rendezvous");
                     }
                 }
             }
@@ -364,16 +354,21 @@ fn main() -> ForkliftResult<()> {
                 node_names,
                 &mut joined,
                 full_address,
-                send,
-                &recv_end,
-                send_log.clone(),
+                &heartbeat_input,
+                node_change_output,
+                log_output.clone(),
             ) {
                 Ok(_) => Ok(()),
-                Err(e) => send_mess(LogMessage::Error(e), &send_log.clone()),
+                Err(e) => send_mess(LogMessage::Error(e), &log_output.clone()),
             },
-            || match rendezvous(&mut active_nodes.clone(), &recv, &recv_rend, &send_log.clone()) {
+            || match rendezvous(
+                &mut active_nodes.clone(),
+                &node_change_input,
+                &rendezvous_input,
+                &log_output.clone(),
+            ) {
                 Ok(_) => Ok(()),
-                Err(e) => send_mess(LogMessage::Error(e), &send_log.clone()),
+                Err(e) => send_mess(LogMessage::Error(e), &log_output.clone()),
             },
         )
     });
@@ -385,57 +380,46 @@ fn main() -> ForkliftResult<()> {
  */
 fn rendezvous(
     active_nodes: &mut Arc<Mutex<RendezvousNodes<SocketNode, DefaultNodeHasher>>>,
-    r: &Receiver<ChangeList>,
-    recv_end: &Receiver<EndState>,
-    send_log: &Sender<LogMessage>,
+    node_change_input: &Receiver<ChangeList>,
+    heartbeat_input: &Receiver<EndState>,
+    log_output: &Sender<LogMessage>,
 ) -> ForkliftResult<()> {
     debug!("Started Rendezvous");
     loop {
-        if recv_end.try_recv().is_ok() {
+        if heartbeat_input.try_recv().is_ok() {
             println!("Got exit");
             let node = Nodes::new(NodeStatus::NodeFinished)?;
-            send_mess(LogMessage::Nodes(node), &send_log)?;
+            send_mess(LogMessage::Nodes(node), &log_output)?;
             break;
         }
         let mut list = match active_nodes.lock() {
-            Ok(l) => l,
+            Ok(arr) => arr,
             Err(e) => {
-                send_mess(
-                    LogMessage::ErrorType(
-                        ErrorType::PoisonedMutexError,
-                        format!("Error {:?}, Poisoned rendezvous mutex", e),
-                    ),
-                    &send_log,
-                )?;
+                let mess = LogMessage::ErrorType(
+                    ErrorType::PoisonedMutexError,
+                    format!("Error {:?}, Poisoned rendezvous mutex", e),
+                );
+                send_mess(mess, &log_output)?;
                 return Err(ForkliftError::FSError("Poisoned Rendezvous.".to_string()));
             }
         };
-        match r.try_recv() {
-            Ok(c) => {
-                match c.change_type {
-                    ChangeType::AddNode => {
-                        info!("Add Node {:?} to active list!", c.socket_node);
-                        list.insert(c.socket_node);
-                        let node = Nodes::new(NodeStatus::NodeAdded)?;
-                        send_mess(LogMessage::Nodes(node), &send_log)?;
-                        info!(
-                            "The current list is {:?}",
-                            list.calc_candidates(&1).collect::<Vec<_>>()
-                        );
-                    }
-                    ChangeType::RemNode => {
-                        info!("Remove Node {:?} from active list!", c.socket_node);
-                        list.remove(&c.socket_node);
-                        let node = Nodes::new(NodeStatus::NodeDied)?;
-                        send_mess(LogMessage::Nodes(node), &send_log)?;
-                        info!(
-                            "The current list is {:?}",
-                            list.calc_candidates(&1).collect::<Vec<_>>()
-                        );
-                    }
-                };
-            }
-            Err(_) => trace!("No Changes"),
+        if let Ok(change) = node_change_input.try_recv() {
+            match change.change_type {
+                ChangeType::AddNode => {
+                    info!("Add Node {:?} to active list!", change.socket_node);
+                    list.insert(change.socket_node);
+                    let node = Nodes::new(NodeStatus::NodeAdded)?;
+                    send_mess(LogMessage::Nodes(node), &log_output)?;
+                    info!("The current list is {:?}", list.calc_candidates(&1).collect::<Vec<_>>());
+                }
+                ChangeType::RemNode => {
+                    info!("Remove Node {:?} from active list!", change.socket_node);
+                    list.remove(&change.socket_node);
+                    let node = Nodes::new(NodeStatus::NodeDied)?;
+                    send_mess(LogMessage::Nodes(node), &log_output)?;
+                    info!("The current list is {:?}", list.calc_candidates(&1).collect::<Vec<_>>());
+                }
+            };
         }
     }
     Ok(())

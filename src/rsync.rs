@@ -140,24 +140,24 @@ impl Rsyncer {
         for _ in 0..num_threads {
             match self.filesystem_type {
                 FileSystemType::Samba => {
-                    let (sctx, dctx) = (
+                    let (src_context, dest_context) = (
                         ProtocolContext::Samba(Box::new(s.clone())),
                         ProtocolContext::Samba(Box::new(s.clone())),
                     );
-                    contexts.push((sctx, dctx));
-                    let (sctx, dctx) = (
+                    contexts.push((src_context, dest_context));
+                    let (src_context, dest_context) = (
                         ProtocolContext::Samba(Box::new(s.clone())),
                         ProtocolContext::Samba(Box::new(s.clone())),
                     );
-                    sync_contexts.push((sctx, dctx));
+                    sync_contexts.push((src_context, dest_context));
                 }
                 FileSystemType::Nfs => {
-                    let (sctx, dctx) = (
+                    let (src_context, dest_context) = (
                         create_nfs_context(src_ip, src_share, level)?,
                         create_nfs_context(dest_ip, dest_share, level)?,
                     );
-                    contexts.push((sctx.clone(), dctx.clone()));
-                    sync_contexts.push((sctx, dctx));
+                    contexts.push((src_context.clone(), dest_context.clone()));
+                    sync_contexts.push((src_context, dest_context));
                 }
             }
         }
@@ -166,9 +166,9 @@ impl Rsyncer {
             WalkWorker::new(self.source.as_path(), my_node, nodelist, send_handles, send_prog);
         let progress_worker =
             ProgressWorker::new(src_share.to_string(), self.progress_info, rec_prog);
-        let c = self.log_output.clone();
+        let copy_log_output = self.log_output.clone();
         rayon::spawn(move || {
-            progress_worker.start(&c).unwrap();
+            progress_worker.start(&copy_log_output).unwrap();
         });
         let pool = rayon::ThreadPoolBuilder::new()
             .num_threads(num_threads as usize)

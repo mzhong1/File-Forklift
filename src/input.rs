@@ -1,3 +1,4 @@
+use crate::error::{ForkliftError, ForkliftResult};
 use crate::filesystem::FileSystemType;
 
 use serde_derive::*;
@@ -72,50 +73,75 @@ pub fn is_smb_path(path: &PathBuf) -> bool {
 impl Input {
     //NOTE, send invalid config error when panicking
     /// create new Input object from config file
-    pub fn new(input: &str) -> Self {
-        let i: Input = match serde_json::from_str(input) {
+    pub fn new_input(config: &str) -> ForkliftResult<Self> {
+        let input: Input = match serde_json::from_str(config) {
             Ok(e) => e,
-            Err(e) => panic!("Error {:?}, unable to parse config file!", e),
+            Err(e) => {
+                return Err(ForkliftError::InvalidConfigError(format!(
+                    "Error {:?}, unable to parse config file!",
+                    e
+                )));
+            }
         };
-        if i.src_server.is_empty() {
-            panic!("Error! source server not given!");
+        if input.src_server.is_empty() {
+            return Err(ForkliftError::InvalidConfigError(
+                "Error! source server not given!".to_string(),
+            ));
         }
-        if i.dest_server.is_empty() {
-            panic!("Error! destination server not given!");
+        if input.dest_server.is_empty() {
+            return Err(ForkliftError::InvalidConfigError(
+                "Error! destination server not given!".to_string(),
+            ));
         }
-        if i.src_share.is_empty() {
-            panic!("Error! source share not given!");
+        if input.src_share.is_empty() {
+            return Err(ForkliftError::InvalidConfigError(
+                "Error! source share not given!".to_string(),
+            ));
         }
-        if i.dest_share.is_empty() {
-            panic!("Error! destination share not given!");
+        if input.dest_share.is_empty() {
+            return Err(ForkliftError::InvalidConfigError(
+                "Error! destination share not given!".to_string(),
+            ));
         }
         //check if shares starts with '/', exit if not
-        if !i.src_share.starts_with('/') {
-            panic!("Source share does not start with '/'");
+        if !input.src_share.starts_with('/') {
+            return Err(ForkliftError::InvalidConfigError(
+                "Source share does not start with '/'".to_string(),
+            ));
         }
-        if !i.dest_share.starts_with('/') {
-            panic!("Destination share does not start with '/'");
+        if !input.dest_share.starts_with('/') {
+            return Err(ForkliftError::InvalidConfigError(
+                "Destination share does not start with '/'".to_string(),
+            ));
         }
-        match i.system {
+        match input.system {
             FileSystemType::Nfs => {
                 // if the input is empty, exit
-                if i.src_path.to_string_lossy().is_empty() {
-                    panic!("Empty source path!");
+                if input.src_path.to_string_lossy().is_empty() {
+                    return Err(ForkliftError::InvalidConfigError("Empty source path!".to_string()));
                 }
-                if i.dest_path.to_string_lossy().is_empty() {
-                    panic!("Empty destination path!");
+                if input.dest_path.to_string_lossy().is_empty() {
+                    return Err(ForkliftError::InvalidConfigError(
+                        "Empty destination path!".to_string(),
+                    ));
                 }
             }
             FileSystemType::Samba => {
                 // if the input is not an smburl, 'smb://server/share', exit
-                if !is_smb_path(&i.src_path) {
-                    panic!("Improperly formatted source path, should be smb://server/share");
+                if !is_smb_path(&input.src_path) {
+                    return Err(ForkliftError::InvalidConfigError(
+                        "Improperly formatted source path, should be smb://server/share"
+                            .to_string(),
+                    ));
                 }
-                if !is_smb_path(&i.dest_path) {
-                    panic!("Improperly formatted destination path, should beto smb://server/share");
+                if !is_smb_path(&input.dest_path) {
+                    return Err(ForkliftError::InvalidConfigError(
+                        "Improperly formatted destination path, should beto smb://server/share"
+                            .to_string(),
+                    ));
                 }
             }
         }
-        i
+        Ok(input)
     }
 }

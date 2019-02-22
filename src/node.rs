@@ -164,7 +164,6 @@ impl NodeMap {
         node_names: &[SocketAddr],
     ) -> ForkliftResult<Self> {
         if lifetime == 0 {
-            error!("Lifetime is trivial (less than or equal to zero)!");
             return Err(ForkliftError::InvalidConfigError("Lifetime is trivial".to_string()));
         }
         debug! {"Initialize hashmap of nodes with lifetime {} from socket list {:?} not including {}", lifetime, node_names, node_address};
@@ -189,7 +188,6 @@ impl NodeMap {
         heartbeat: bool,
     ) -> ForkliftResult<()> {
         if lifetime == 0 {
-            error!("Lifetime is trivial (less than or equal to zero)!");
             return Err(ForkliftError::HeartbeatError(
                 "Lifetime of added node is trivial!".to_string(),
             ));

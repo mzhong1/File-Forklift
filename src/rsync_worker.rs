@@ -62,11 +62,11 @@ impl RsyncWorker {
         };
 
         for entry in self.input.iter() {
-            let e = match entry {
+            let input_entry = match entry {
                 Some(e) => e,
                 None => break,
             };
-            let sync_outcome = self.sync(&e, &mut src, &mut dest)?;
+            let sync_outcome = self.sync(&input_entry, &mut src, &mut dest)?;
             debug!(
                 "Sync Thread {:?} Outcome: {:?} Num left {:?}",
                 id,
@@ -119,12 +119,12 @@ impl RsyncWorker {
         if !dir {
             let temp_outcome =
                 copy_permissions(&src_entry, &dest_entry, src_context, dest_context)?;
-            let c = outcome.clone();
+            let current_outcome = outcome.clone();
             outcome = match (outcome, temp_outcome) {
                 (SyncOutcome::UpToDate, SyncOutcome::PermissionsUpdated) => {
                     SyncOutcome::PermissionsUpdated
                 }
-                (..) => c,
+                (..) => current_outcome,
             }
         }
         Ok(outcome)
