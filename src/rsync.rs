@@ -192,6 +192,7 @@ impl Rsyncer {
         let copy_log_output = self.log_output.clone();
         let (mut contexts, sync_contexts) =
             self.create_contexts(num_threads, servers, shares, auth, level)?;
+        //create workers
         let (send_handles, syncers) = self.create_syncers(num_threads, &send_prog);
         let walk_worker =
             WalkWorker::new(self.source.as_path(), my_node, nodelist, send_handles, send_prog);
