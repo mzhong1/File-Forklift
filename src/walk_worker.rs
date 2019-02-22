@@ -240,20 +240,20 @@ impl WalkWorker {
             let check: bool;
             let mut check_paths: Vec<PathBuf> = vec![];
             match stack.pop() {
-                Some(p) => {
-                    let check_path = self.get_check_path(&p, root_path)?;
+                Some(path) => {
+                    let check_path = self.get_check_path(&path, root_path)?;
                     check = exist(&check_path, dest_context);
-                    let dir = src_context.opendir(&p)?;
+                    let dir = src_context.opendir(&path)?;
                     self.walk_loop(
                         (&mut num_files, &mut total_size),
-                        (this, parent, &p, &mut stack),
+                        (this, parent, &path, &mut stack),
                         (check, &check_path, &mut check_paths),
                         (dir, src_context),
                     )?;
                     // check through dest files
                     self.check_and_remove(
                         (check, &mut check_paths),
-                        (root_path, &p, dest_context),
+                        (root_path, &path, dest_context),
                         (this, parent),
                     )?;
                 }
@@ -313,7 +313,7 @@ impl WalkWorker {
         src_context: &mut ProtocolContext,
         nodes: &Arc<Mutex<RendezvousNodes<SocketNode, DefaultNodeHasher>>>,
     ) -> ForkliftResult<Option<Stat>> {
-        let n = match nodes.lock() {
+        let node = match nodes.lock() {
             Ok(e) => {
                 let mut list = e;
                 trace!("{:?}", list.calc_candidates(&entry.to_string_lossy()).collect::<Vec<_>>());
@@ -328,7 +328,7 @@ impl WalkWorker {
                 return Err(ForkliftError::FSError("failed to lock".to_string()));
             }
         };
-        if n == self.node {
+        if node == self.node {
             let src_entry = Entry::new(entry, src_context);
             let metadata = match src_entry.metadata() {
                 Some(stat) => stat,

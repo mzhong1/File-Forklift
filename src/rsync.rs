@@ -109,23 +109,19 @@ impl Rsyncer {
         Rsyncer { source, destination, filesystem_type, progress_info, log_output }
     }
 
-    /// run the rsync protocol
-    pub fn sync(
-        self,
-        (src_ip, dest_ip): (&str, &str),
-        (src_share, dest_share): (&str, &str),
-        (level, num_threads): (DebugLevel, u32),
-        (workgroup, username, password): (String, String, String),
-        nodelist: Arc<Mutex<RendezvousNodes<SocketNode, DefaultNodeHasher>>>,
-        my_node: SocketNode,
-    ) -> ForkliftResult<()> {
+    /// create the rsync workers and store them along with their
+    /// respective input channels
+    pub fn create_syncers(
+        &self,
+        num_threads: u32,
+        send_progress: &Sender<ProgressMessage>,
+    ) -> (Vec<Sender<Option<Entry>>>, Vec<RsyncWorker>) {
         let mut send_handles: Vec<Sender<Option<Entry>>> = Vec::new();
         let mut syncers: Vec<RsyncWorker> = Vec::new();
-        let (send_prog, rec_prog) = channel::unbounded::<ProgressMessage>();
         for _ in 0..num_threads {
             let (send_e, rec_e) = channel::unbounded();
             send_handles.push(send_e);
-            let sync_progress = send_prog.clone();
+            let sync_progress = send_progress.clone();
             syncers.push(RsyncWorker::new(
                 self.source.as_path(),
                 self.destination.as_path(),
@@ -134,6 +130,21 @@ impl Rsyncer {
                 self.log_output.clone(),
             ));
         }
+        (send_handles, syncers)
+    }
+
+    /// create the Filesystem contexts and store them in vectors
+    pub fn create_contexts(
+        &self,
+        num_threads: u32,
+        (src_ip, dest_ip): (&str, &str),
+        (src_share, dest_share): (&str, &str),
+        (workgroup, username, password): (String, String, String),
+        level: DebugLevel,
+    ) -> ForkliftResult<(
+        Vec<(ProtocolContext, ProtocolContext)>,
+        Vec<(ProtocolContext, ProtocolContext)>,
+    )> {
         let mut contexts: Vec<(ProtocolContext, ProtocolContext)> = Vec::new();
         let mut sync_contexts: Vec<(ProtocolContext, ProtocolContext)> = Vec::new();
         let smbc = init_samba(workgroup, username, password, level.clone())?;
@@ -161,12 +172,31 @@ impl Rsyncer {
                 }
             }
         }
+        Ok((contexts, sync_contexts))
+    }
+
+    /// run the rsync protocol
+    pub fn sync(
+        self,
+        (src_ip, dest_ip): (&str, &str),
+        (src_share, dest_share): (&str, &str),
+        (level, num_threads): (DebugLevel, u32),
+        (workgroup, username, password): (String, String, String),
+        nodelist: Arc<Mutex<RendezvousNodes<SocketNode, DefaultNodeHasher>>>,
+        my_node: SocketNode,
+    ) -> ForkliftResult<()> {
+        let auth = (workgroup, username, password);
+        let (servers, shares) = ((src_ip, dest_ip), (src_share, dest_share));
+        let (send_prog, rec_prog) = channel::unbounded::<ProgressMessage>();
         let send_prog_thread = send_prog.clone();
+        let copy_log_output = self.log_output.clone();
+        let (mut contexts, sync_contexts) =
+            self.create_contexts(num_threads, servers, shares, auth, level)?;
+        let (send_handles, syncers) = self.create_syncers(num_threads, &send_prog);
         let walk_worker =
             WalkWorker::new(self.source.as_path(), my_node, nodelist, send_handles, send_prog);
         let progress_worker =
             ProgressWorker::new(src_share.to_string(), self.progress_info, rec_prog);
-        let copy_log_output = self.log_output.clone();
         rayon::spawn(move || {
             progress_worker.start(&copy_log_output).unwrap();
         });
@@ -181,8 +211,7 @@ impl Rsyncer {
             walk_worker.s_walk(self.source.as_path(), &mut fs, &mut destfs)?;
             walk_worker.stop()?;
         }
-        let src_path = self.source.as_path();
-        let dest_path = self.destination.as_path();
+        let (src_path, dest_path) = (self.source.as_path(), self.destination.as_path());
         pool.install(|| {
             if num_threads > 1 {
                 if let Err(e) = walk_worker.t_walk(dest_path, src_path, &mut contexts, &pool) {

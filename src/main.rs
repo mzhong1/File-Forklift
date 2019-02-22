@@ -38,6 +38,7 @@ use crate::error::{ForkliftError, ForkliftResult};
 use crate::input::*;
 use crate::node::*;
 use crate::postgres_logger::*;
+use crate::progress_message::ProgressMessage;
 use crate::rsync::*;
 use crate::socket_node::*;
 use crate::tables::*;
@@ -299,23 +300,17 @@ fn main() -> ForkliftResult<()> {
         Box::new(console_info),
         log_output.clone(),
     );
-
-    let (src_server, dest_server) = (input.src_server, input.dest_server);
-    let (src_share, dest_share) = (input.src_share, input.dest_share);
-    let (debug_level, num_threads) = (input.debug_level, input.num_threads);
-    let workgroup = input.workgroup;
+    let servers = (&*input.src_server, &*input.dest_server);
+    let shares = (&*input.src_share, &*input.dest_share);
+    let levels = (input.debug_level, input.num_threads);
+    let auth = (input.workgroup, username.to_string(), password.to_string());
     let lifetime = input.lifetime;
     rayon::scope(|s| {
         s.spawn(|_| {
             debug!("Started Sync");
-            if let Err(e) = syncer.sync(
-                (&src_server, &dest_server),
-                (&src_share, &dest_share),
-                (debug_level, num_threads),
-                (workgroup, username.to_string(), password.to_string()),
-                active_nodes.clone(),
-                current_address,
-            ) {
+            if let Err(e) =
+                syncer.sync(servers, shares, levels, auth, active_nodes.clone(), current_address)
+            {
                 // Note, only Errors if there IS a database and query/execution fails
                 send_mess(LogMessage::Error(e), &log_output.clone()).unwrap();
                 if send_mess(LogMessage::End, &log_output.clone()).is_err() {
