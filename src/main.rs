@@ -38,7 +38,6 @@ use crate::error::{ForkliftError, ForkliftResult};
 use crate::input::*;
 use crate::node::*;
 use crate::postgres_logger::*;
-use crate::progress_message::ProgressMessage;
 use crate::rsync::*;
 use crate::socket_node::*;
 use crate::tables::*;
@@ -354,9 +353,7 @@ fn main() -> ForkliftResult<()> {
     Ok(())
 }
 
-/**
- * Thread where rendezvous hash is dealt with
- */
+/// thread where rendezvous hash is used to keep track of all active nodes
 fn rendezvous(
     active_nodes: &mut Arc<Mutex<RendezvousNodes<SocketNode, DefaultNodeHasher>>>,
     node_change_input: &Receiver<ChangeList>,
