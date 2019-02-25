@@ -4,15 +4,26 @@ use rendezvous_hash::Node as RNode;
 use rendezvous_hash::NodeHasher;
 use std::cmp::Ordering;
 use std::hash::{Hash, Hasher};
+use std::net::IpAddr;
 use std::net::SocketAddr;
 
 #[derive(Debug, Clone, Eq)]
+/// hashable node containing a Socket Address
 pub struct SocketNode {
     id: SocketAddr,
 }
 impl SocketNode {
+    /// create a new SocketNode
     pub fn new(s: SocketAddr) -> Self {
         SocketNode { id: s }
+    }
+    /// get the ip address
+    pub fn get_ip(&self) -> IpAddr {
+        self.id.ip()
+    }
+    /// get the port number
+    pub fn get_port(&self) -> u16 {
+        self.id.port()
     }
 }
 
@@ -62,11 +73,13 @@ impl PartialEq for SocketNode {
     }
 }
 
+/// enum determining how the node_list is changing
 pub enum ChangeType {
     AddNode,
     RemNode,
 }
 
+/// wrapper to hold change type and node it effects
 pub struct ChangeList {
     pub change_type: ChangeType,
     pub socket_node: SocketNode,
@@ -74,9 +87,6 @@ pub struct ChangeList {
 
 impl ChangeList {
     pub fn new(ct: ChangeType, sn: SocketNode) -> Self {
-        ChangeList {
-            change_type: ct,
-            socket_node: sn,
-        }
+        ChangeList { change_type: ct, socket_node: sn }
     }
 }

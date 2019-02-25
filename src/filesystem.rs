@@ -3,85 +3,99 @@ use crate::error::*;
 use ::smbc::*;
 use chrono::*;
 use libnfs::*;
-use log::{debug, error, trace};
+use log::*;
 use nix::fcntl::OFlag;
 use nix::sys::stat::Mode;
-use rand::prelude::*;
+use rand::*;
 use rayon::*;
+use serde_derive::*;
 
-use std::ffi::CString;
 use std::path::Path;
 
-pub fn create_cstring(input: &str) -> CString {
-    //Note, new only returns Err if the input str contains a '/0' character
-    match CString::new(input) {
-        Ok(s) => s,
-        Err(e) => {
-            let pos = e.nul_position();
-            let mut v = e.into_vec();
-            unsafe {
-                v.set_len(pos);
-                CString::from_vec_unchecked(v)
-            }
-        }
-    }
-}
-
-/// initialize the Samba contexts
-pub fn init_samba(wg: String, un: String, pw: String, level: u32) -> ForkliftResult<Smbc> {
+/// initialize the Samba context
+pub fn init_samba(wg: String, un: String, pw: String, level: DebugLevel) -> ForkliftResult<Smbc> {
+    let debug_level = match level {
+        DebugLevel::OFF => 0,
+        DebugLevel::FATAL => 1,
+        DebugLevel::ERROR => 1,
+        DebugLevel::WARN => 2,
+        DebugLevel::INFO => 2,
+        DebugLevel::DEBUG => 3,
+        DebugLevel::ALL => 10,
+    };
     Smbc::set_data(wg, un, pw);
-    match Smbc::new_with_auth(level) {
+    match Smbc::new_with_auth(debug_level) {
         Ok(e) => Ok(e),
-        Err(e) => {
-            error!("ERROR: {:?}", e);
-            Err(ForkliftError::SmbcError(e))
-        }
+        Err(e) => Err(ForkliftError::SmbcError(e)),
     }
 }
 
-/// return the index of the current thread in the pool,
-/// otherwise return a random number
+/// get the thread index or a random number
 pub fn get_index_or_rand(pool: &ThreadPool) -> usize {
     match pool.current_thread_index() {
         Some(i) => i,
         None => {
             error!("thread is not part of the current pool");
             //default to random number
-            rand::random()
+            random()
         }
     }
 }
 
-/// create a new nfs Network context
-pub fn create_nfs_context(ip: &str, share: &str, level: u32) -> ForkliftResult<NetworkContext> {
+/// create a new nfs Protocol context
+pub fn create_nfs_context(
+    ip: &str,
+    share: &str,
+    level: DebugLevel,
+) -> ForkliftResult<ProtocolContext> {
     let nfs = Nfs::new()?;
-    nfs.mount(ip, share)?;
     nfs.set_debug(level as i32)?;
-    Ok(NetworkContext::Nfs(nfs))
+    nfs.mount(ip, share)?;
+    Ok(ProtocolContext::Nfs(nfs))
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 /// an enum to represent the filesystem type
 pub enum FileSystemType {
     Samba,
     Nfs,
 }
+#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Debug Level of a Context;
+/// Note, it is not recommended to set the log level above 3 for Samba, as it will cause
+/// significant server slowdown
+pub enum DebugLevel {
+    /// Samba level 0
+    OFF = 0,
+    /// Samba level 1
+    FATAL,
+    /// Samba level 1
+    ERROR,
+    /// Samba level 2
+    WARN,
+    /// Samba level 2
+    INFO,
+    /// Samba level 3
+    DEBUG,
+    /// Samba level 10
+    ALL,
+}
 
 #[derive(Clone)]
 /// a generic wrapper for filesystem contexts
-pub enum NetworkContext {
+pub enum ProtocolContext {
     Samba(Box<Smbc>),
     Nfs(Nfs),
 }
 
-impl FileSystem for NetworkContext {
+impl FileSystem for ProtocolContext {
     fn create(&mut self, path: &Path, flags: OFlag, mode: Mode) -> ForkliftResult<FileType> {
         match self {
-            NetworkContext::Nfs(nfs) => {
+            ProtocolContext::Nfs(nfs) => {
                 let file = nfs.create(path, flags, mode)?;
                 Ok(FileType::Nfs(file))
             }
-            NetworkContext::Samba(smbc) => {
+            ProtocolContext::Samba(smbc) => {
                 let file = smbc.create(path, mode)?;
                 Ok(FileType::Samba(file))
             }
@@ -92,10 +106,10 @@ impl FileSystem for NetworkContext {
     /// use setxattr, since samba uses DOS permissions
     fn chmod(&self, path: &Path, mode: Mode) -> ForkliftResult<()> {
         match self {
-            NetworkContext::Nfs(nfs) => {
+            ProtocolContext::Nfs(nfs) => {
                 nfs.lchmod(path, mode)?;
             }
-            NetworkContext::Samba(smbc) => {
+            ProtocolContext::Samba(smbc) => {
                 smbc.chmod(path, mode)?;
             }
         }
@@ -103,7 +117,7 @@ impl FileSystem for NetworkContext {
     }
     fn stat(&self, path: &Path) -> ForkliftResult<Stat> {
         match self {
-            NetworkContext::Nfs(nfile) => {
+            ProtocolContext::Nfs(nfile) => {
                 let stat = nfile.lstat64(path)?;
                 let atime = Timespec::new(stat.nfs_atime as i64, stat.nfs_atime_nsec as i64);
                 let mtime = Timespec::new(stat.nfs_mtime as i64, stat.nfs_mtime_nsec as i64);
@@ -122,7 +136,7 @@ impl FileSystem for NetworkContext {
                 );
                 Ok(Stat::new(s, atime, mtime, ctime))
             }
-            NetworkContext::Samba(sfile) => {
+            ProtocolContext::Samba(sfile) => {
                 let stat = sfile.stat(path)?;
                 let atime = Timespec::new(stat.st_atim.tv_sec as i64, stat.st_atim.tv_nsec as i64);
                 let ctime = Timespec::new(stat.st_ctim.tv_sec as i64, stat.st_ctim.tv_nsec as i64);
@@ -145,27 +159,25 @@ impl FileSystem for NetworkContext {
     }
     fn mkdir(&self, path: &Path) -> ForkliftResult<()> {
         match self {
-            NetworkContext::Nfs(nfs) => {
+            ProtocolContext::Nfs(nfs) => {
                 nfs.mkdir(path)?;
             }
-            NetworkContext::Samba(smbc) => {
+            ProtocolContext::Samba(smbc) => {
                 smbc.mkdir(path, Mode::S_IRWXU | Mode::S_IRWXO | Mode::S_IRWXG)?;
             }
         }
         Ok(())
     }
-    ///
     /// Please note that neither Samba nor Nfs use mode in their open function (
     /// the option might exist, but does nothing.) the mode parameter exists should
     /// another Filesystem need to be implemented where it's open function uses mode.
-    ///
     fn open(&mut self, path: &Path, flags: OFlag, mode: Mode) -> ForkliftResult<FileType> {
         match self {
-            NetworkContext::Nfs(nfs) => {
+            ProtocolContext::Nfs(nfs) => {
                 let file = nfs.open(path, flags)?;
                 Ok(FileType::Nfs(file))
             }
-            NetworkContext::Samba(smbc) => {
+            ProtocolContext::Samba(smbc) => {
                 let file = smbc.open(path, flags, mode)?;
                 Ok(FileType::Samba(file))
             }
@@ -173,11 +185,11 @@ impl FileSystem for NetworkContext {
     }
     fn opendir(&mut self, path: &Path) -> ForkliftResult<DirectoryType> {
         match self {
-            NetworkContext::Nfs(nfs) => {
+            ProtocolContext::Nfs(nfs) => {
                 let dir = nfs.opendir(path)?;
                 Ok(DirectoryType::Nfs(dir))
             }
-            NetworkContext::Samba(smbc) => {
+            ProtocolContext::Samba(smbc) => {
                 let dir = smbc.opendir(path)?;
                 Ok(DirectoryType::Samba(dir))
             }
@@ -185,10 +197,10 @@ impl FileSystem for NetworkContext {
     }
     fn rename(&self, oldpath: &Path, newpath: &Path) -> ForkliftResult<()> {
         match self {
-            NetworkContext::Nfs(nfs) => {
+            ProtocolContext::Nfs(nfs) => {
                 nfs.rename(oldpath, newpath)?;
             }
-            NetworkContext::Samba(smbc) => {
+            ProtocolContext::Samba(smbc) => {
                 smbc.rename(oldpath, newpath)?;
             }
         }
@@ -197,10 +209,10 @@ impl FileSystem for NetworkContext {
 
     fn rmdir(&self, path: &Path) -> ForkliftResult<()> {
         match self {
-            NetworkContext::Nfs(nfs) => {
+            ProtocolContext::Nfs(nfs) => {
                 nfs.rmdir(path)?;
             }
-            NetworkContext::Samba(smbc) => {
+            ProtocolContext::Samba(smbc) => {
                 smbc.rmdir(path)?;
             }
         }
@@ -209,10 +221,10 @@ impl FileSystem for NetworkContext {
 
     fn unlink(&self, path: &Path) -> ForkliftResult<()> {
         match self {
-            NetworkContext::Nfs(nfs) => {
+            ProtocolContext::Nfs(nfs) => {
                 nfs.unlink(path)?;
             }
-            NetworkContext::Samba(smbc) => {
+            ProtocolContext::Samba(smbc) => {
                 smbc.unlink(path)?;
             }
         }
@@ -351,7 +363,6 @@ impl DirEntryType {
             DirEntryType::Nfs(nfsentry) => nfsentry.path.as_path(),
         }
     }
-
     /// get the general filetype of the directory entry
     pub fn filetype(&self) -> GenericFileType {
         match self {
@@ -402,29 +413,24 @@ impl Iterator for DirectoryType {
 pub struct Timespec {
     /// number of seconds since the system's EPOCH
     tv_sec: i64,
+    /// number of nanoseconds - tv_sec from system's EPOCH
     tv_nsec: i64,
 }
 
 impl Timespec {
     /// create a new Timespec
     pub fn new(sec: i64, nsec: i64) -> Self {
-        Timespec {
-            tv_sec: sec,
-            tv_nsec: nsec,
-        }
+        Timespec { tv_sec: sec, tv_nsec: nsec }
     }
-
-    /// get the number of hours represented in this object
+    /// get the number of hours since the system's EPOCH
     pub fn num_hours(&self) -> i64 {
         self.num_seconds() / 3600
     }
-
-    /// get the number of minutes represented in this object
+    /// get the number of minutes since the system's EPOCH
     pub fn num_minutes(&self) -> i64 {
         self.num_seconds() / 60
     }
-
-    /// get the number of seconds represented in this object
+    /// get the number of seconds since the system's EPOCH
     pub fn num_seconds(&self) -> i64 {
         if self.tv_sec < 0 && self.tv_nsec > 0 {
             self.tv_sec + 1
@@ -432,19 +438,16 @@ impl Timespec {
             self.tv_sec
         }
     }
-
-    /// get the number of milliseconds represented in this object
+    /// get the number of milliseconds since the system's EPOCH
     pub fn num_milliseconds(&self) -> i64 {
         self.num_microseconds() / 1000
     }
-
-    /// get the number of microseconds represented in this object
+    /// get the number of microseconds since the system's EPOCH
     pub fn num_microseconds(&self) -> i64 {
         let secs = self.num_seconds() * 1_000_000;
         let usecs = self.micros_mod_sec();
         secs + usecs
     }
-
     /// a helper function for getting the number of microseconds represented
     fn micros_mod_sec(&self) -> i64 {
         if self.tv_sec < 0 && self.tv_nsec > 0 {
@@ -453,7 +456,6 @@ impl Timespec {
             self.tv_nsec
         }
     }
-
     /// print the time formatted
     pub fn print_timeval_secs(&self) {
         let time = self.num_seconds();
@@ -495,6 +497,7 @@ pub struct Stat {
 }
 
 impl Stat {
+    /// create a new Stat
     pub fn new(
         stat: (u64, u64, u32, u64, u32, u32, u64, i64, i64, i64),
         atime: Timespec,
@@ -587,7 +590,7 @@ pub trait FileSystem {
     fn opendir(&mut self, path: &Path) -> ForkliftResult<DirectoryType>;
     /// rename a file/directory
     fn rename(&self, oldpath: &Path, newpath: &Path) -> ForkliftResult<()>;
-    ///remove a directory
+    /// remove a directory
     fn rmdir(&self, path: &Path) -> ForkliftResult<()>;
     /// unlink (remove) a file
     fn unlink(&self, path: &Path) -> ForkliftResult<()>;

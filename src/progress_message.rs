@@ -1,20 +1,22 @@
+use crate::error::ForkliftError;
 use crate::filesystem_ops::SyncOutcome;
 use crate::rsync::SyncStats;
 
+/// enum holding progress messages
 pub enum ProgressMessage {
+    /// wrapper for SyncOutcomes
     DoneSyncing(SyncOutcome),
+    /// start syncing a file
     StartSync(String),
-    Todo {
-        num_files: u64,
-        total_size: usize,
-    },
-    Syncing {
-        description: String,
-        size: usize,
-        done: usize,
-    },
+    /// update number of files to sync + size
+    Todo { num_files: u64, total_size: usize },
+    /// Error message
+    SendError(ForkliftError),
+    /// sync in progress
+    CheckSyncing { description: String, size: usize, done: usize },
 }
 
+/// Store the progress of the rsync
 pub struct Progress {
     /// Name of the file being transferred
     pub current_file: String,

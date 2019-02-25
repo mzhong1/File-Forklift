@@ -1,6 +1,6 @@
 use api;
 use flatbuffers;
-use log::trace;
+use log::*;
 
 use self::api::service_generated::*;
 
@@ -17,10 +17,7 @@ fn test_create_message() {
         0, 0, 0,
     ];
 
-    let result = create_message(
-        MessageType::HEARTBEAT,
-        &vec!["192.168.1.1:5250".to_string()],
-    );
+    let result = create_message(MessageType::HEARTBEAT, &vec!["192.168.1.1:5250".to_string()]);
     println!("{:?}", result);
     assert_eq!(result, expected_result);
 
@@ -133,29 +130,23 @@ fn test_get_message_type() {
     assert_eq!(result, expected_result);
 }
 
+/// create a new message to send
 pub fn create_message(m_type: MessageType, message: &[String]) -> Vec<u8> {
     trace!("Creating Message {:?} with body {:?}", m_type, message);
     let mut builder = flatbuffers::FlatBufferBuilder::new();
     let v: Vec<&str> = message.iter().map(|x| &**x).collect();
     trace!("Converting message vector {:?} to flatbuffer vector", v);
     let nodes = builder.create_vector_of_strings(&v);
-    trace!(
-        "Successfully converted messagebody to flatbuffer vector {:?}",
-        nodes
-    );
+    trace!("Successfully converted messagebody to flatbuffer vector {:?}", nodes);
 
-    let create = Message::create(
-        &mut builder,
-        &MessageArgs {
-            mtype: m_type,
-            members: Some(nodes),
-        },
-    );
+    let create =
+        Message::create(&mut builder, &MessageArgs { mtype: m_type, members: Some(nodes) });
     trace!("Successfully created Message {:?}", create);
     builder.finish_minimal(create);
     builder.finished_data().to_vec()
 }
 
+/// read a serialized message to a vector of string
 pub fn read_message(buf: &[u8]) -> Option<Vec<String>> {
     trace!("Calling get_root_as_message on buffer");
     let mess = get_root_as_message(&buf);
@@ -181,6 +172,7 @@ pub fn read_message(buf: &[u8]) -> Option<Vec<String>> {
     }
 }
 
+/// get the message type of a message
 pub fn get_message_type(buf: &[u8]) -> MessageType {
     trace!("Calling get_root_as_message");
     let mess = get_root_as_message(buf);

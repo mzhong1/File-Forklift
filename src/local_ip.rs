@@ -2,8 +2,11 @@ use nix;
 
 use self::nix::ifaddrs::getifaddrs;
 use crate::error::{ForkliftError, ForkliftResult};
+use crate::postgres_logger::{send_mess, LogMessage};
+use crate::tables::*;
 
-use log::{debug, error, trace};
+use crossbeam::channel::Sender;
+use log::*;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Result};
 use std::net::{SocketAddr, SocketAddrV4, SocketAddrV6};
@@ -31,7 +34,7 @@ fn get_default_v4_iface() -> Result<Option<String>> {
 
 /// Get the local ip address of the default route
 /// on this machine
-pub fn get_ip() -> ForkliftResult<Option<SocketAddr>> {
+pub fn get_ip(send_log: &Sender<LogMessage>) -> ForkliftResult<Option<SocketAddr>> {
     let default_iface = get_default_v4_iface()?;
     let default_iface = default_iface.unwrap();
     trace!("Default interface: {:?}", default_iface);
@@ -49,15 +52,19 @@ pub fn get_ip() -> ForkliftResult<Option<SocketAddr>> {
                     }
                 }
                 None => {
-                    error!(
-                        "interface {} with unsupported address family",
-                        ifaddr.interface_name
+                    let mess = LogMessage::ErrorType(
+                        ErrorType::IpLocalError,
+                        format!(
+                            "interface {} with unsupported address family",
+                            ifaddr.interface_name
+                        ),
                     );
+                    send_mess(mess, &send_log)?;
                 }
             }
         }
     }
-    Err(ForkliftError::IpLocalError)
+    Err(ForkliftError::IpLocalError("Could not determine local ip address".to_string()))
 }
 
 //get the ip in ipv6.
@@ -79,21 +86,12 @@ pub fn get_ipv6() -> ForkliftResult<Option<SocketAddr>> {
                     }
                 }
                 None => {
-                    error!(
-                        "interface {} with unsupported address family",
-                        ifaddr.interface_name
-                    );
+                    error!("interface {} with unsupported address family", ifaddr.interface_name);
                 }
             }
         }
     }
-    Err(ForkliftError::IpLocalError)
-}
-
-#[test]
-fn test_get_ip() {
-    let socketa = get_ip().unwrap().unwrap();
-    println!("socket: {:?}", socketa);
+    Err(ForkliftError::IpLocalError("Could not determine local ip address".to_string()))
 }
 
 #[test]

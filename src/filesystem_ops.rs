@@ -1,14 +1,16 @@
+use ::smbc::*;
+use chrono::NaiveDateTime;
+use crossbeam::channel::Sender;
 use digest::Digest;
+use lazy_static::lazy_static;
+use libnfs::*;
+use log::*;
 use meowhash::*;
 use nix::fcntl::OFlag;
 use nix::sys::stat::Mode;
 use nom::types::CompleteByteSlice;
 use pathdiff::*;
 
-use ::smbc::*;
-use lazy_static::lazy_static;
-use libnfs::*;
-use log::{debug, error, trace};
 use std::collections::hash_map::Entry as E;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -17,13 +19,16 @@ use std::sync::Mutex;
 use crate::error::{ForkliftError, ForkliftResult};
 use crate::filesystem::*;
 use crate::filesystem_entry::Entry;
+use crate::postgres_logger::{send_mess, LogMessage};
+use crate::progress_message::ProgressMessage;
+use crate::tables::{current_time, ErrorType};
 
 /// default buffer size
 const BUFF_SIZE: u64 = 1024 * 1000;
 
 lazy_static! {
     /// singleton containing a map of named ID's to Sid's
-    pub static ref NAME_MAP: Mutex<HashMap<String, Sid>> = {
+    pub static ref SID_NAME_MAP: Mutex<HashMap<String, Sid>> = {
         let mut map = HashMap::new();
         map.insert("\\Everyone".to_string(), Sid(vec![1, 0]));
         map.insert("\\Creator Owner".to_string(), Sid(vec![3, 0]));
@@ -37,8 +42,8 @@ lazy_static! {
 pub enum SyncOutcome {
     /// file/directory is up-to-date
     UpToDate,
-    /// copied a file
-    FileCopied,
+    /// copied a file,  send path, src, dest checksum, size
+    FileCopied(String, Vec<u8>, Vec<u8>, i64, NaiveDateTime),
     /// updated a symlink
     SymlinkUpdated,
     /// created a symlink
@@ -51,230 +56,150 @@ pub enum SyncOutcome {
     DirectoryCreated,
     /// updated a directory internal bytes
     DirectoryUpdated,
-    /// updated a file internal bytes
-    ChecksumUpdated,
+    /// updated a file internal bytes, send path, src, dest checksum, size
+    ChecksumUpdated(String, Vec<u8>, Vec<u8>, i64, NaiveDateTime),
 }
 
-///
 /// checks if a path is valid
-///
-/// @param path     The path to be checked
-///
-/// @param fs       The filesystem context the path is checked against
-///
-/// @return         true if the path exists (is valid), false otherwise
-///
-pub fn exist(path: &Path, fs: &mut NetworkContext) -> bool {
-    fs.stat(path).is_ok()
+pub fn exist(path: &Path, context: &mut ProtocolContext) -> bool {
+    context.stat(path).is_ok()
 }
 
-///
-/// gets the relative path (the parts of the path in common)
-///
-/// @param a    the base path
-///
-/// @param b    the comparison path
-///
-/// @return     the relative path between a and b, error if
-///             a relative path does not exist
-///
-pub fn get_rel_path(a: &Path, b: &Path) -> ForkliftResult<PathBuf> {
-    match diff_paths(&a, &b) {
+/// gets the relative path (the parts of the path in common) between base and comp
+pub fn get_rel_path(base_path: &Path, comp_path: &Path) -> ForkliftResult<PathBuf> {
+    match diff_paths(&base_path, &comp_path) {
         None => {
-            let err = format!("Could not get relative path from {:?} to {:?}", &a, &b);
+            let err =
+                format!("Could not get relative path from {:?} to {:?}", &base_path, &comp_path);
             Err(ForkliftError::FSError(err))
         }
         Some(path) => Ok(path),
     }
 }
 
-///
-/// set the external attribute of a destination file on a Samba server
-///
-/// @param path     The path of the file whose external attributes are
-///                 being set
-///
-/// @param fs       the Samba filesystem of the file
-///
-/// @param attr     The attribute being set.  valid descriptors can be
-///                 found in Smbc.
-///
-/// @param val      The value to be set in the external attribute
-///
-/// @param error    The error description should the set fail
-///
-/// @param success  The string to be printed to debug logs upon success
+/// set the external attribute of a destination file on a Samba server.
+/// valid descriptors can be found in Smbc for the attribute.
+/// The error and success strings are descriptions should the set either
+/// fail or succeed.
 ///
 /// @note           See Smbc.rs for notes on setxattr
-///
 pub fn set_xattr(
     path: &Path,
-    fs: &Smbc,
-    attr: &SmbcXAttr,
-    val: &SmbcXAttrValue,
+    context: &Smbc,
+    attribute: &SmbcXAttr,
+    value: &SmbcXAttrValue,
     error: &str,
     success: &str,
 ) -> ForkliftResult<()> {
-    match fs.setxattr(path, attr, val, XAttrFlags::SMBC_XATTR_FLAG_CREATE) {
-        Ok(_) => {
-            trace!("set success! {}", success);
-            Ok(())
-        }
-        Err(e) => {
-            let err = format!("Error {}, {}", e, error);
-            error!("{}", err);
-            Err(ForkliftError::FSError(err))
-        }
+    if let Err(e) = context.setxattr(path, attribute, value, XAttrFlags::SMBC_XATTR_FLAG_CREATE) {
+        let err = format!("Error {}, {}", e, error);
+        return Err(ForkliftError::FSError(err));
     }
+    trace!("set success! {}", success);
+    Ok(())
 }
 
-///
 /// get the external attribute of a destination file on a Samba server
+/// as a Vec<u8>.  valid descriptors can be found in Smbc for the attribute.
+/// The error and success strings are descriptions should the set either
+/// fail or succeed.
 ///
-/// @param path     The path of the file whose external attributes are
-///                 being set
-///
-/// @param fs       the Samba filesystem of the file
-///
-/// @param attr     The attribute to be retrieved. valid descriptors
-///                 can be found in Smbc.
-///
-/// @param error    The error description should the get fail
-///
-/// @param success  The string to be printed to debug logs upon success
-///
-/// @note           See Smbc.rs for notes on getxattr.  Please note that
-///                 you can in fact do an exclude for .* (all) operations
-///
+/// @note See Smbc.rs for notes on getxattr.  Please note that you can
+/// in fact do an exclude for .* (all) operations. Also, all returned
+/// vectors should end in the \{0}, or Null character.  If you want
+/// to parse this using xattr_parser, you will have to pop off the null
+/// terminator.
 pub fn get_xattr(
     path: &Path,
-    fs: &Smbc,
+    context: &Smbc,
     attr: &SmbcXAttr,
     error: &str,
     success: &str,
 ) -> ForkliftResult<Vec<u8>> {
-    match fs.getxattr(path, attr) {
+    match context.getxattr(path, attr) {
         Ok(buf) => {
             debug!("{}", success);
             Ok(buf)
         }
         Err(e) => {
             let err = format!("Error {}, {}", e, error);
-            error!("{}", err);
             Err(ForkliftError::FSError(err))
         }
     }
 }
 
-///
-/// make and/or update a directory endpoint in the destination filesytem,
+/// make and/or update a directory endpoint in the destination filesystem,
 /// keeping Dos or Unix permissions (depending on if the context is Samba or NFS)
 ///
-/// @param src_path     the path of the equivalent directory from the source filesystem
-///
-/// @param dest_path    the path of the directory being created
-///
-/// @param fs           the source filesystem
-///
-/// @param destfs       the destination filesystem
-///
-/// @return             returns the Sync outcome (or an error)
-///
-/// @note           If the filesystem context is Samba CIFS, then please note
-///                 that the mode of the directory cannot go below 555 (see chmod
-///                 notes in Smbc)
-///
+/// @note If the filesystem context is Samba CIFS, then please note that the
+/// mode of the directory cannot go below 555 (see chmod notes in Smbc)
+/// This function might print an error to the console on mkdir.  This is because
+/// another thread may have already created the directory before mkdir could be executed.  
 pub fn make_dir(
     src_path: &Path,
     dest_path: &Path,
-    fs: &mut NetworkContext,
-    destfs: &mut NetworkContext,
+    src_context: &mut ProtocolContext,
+    dest_context: &mut ProtocolContext,
 ) -> ForkliftResult<SyncOutcome> {
     let outcome: SyncOutcome;
-    let exists = exist(dest_path, destfs);
+    let exists = exist(dest_path, dest_context);
     if !exists {
-        if let Err(e) = destfs.mkdir(dest_path) {
+        if let Err(e) = dest_context.mkdir(dest_path) {
+            let exists_now = exist(dest_path, dest_context);
+            //Note, this might occur due to another thread creating the directory
             let err = format!(
-                "Error {}, Could not create {:?}, exists: {:?}",
-                e, dest_path, exists
+                "Error {}, Could not create {:?}, check_exists: {:?}, current exists {:?}",
+                e, dest_path, exists, exists_now
             );
-            error!("{}", err);
+            error!("{:?}", err); //this one does not need to be logged
             return Ok(SyncOutcome::UpToDate);
         }
     }
-    let (src_entry, dest_entry) = (Entry::new(&src_path, fs), Entry::new(&dest_path, destfs));
+    let (src_entry, dest_entry) =
+        (Entry::new(&src_path, src_context), Entry::new(&dest_path, dest_context));
     // make sure permissions match
-    let out = match copy_permissions(&src_entry, &dest_entry, &fs, &destfs) {
-        Ok(out) => {
-            debug!("Copy permissions successful");
-            out
-        }
-        Err(e) => {
-            return Err(e);
-        }
-    };
-    match (exists, out) {
+    let copy_outcome = copy_permissions(&src_entry, &dest_entry, &src_context, &dest_context)?;
+    debug!("Copy permissions successful");
+    match (exists, copy_outcome) {
         (false, _) => outcome = SyncOutcome::DirectoryCreated,
         (_, SyncOutcome::PermissionsUpdated) => outcome = SyncOutcome::DirectoryUpdated,
-        (_, _) => outcome = SyncOutcome::UpToDate,
+        (..) => outcome = SyncOutcome::UpToDate,
     }
     Ok(outcome)
 }
-
-///
 /// find any directories in the path that do not exist in the
-/// filesystem and add them
-///
-/// @param dest_path    the destination file path being checked
-///
-/// @param src_path     the src path equivalent used to ensure any created
-///                     directories have the same permissions as the source
-///                     filesystem
-///
-/// @param root         the root filepath, to ensure correctness while looping
-///                     over the parent directories
-///
-/// @param fs           the source filesystem
-///
-/// @param destfs       the destination filesystem
-///                     
+/// filesystem and add them.
+/// @note the src_path is used to ensure correctness in permissions,
+/// while the root_file_path ensures correctness while looping over
+/// parent directories.                   
 pub fn make_dir_all(
-    dest_path: &Path,
     src_path: &Path,
-    root: &Path,
-    fs: &mut NetworkContext,
-    destfs: &mut NetworkContext,
+    dest_path: &Path,
+    root_file_path: &Path,
+    src_context: &mut ProtocolContext,
+    dest_context: &mut ProtocolContext,
 ) -> ForkliftResult<()> {
     let (mut stack, mut src_stack) = (vec![], vec![]);
     let (mut dest_parent, mut src_parent) = (dest_path.parent(), src_path.parent());
-    trace!("dest parent {:?}", root);
+    trace!("dest parent {:?}", root_file_path);
     //add parent directory paths to stack
     while {
         match dest_parent {
-            Some(parent) => parent != root,
+            Some(parent) => parent != root_file_path,
             None => false,
         }
     } {
-        trace!("dest_parent {:?} , root {:?}", dest_parent, root);
-        dest_parent = match dest_parent {
-            Some(parent) => {
-                stack.push(parent);
-                parent.parent()
+        trace!("dest_parent {:?} , root {:?}", dest_parent, root_file_path);
+        match (dest_parent, src_parent) {
+            (Some(destination_parent), Some(source_parent)) => {
+                stack.push(destination_parent);
+                src_stack.push(source_parent);
+                dest_parent = destination_parent.parent();
+                src_parent = source_parent.parent();
             }
-            None => {
+            (..) => {
                 return Err(ForkliftError::FSError(
-                    "While loop invariant failed".to_string(),
-                ));
-            }
-        };
-        src_parent = match src_parent {
-            Some(src_parent) => {
-                src_stack.push(src_parent);
-                src_parent.parent()
-            }
-            None => {
-                return Err(ForkliftError::FSError(
-                    "src_path is smaller than dest".to_string(),
+                    "While loop invariant in make_dir_all failed".to_string(),
                 ));
             }
         };
@@ -284,36 +209,25 @@ pub fn make_dir_all(
         trace!("stack not empty");
         let (path, srcpath) = match (stack.pop(), src_stack.pop()) {
             (Some(p), Some(sp)) => (p, sp),
-            (_, _) => {
+            (..) => {
                 return Err(ForkliftError::FSError("Loop invariant failed".to_string()));
             }
         };
-        match make_dir(srcpath, &path, fs, destfs) {
-            Ok(_) => debug!("made dir {:?}", path),
-            Err(e) => {
-                return Err(e);
-            }
-        };
+        if !exist(&path, dest_context) {
+            make_dir(srcpath, &path, src_context, dest_context)?;
+            debug!("made dir {:?}", path);
+        }
     }
     Ok(())
 }
 
-///
+/// Check if the source and dest entries have the same size
 /// Since size attributes remain the same for samba + nfs calls,
 /// Can do comparison
-///
-/// @param src      The source entry to compare to
-///
-/// @param dest     The destination entry to compare the size of
-///
-/// @return         true if src, dest files size are different or dest file does not exist
-///                 false otherwise
-///
 pub fn has_different_size(src: &Entry, dest: &Entry) -> ForkliftResult<bool> {
     match (src.metadata(), dest.metadata()) {
         (None, _) => {
             let err = format!("File {:?} stat should not be None!", src.path());
-            error!("{}", err);
             Err(ForkliftError::FSError(err))
         }
         (_, None) => Ok(true),
@@ -321,27 +235,18 @@ pub fn has_different_size(src: &Entry, dest: &Entry) -> ForkliftResult<bool> {
     }
 }
 
-///
+/// Check if the source entry is more recent than the dest entry
 /// Since time attributes remain the same for samba + nfs calls,
 /// we can do comparison.
-///
-/// @param src      The source entry to compare to
-///
-/// @param dest     The destination entry to compare the size of
-///
-/// @return         true if src is more recent than dest (need to update dest then...)
-///
-/// @note           this only checks mtime, since ctime are attr changes and we want
-///                 to know if there were any recent write changes
-///
+/// @note this only checks mtime, since ctime are attr changes and we want
+/// to know if there were any recent write changes
 pub fn is_more_recent(src: &Entry, dest: &Entry) -> ForkliftResult<bool> {
     match (src.metadata(), dest.metadata()) {
         (Some(src_stat), Some(dest_stat)) => {
-            Ok(src_stat.mtime().num_microseconds() > dest_stat.mtime().num_microseconds())
+            Ok(src_stat.mtime().num_seconds() > dest_stat.mtime().num_seconds())
         }
         (None, _) => {
             let err = format!("Source File {:?} does not exist", src.path());
-            error!("{}", err);
             Err(ForkliftError::FSError(err))
         }
         (_, None) => {
@@ -351,38 +256,20 @@ pub fn is_more_recent(src: &Entry, dest: &Entry) -> ForkliftResult<bool> {
     }
 }
 
-///
 /// this functions checks whether or not the destination file has the same
 /// permission settings as the source file.
-///
-/// @param src          Source file entry
-///
-/// @param dest         Dest file entry
-///
-/// @param src_context  the context of the source filesystem
-///
-/// @param dest_context the context of the destination filesystem
-///
-/// @return             true if the source and destination have DIFFERENT permissions
-///                     false otherwise.  
-///
-/// @note               this function ONLY checks the mode attribute (DOS or LINUX)
-///                     this functions DOES NOT check the external attributes (xattr)
-///                     of a file.  
-///
+/// @note this function ONLY checks the mode attribute (DOS or LINUX) this function
+/// DOES NOT check the external attributes (xattr)  of a file.  
 pub fn has_different_permissions(
     src: &Entry,
     dest: &Entry,
-    src_context: &NetworkContext,
-    dest_context: &NetworkContext,
+    src_context: &ProtocolContext,
+    dest_context: &ProtocolContext,
 ) -> ForkliftResult<bool> {
     //check file existence
     let (src_mode, dest_mode) = match (src.metadata(), dest.metadata()) {
         (None, _) => {
-            error!("Source File does not Exist");
-            return Err(ForkliftError::FSError(
-                "Source File does not exist".to_string(),
-            ));
+            return Err(ForkliftError::FSError("Source File does not exist".to_string()));
         }
         (_, None) => {
             debug!("Dest File does not exist");
@@ -392,55 +279,30 @@ pub fn has_different_permissions(
     };
 
     match (src_context, dest_context) {
-        (NetworkContext::Nfs(_), NetworkContext::Nfs(_)) => {
+        (ProtocolContext::Nfs(_), ProtocolContext::Nfs(_)) => {
             trace!("src mode {:?}, dest mode {:?}", src_mode, dest_mode);
             Ok(src_mode != dest_mode)
         }
-        (NetworkContext::Samba(ctx), NetworkContext::Samba(dctx)) => {
+        (ProtocolContext::Samba(ctx), ProtocolContext::Samba(dctx)) => {
             let xattr = SmbcXAttr::DosAttr(SmbcDosAttr::Mode);
-            let err = "get the dos mode failed";
-            let suc = "dos mode retrieved!";
-
+            let (err, suc) = ("get the dos mode failed", "dos mode retreived");
             let src_mod_values = get_xattr(src.path(), ctx, &xattr, err, suc)?;
             let dest_mod_values = get_xattr(dest.path(), dctx, &xattr, err, suc)?;
-            trace!(
-                "src dos mode {:?}, dest dos mode {:?}",
-                src_mod_values,
-                dest_mod_values
-            );
+            trace!("src dos mode {:?}, dest dos mode {:?}", src_mod_values, dest_mod_values);
             Ok(src_mod_values != dest_mod_values)
         }
-        (_, _) => {
-            error!("Filesystems do not match!");
-            Err(ForkliftError::FSError(
-                "Filesystems do not match!".to_string(),
-            ))
-        }
+        (..) => Err(ForkliftError::FSError("Filesystems do not match!".to_string())),
     }
 }
 
-///
 /// create an empty vector to store the name of a symlink
-///
-/// @param size     the length of the name of the target file
-///
-/// @param readmax  the maximum read length
-///
-/// @return         returns the target link as a vector of ubytes
-///
 fn make_target(size: i64, readmax: u64) -> ForkliftResult<Vec<u8>> {
-    let mut src_target: Vec<u8>;
+    let src_target: Vec<u8>;
     if size <= readmax as i64 {
         if size > 0 {
-            src_target = Vec::with_capacity(size as usize);
-            unsafe {
-                src_target.set_len(size as usize);
-            }
+            src_target = vec![0; size as usize]
         } else {
-            src_target = Vec::with_capacity(readmax as usize);
-            unsafe {
-                src_target.set_len(readmax as usize);
-            }
+            src_target = vec![0; readmax as usize]
         }
     } else {
         return Err(ForkliftError::FSError("File Name too long".to_string()));
@@ -448,166 +310,114 @@ fn make_target(size: i64, readmax: u64) -> ForkliftResult<Vec<u8>> {
     Ok(src_target)
 }
 
-///
 /// read a symlink into a String
-///
-/// @param path     the path to the link file
-///
-/// @param context  the filesystem context
-///
-/// @param size     the length of the name of the link's target file
-///
-/// @return         returns a String containing the name of the target file
-///
-fn read_link(path: &Path, context: &Nfs, size: i64) -> ForkliftResult<String> {
+fn read_link(path: &Path, nfs_context: &Nfs, size: i64) -> ForkliftResult<String> {
     let mut src_target: Vec<u8> = make_target(size, BUFF_SIZE)?;
-    if let Err(e) = context.readlink(path, &mut src_target) {
+    if let Err(e) = nfs_context.readlink(path, &mut src_target) {
         let err = format!("Unable to read link at {:?}, {:?}", path, e);
-        error!("{}", err);
         return Err(ForkliftError::FSError(err));
     }
-    Ok(String::from_utf8(src_target)?)
+    let mut link = String::from_utf8(src_target)?;
+    link.pop();
+    Ok(link)
 }
 
-///
+/// helper for copy_link; unlink a symlink in order to update it
+pub fn unlink_outdated_link(path: &Path, nfs_context: &Nfs) -> ForkliftResult<()> {
+    if let Err(e) = nfs_context.unlink(path) {
+        return Err(ForkliftError::FSError(format!(
+            "Could not remove {:?} while updating link, {}",
+            path, e
+        )));
+    }
+    Ok(())
+}
+
 /// check if the destination symlink links to the same file as the source, copy if not
 ///
-/// @param src          Source file entry
-///
-/// @param dest         Dest file entry
-///
-/// @param src_context  the context of the source filesystem
-///
-/// @param dest_context the context of the destination filesystem
-///
-/// @return return the outcome of the Sync (either Update or create) or Error
-///
 /// @note Samba does not support symlinks, so copy_link will immediately return
-///       with an error
-///
+///  with an error
 pub fn copy_link(
     src: &Entry,
     dest: &Entry,
-    src_context: &mut NetworkContext,
-    dest_context: &mut NetworkContext,
+    src_context: &mut ProtocolContext,
+    dest_context: &mut ProtocolContext,
+    log_output: &Sender<LogMessage>,
 ) -> ForkliftResult<SyncOutcome> {
     //Check if correct Filesytem
-    let (context, dcontext) = match (src_context.clone(), dest_context.clone()) {
-        (NetworkContext::Nfs(ctx), NetworkContext::Nfs(dctx)) => (ctx, dctx),
-        (_, _) => {
-            return Err(ForkliftError::FSError(
-                "Samba does not support symlinks".to_string(),
-            ));
+    let (src_nfs_context, dest_nfs_context) = match (src_context.clone(), dest_context.clone()) {
+        (ProtocolContext::Nfs(ctx), ProtocolContext::Nfs(dctx)) => (ctx, dctx),
+        (..) => {
+            return Err(ForkliftError::FSError("Samba does not support symlinks".to_string()));
         }
     };
-    //Check if files exist
-    let (src_size, dest_size) = match (src.metadata(), dest.metadata()) {
+    //Check if files exist and get size
+    let (size, dest_size) = match (src.metadata(), dest.metadata()) {
         (None, _) => {
-            return Err(ForkliftError::FSError(
-                "Source File does not exist!".to_string(),
-            ));
+            return Err(ForkliftError::FSError("Source File does not exist!".to_string()));
         }
-        (Some(src_stat), None) => (src_stat.size(), 0),
-        (Some(src_stat), Some(dest_stat)) => (src_stat.size(), dest_stat.size()),
+        (Some(src_stat), None) => (src_stat.size() + 1, 0),
+        (Some(src_stat), Some(dest_stat)) => (src_stat.size() + 1, dest_stat.size() + 1),
     };
     let (src_path, dest_path) = (src.path(), dest.path());
-    let src_target = read_link(src_path, &context, src_size)?;
-
+    let src_target = read_link(src_path, &src_nfs_context, size)?;
     let mut outcome: SyncOutcome;
-
     match dest.is_link() {
         Some(true) => {
-            let dest_target = read_link(dest_path, &dcontext, dest_size)?;
+            let dest_target = read_link(dest_path, &dest_nfs_context, dest_size)?;
             if dest_target != src_target {
-                match dcontext.unlink(dest_path) {
-                    Ok(_) => (),
-                    Err(e) => {
-                        let err = format!(
-                            "Could not remove {:?} while updating link, {}",
-                            dest_path, e
-                        );
-                        error!("{}", err);
-                        return Err(ForkliftError::FSError(err));
-                    }
-                }
+                unlink_outdated_link(dest_path, &dest_nfs_context)?;
+                outcome = SyncOutcome::SymlinkUpdated;
+            } else {
+                return Ok(SyncOutcome::UpToDate);
             }
-            outcome = SyncOutcome::SymlinkUpdated
         }
         Some(false) => {
             //Not safe to delete
-            let err = format!(
+            return Err(ForkliftError::FSError(format!(
                 "Refusing to replace existing path {:?} by symlink",
                 dest_path
-            );
-            error!("{}", err);
-            return Err(ForkliftError::FSError(err));
+            )));
         }
         None => {
             outcome = SyncOutcome::SymlinkCreated;
         }
     }
-
-    //create new symlink, if creation fails, skip
-    match dcontext.symlink(Path::new(&src_target), dest_path) {
-        Ok(_) => (),
-        Err(e) => {
-            let err = format!(
-                "Error {}, Could not create link from {:?} to {:?}",
-                e, dest_path, src_target
-            );
-            error!("{}", err);
-            outcome = SyncOutcome::SymlinkSkipped;
-        }
-    };
+    //create/update symlink, if creation fails, skip
+    if let Err(e) = dest_nfs_context.symlink(Path::new(&src_target), dest_path) {
+        let mess = LogMessage::ErrorType(
+            ErrorType::FSError,
+            format!("Error {}, could not create link from {:?} to {:?}", e, dest_path, src_target),
+        );
+        send_mess(mess, log_output)?;
+        outcome = SyncOutcome::SymlinkSkipped;
+    }
     Ok(outcome)
 }
 
-///
 /// read as much data from a file from the offset as possible in one pass
-///
-/// @param path     the path of the file
-///
-/// @param file     The file to be read
-///
-/// @param offset   The location where the read will start
-///
-/// @return         a vector of ubytes containing the data in the file
 ///
 /// @note           while this function will attempt to read BUFF_SIZE
 ///                 bytes from the file starting from offset, it is
 ///                 still possible that the actual number of bytes read is
 ///                 smaller.  Be sure to check the length of the returned
 ///                 vector for the true number of bytes read
-///
 fn read_chunk(path: &Path, file: &FileType, offset: u64) -> ForkliftResult<Vec<u8>> {
     match file.read(BUFF_SIZE, offset) {
         Ok(buf) => Ok(buf),
         Err(e) => {
             let err = format!("Error {:?}, Could not read from {:?}", e, path,);
-            error!("{}", err);
             Err(ForkliftError::FSError(err))
         }
     }
 }
 
-///
 /// open the file at path in context.
 ///
-/// @param path     the path of the file to be opened
-///
-/// @param context  the filesystem context of the file
-///
-/// @param flags    the flags used when opening the file
-///
-/// @param error    the error message should the file fail to open
-///
-/// @return         a FileType containing the opened file
-///
-/// @note           since mode is never used, we can set mode to be anything
-///
+/// @note since mode is never used, we can set mode to be anything
 fn open_file(
     path: &Path,
-    context: &mut NetworkContext,
+    context: &mut ProtocolContext,
     flags: OFlag,
     error: &str,
 ) -> ForkliftResult<FileType> {
@@ -615,149 +425,97 @@ fn open_file(
         Ok(f) => Ok(f),
         Err(e) => {
             let err = format!("Error {}, {}", e, error);
-            error!("{}", err);
             Err(ForkliftError::FSError(err))
         }
     }
 }
 
-///
 /// write buffer to the file at path starting at the offset
-///
-/// @param path     the path of the file to be written to
-///
-/// @param file     the FileType holding the file to be
-///                 written to
-///
-/// @param buffer   the vector containing the bytes to be
-///                 written
-///
-/// @param offset   the place in file where the write starts
-///
-/// @return         the number of bytes written to the file
-///                 is returned
 ///
 /// @note           sometimes the size of the input buffer is too
 ///                 big to write, so we can check the num written
 ///                 against the size of the buffer to see if we
 ///                 need to write again
-///
 fn write_file(path: &Path, file: &FileType, buffer: &[u8], offset: u64) -> ForkliftResult<u64> {
     match file.write(buffer, offset) {
         Ok(n) => Ok(n),
         Err(e) => {
             let err = format!("Error {}, Could not write to {:?}", e, path);
-            error!("{}", err);
             Err(ForkliftError::FSError(err))
         }
     }
 }
-
-///
-/// copy an entry from source to destination
-///
-/// @param src          Source file entry
-///
-/// @param dest         Dest file entry
-///
-/// @param src_context  the context of the source filesystem
-///
-/// @param dest_context the context of the destination filesystem
-///
-/// @return             the sync outcome File Copied or an error
-///
-fn copy_entry(
-    src: &Entry,
-    dest: &Entry,
-    src_context: &mut NetworkContext,
-    dest_context: &mut NetworkContext,
-) -> ForkliftResult<SyncOutcome> {
-    //check if src exists (which it should...)
-    let (src_path, dest_path) = (src.path(), dest.path());
-    if src.metadata().is_none() {
-        let err = format!("Source file {:?} should exist!", src_path);
-        error!("{}", err);
-        return Err(ForkliftError::FSError(err));
-    };
-    let err = format!("Could not open {:?} for reading", dest_path);
-    let src_file = open_file(src_path, src_context, OFlag::empty(), &err)?;
-    let flags = OFlag::O_CREAT;
-    let dest_file = match dest_context.create(
-        &dest_path,
-        flags,
-        Mode::S_IRWXU | Mode::S_IRWXO | Mode::S_IRWXG,
-    ) {
-        Ok(f) => f,
-        Err(e) => {
-            trace!("Error {:?}", e);
-            let err = format!("Could not open {:?} for writing", dest_path);
-            return Err(ForkliftError::FSError(err));
-        }
-    };
-
-    let mut offset = 0;
-    let mut end = false;
-    while { !end } {
-        let buffer = read_chunk(src_path, &src_file, offset)?;
-        let num_written = write_file(dest_path, &dest_file, &buffer, offset)?;
-        if num_written == 0 {
-            end = true;
-        }
-        offset += num_written as u64;
-        //INSERT PROGRESS MESSAGE HERE
-        //SEND PROGRESS
+/// helper for checksum copy; creates a new file at path
+fn file_create(path: &Path, context: &mut ProtocolContext, err: &str) -> ForkliftResult<FileType> {
+    match context.create(&path, OFlag::O_CREAT, Mode::S_IRWXU | Mode::S_IRWXO | Mode::S_IRWXG) {
+        Ok(f) => Ok(f),
+        Err(e) => Err(ForkliftError::FSError(format!("Error {}, {}", e, err))),
     }
-    Ok(SyncOutcome::FileCopied)
 }
 
-///
+/// helper for checksum copy; hash a buffer of bytes to a checksum vec of bytes
+fn hash(buf: &[u8], hasher: &mut MeowHasher) -> Vec<u8> {
+    hasher.input(buf);
+    hasher.result_reset().as_slice().to_vec()
+}
+
+/// helper for checksum copy; trucate a buffer to the number written and append to total
+fn update_buffer(buf: &mut Vec<u8>, total_buf: &mut Vec<u8>, num_written: u64) {
+    buf.truncate(num_written as usize);
+    total_buf.append(buf);
+}
+/// Send progress and log errors
+fn send_progress(
+    progress: ProgressMessage,
+    progress_output: &Sender<ProgressMessage>,
+    log_output: &Sender<LogMessage>,
+) -> ForkliftResult<()> {
+    if progress_output.send(progress).is_err() {
+        let mess = LogMessage::ErrorType(
+            ErrorType::CrossbeamChannelError,
+            "Unable to send progress".to_string(),
+        );
+        send_mess(mess, log_output)?;
+    }
+    Ok(())
+}
 /// checksums a destination file, copying over the data from the src file in the chunks
-/// where checksum fails
-///
-/// @param src          Source file entry
-///
-/// @param dest         Dest file entry
-///
-/// @param src_context  the context of the source filesystem
-///
-/// @param dest_context the context of the destination filesystem
-///
-/// @return             the sync outcome File Updated or Up To Date,
-///                     otherwise an error occured
-///
+/// where checksum fails. is_copy is used to determine if file copy or checksum copy
 pub fn checksum_copy(
     src: &Entry,
     dest: &Entry,
-    src_context: &mut NetworkContext,
-    dest_context: &mut NetworkContext,
+    src_context: &mut ProtocolContext,
+    dest_context: &mut ProtocolContext,
+    is_copy: bool,
+    progress_output: &Sender<ProgressMessage>,
+    log_output: &Sender<LogMessage>,
 ) -> ForkliftResult<SyncOutcome> {
     let (src_path, dest_path) = (src.path(), dest.path());
-    //check if src exists (which it should...)
-    if src.metadata().is_none() {
-        let err = format!("Source file {:?} should exist", src_path);
-        error!("{}", err);
-        return Err(ForkliftError::FSError(err));
+    let size = match src.metadata() {
+        Some(m) => m.size(),
+        None => {
+            return Err(ForkliftError::FSError(format!("Source file {:?} should exist!", src_path)));
+        }
     };
     // open src and dest files
-    let err = format!("Could not open {:?} for reading", dest_path);
-    let src_file = open_file(src_path, src_context, OFlag::O_RDONLY, &err)?;
-    let flags = OFlag::O_CREAT;
-    let dest_file = open_file(dest_path, dest_context, flags, &err)?;
-
+    let src_err = format!("Could not open {:?} for reading", src_path);
+    let dest_err = format!("could not open {:?} for writing", dest_path);
+    let src_file = open_file(src_path, src_context, OFlag::empty(), &src_err)?;
+    let dest_file = if is_copy {
+        file_create(&dest_path, dest_context, &dest_err)?
+    } else {
+        open_file(dest_path, dest_context, OFlag::O_CREAT, &dest_err)?
+    };
     //loop until end, count the number of times we needed to update the file
+    let (mut src_total, mut dest_total): (Vec<u8>, Vec<u8>) = (vec![], vec![]);
     let (mut offset, mut counter) = (0, 0);
-    let mut meowhash = MeowHasher::new();
-    let mut end = false;
-    let mut file_buf: Vec<u8> = vec![];
-    while { !end } {
+    let mut hasher = MeowHasher::new();
+    let path = src_path.to_string_lossy().to_string();
+    loop {
         let mut num_written = 0;
         let mut src_buf = read_chunk(src_path, &src_file, offset)?;
-        meowhash.input(&src_buf);
-        let hash_src = meowhash.result_reset();
-        let dest_buf = read_chunk(dest_path, &dest_file, offset)?;
-        meowhash.input(&dest_buf);
-        let hash_dest = meowhash.result_reset();
-
+        let mut dest_buf = read_chunk(dest_path, &dest_file, offset)?;
+        let (hash_src, hash_dest) = (hash(&src_buf, &mut hasher), hash(&dest_buf, &mut hasher));
         if hash_src != hash_dest {
             if src_buf.len() < dest_buf.len() {
                 dest_file.truncate(src_buf.len() as u64)?;
@@ -765,64 +523,72 @@ pub fn checksum_copy(
             //write src_buf -> dest
             num_written = write_file(dest_path, &dest_file, &src_buf, offset)?;
             counter += 1;
+            dest_buf = read_chunk(dest_path, &dest_file, offset)?;
         }
-        //update offset, add bytes to file_buf and check if num_written > 0
+        //update offset, add bytes to file_bufs and check if num_written > 0
         if num_written > 0 {
-            src_buf.truncate(num_written as usize);
-            file_buf.append(&mut src_buf);
+            update_buffer(&mut src_buf, &mut src_total, num_written);
+            update_buffer(&mut dest_buf, &mut dest_total, num_written);
             offset += num_written - 1;
         } else {
-            file_buf.append(&mut src_buf);
+            update_buffer(&mut src_buf, &mut src_total, num_written);
             offset += src_buf.len() as u64;
         }
         if src_buf.is_empty() {
-            end = true;
+            break;
         }
+        //send progress
+        let progress = ProgressMessage::CheckSyncing {
+            description: path.clone(),
+            size: size as usize,
+            done: offset as usize,
+        };
+        send_progress(progress, progress_output, log_output)?;
     }
-    meowhash.input(&file_buf);
-    // NOTE: send this value for final check
-    let _whole_checksum = meowhash.result();
+    let (src_check, dest_check) = (hash(&src_total, &mut hasher), hash(&dest_total, &mut hasher));
+    if src_check != dest_check {
+        return Err(ForkliftError::ChecksumError(format!(
+            "{} has source checksum {:?}, destination checksum {:?}",
+            path, src_check, dest_check
+        )));
+    }
     if counter == 0 {
         return Ok(SyncOutcome::UpToDate);
     }
-    Ok(SyncOutcome::ChecksumUpdated)
+    if is_copy {
+        Ok(SyncOutcome::FileCopied(path, src_check, dest_check, size, current_time()))
+    } else {
+        Ok(SyncOutcome::ChecksumUpdated(path, src_check, dest_check, size, current_time()))
+    }
 }
 
-///don't forget to add a progress sender at some point......
-///Also update the function once you add progress sending...
-///
 /// syncs the src and dest files.  It also sends the current progress
 /// of the rsync of the entry.
 ///
-/// @param src          Source file entry
-///
-/// @param dest         Dest file entry
-///
-/// @param src_context  the context of the source filesystem
-///
-/// @param dest_context the context of the destination filesystem
-///
-/// @return             the outcome of the entry rsync (or a ForkliftError if it fails)
-///
+/// @note                   no destination => FileCopied, diff size => File Copied
+///                         diff srctime more recent => File Copied
+///                         Otherwise, checksum copy
 pub fn sync_entry(
     src: &Entry,
     dest: &Entry,
-    src_context: &mut NetworkContext,
-    dest_context: &mut NetworkContext,
+    src_context: &mut ProtocolContext,
+    dest_context: &mut ProtocolContext,
+    progress_output: &Sender<ProgressMessage>,
+    log_output: &Sender<LogMessage>,
 ) -> ForkliftResult<SyncOutcome> {
+    let description = src.path().to_string_lossy().into_owned();
+    send_progress(ProgressMessage::StartSync(description), progress_output, log_output)?;
     match src.is_link() {
         Some(true) => {
             trace!("Is link!");
-            return copy_link(src, dest, src_context, dest_context);
+            return copy_link(src, dest, src_context, dest_context, log_output);
         }
         Some(false) => (),
         None => {
             let err = format!("Source file {:?} is_link should not be None!", src.path());
-            error!("{}", err);
             return Err(ForkliftError::FSError(err));
         }
     }
-
     match src.is_dir() {
         Some(true) => {
             trace!("Is directory!");
@@ -831,40 +597,51 @@ pub fn sync_entry(
         Some(false) => (),
         None => {
             let err = format!("Source file {:?} is_dir should not be None!", src.path());
-            error!("{}", err);
             return Err(ForkliftError::FSError(err));
         }
     }
-
     //check if size different or if src more recent than dest
-    match (has_different_size(src, dest), is_more_recent(src, dest)) {
-        (Ok(size_dif), Ok(recent)) => {
+    match (dest.metadata(), has_different_size(src, dest), is_more_recent(src, dest)) {
+        (None, _, _) => {
+            debug!("Destination does not exist yet!");
+            checksum_copy(src, dest, src_context, dest_context, true, progress_output, log_output)
+        }
+        (Some(_), Ok(size_dif), Ok(recent)) => {
+            debug!("Is different!!! size {}  recent {}", size_dif, recent);
             if size_dif || recent {
-                debug!("Is different!!! size {}  recent {}", size_dif, recent);
-                copy_entry(src, dest, src_context, dest_context)
+                checksum_copy(
+                    src,
+                    dest,
+                    src_context,
+                    dest_context,
+                    true,
+                    progress_output,
+                    log_output,
+                )
             } else {
-                debug!("not diff {} {}", size_dif, recent);
-                checksum_copy(src, dest, src_context, dest_context)
+                checksum_copy(
+                    src,
+                    dest,
+                    src_context,
+                    dest_context,
+                    false,
+                    progress_output,
+                    log_output,
+                )
             }
         }
-        (Err(e), _) => Err(e),
-        (_, Err(e)) => Err(e),
+        (_, Err(e), _) => Err(e),
+        (_, _, Err(e)) => Err(e),
     }
 }
 
-///
 /// given a source sid, check through a list of destination acls for the acl
 /// with the matching destination sid, remove it from the list and return it
-///
-/// @param check_sid    the source sid to check for
-///
-/// @param dest_acls    the list of destination acls
 ///
 /// @return             return Some<ACE>, where ACE is the acl in the list
 ///                     of destination acls with the same sid as check_sid
 ///                     otherwise if dest_acls does not have an acl with the
 ///                     input sid
-///
 fn check_acl_sid_remove(check_sid: &Sid, dest_acls: &mut Vec<SmbcAclValue>) -> Option<ACE> {
     for (count, dest_acl) in dest_acls.iter().enumerate() {
         if let SmbcAclValue::Acl(ACE::Numeric(
@@ -876,35 +653,18 @@ fn check_acl_sid_remove(check_sid: &Sid, dest_acls: &mut Vec<SmbcAclValue>) -> O
         {
             trace!("Sid to check {}, dest sid {}", *check_sid, &dest_sid);
             if check_sid == dest_sid {
-                let ret = ACE::Numeric(
-                    SidType::Numeric(Some(dest_sid.clone())),
-                    atype.clone(),
-                    *flag,
-                    *mask,
-                );
+                let sid = SidType::Numeric(Some(dest_sid.clone()));
+                let return_ace = ACE::Numeric(sid, atype.clone(), *flag, *mask);
                 dest_acls.remove(count);
-                return Some(ret);
+                return Some(return_ace);
             }
         }
     }
     None
 }
 
-///
 /// Change the Dos Mode Attribute of the destination file to match
 /// the source Dos Mode Attribute
-///
-/// @param src_path     the path to the source file
-///
-/// @param dest_path    the path to the destination file
-///
-/// @param src_ctx      the Samba context of the source filesystem
-///
-/// @param dest_ctx     the Samba context of the destination filesystem
-///
-/// @return             Nothing, or an error should any of the xattr
-///                     functions fail.
-///
 fn change_mode(
     src_path: &Path,
     dest_path: &Path,
@@ -920,45 +680,25 @@ fn change_mode(
     let dosmode = match xattr_parser(CompleteByteSlice(&m)) {
         Ok((_, mode)) => mode,
         Err(e) => {
-            let err = format!(
-                "Error {}, unable to parse xattr from file {:?}",
-                e, src_path
-            );
-            error!("{}", err);
+            let err = format!("Error {}, unable to parse xattr from file {:?}", e, src_path);
             return Err(ForkliftError::FSError(err));
         }
     };
     trace!("dosmode src is {:?}", &dosmode);
-    let err = format!(
-        "unable to set dos mode {} for file {:?}",
-        &dosmode, dest_path
-    );
+    let err = format!("unable to set dos mode {} for file {:?}", &dosmode, dest_path);
     let suc = format!("set file {:?} dosmode to {}", dest_path, &dosmode);
 
     set_xattr(dest_path, dest_ctx, &mode_xattr, &dosmode, &err, &suc)?;
     Ok(())
 }
 
-///
 /// get the numeric destination SID corresponding to a named
 /// source SID.
-///
-/// @param dest_path The path of the file whose acl's you are checking
-///
-/// @param sid  The named source SID
-///
-/// @param dest_acls_plus A vector of all of the destination acls named
-///
-/// @param dest_ctx The filesystem context of the destination filesystem
-///
-/// @return Option<Sid>  Some(SID) if a matching SID was found, NONE if
-///                      the file does not have a named equivalent ACL.
-///
 fn get_mapped_sid(
     dest_path: &Path,
+    dest_ctx: &Smbc,
     sid: &str,
     dest_acls_plus: &[SmbcAclValue],
-    dest_ctx: &Smbc,
 ) -> ForkliftResult<Option<Sid>> {
     for (count, ace) in dest_acls_plus.iter().enumerate() {
         if let SmbcAclValue::AclPlus(ACE::Named(SidType::Named(Some(dest_sid)), _, _, _)) = ace {
@@ -978,21 +718,9 @@ fn get_mapped_sid(
     Ok(None)
 }
 
-///
 /// Temporarily map a named acl from the source filesystem to a file at dest_path
 /// in order to determine the numeric equivalent of the mapped sid in the destination
 /// file, then remove the temporary acl
-///
-/// @param dest_apth    the path do the destination file
-///
-/// @param dest_ctx     the Samba context of the destination filesystem
-///
-/// @param sid          the named source acl to map
-///
-/// @return             the numeric sid of the mapped source sid
-///                     return a forklift error should any of the xattr
-///                     functions fail.
-///
 fn map_temp_acl(dest_path: &Path, dest_ctx: &Smbc, sid: &str) -> ForkliftResult<Sid> {
     let temp_ace = ACE::Named(
         SidType::Named(Some(sid.to_string())),
@@ -1007,43 +735,26 @@ fn map_temp_acl(dest_path: &Path, dest_ctx: &Smbc, sid: &str) -> ForkliftResult<
     set_xattr(dest_path, dest_ctx, &xattr_set, &val, &err, &suc)?;
 
     let dest_acls = get_acl_list(dest_path, dest_ctx, true)?;
-    let ret = match get_mapped_sid(dest_path, &sid, &dest_acls, dest_ctx) {
+    let return_sid = match get_mapped_sid(dest_path, dest_ctx, &sid, &dest_acls) {
         Ok(Some(dest_sid)) => dest_sid,
         Ok(None) => {
             let err = format!("Unsucessful in mapping sid {}", &sid);
-            error!("{}", err);
             return Err(ForkliftError::FSError(err));
         }
         Err(e) => return Err(e),
     };
-    match dest_ctx.removexattr(
-        dest_path,
-        &SmbcXAttr::AclAttr(SmbcAclAttr::AclPlus(temp_ace)),
-    ) {
-        Ok(_) => debug!("removing temp acl success"),
-        Err(e) => {
-            let err = format!("Error {}, failed to remove temp acl", e);
-            error!("{}", err);
-            return Err(ForkliftError::FSError(err));
-        }
+    if let Err(e) =
+        dest_ctx.removexattr(dest_path, &SmbcXAttr::AclAttr(SmbcAclAttr::AclPlus(temp_ace)))
+    {
+        let err = format!("Error {}, failed to remove temp acl", e);
+        return Err(ForkliftError::FSError(err));
     }
-    Ok(ret)
+    debug!("removing temp acl success");
+    Ok(return_sid)
 }
 
-///
 /// remove the old acl from the destiation file and set a new one to replace
 /// it with a new acl
-///
-/// @param dest_path    the destination file we are replacing the acls of
-///
-/// @param dest_ctx     the destination Samba context of the filesystem
-///
-/// @param new_acl      the acl we are replace the old one with
-///
-/// @param old_acl      the acl we are replacing
-///
-/// @return             nothing, or an error should remove or set xattr fail
-///
 fn replace_acl(
     dest_path: &Path,
     dest_ctx: &Smbc,
@@ -1051,20 +762,14 @@ fn replace_acl(
     old_acl: &ACE,
 ) -> ForkliftResult<()> {
     //remove the old acl first
-    match dest_ctx.removexattr(
-        dest_path,
-        &SmbcXAttr::AclAttr(SmbcAclAttr::Acl(old_acl.clone())),
-    ) {
-        Ok(_) => trace!("Removed old acl {}", old_acl),
-        Err(e) => {
-            let err = format!(
-                "Error {}, failed to remove the old acl {} from {:?}",
-                e, old_acl, dest_path
-            );
-            error!("{}", err);
-            return Err(ForkliftError::FSError(err));
-        }
+    if let Err(e) =
+        dest_ctx.removexattr(dest_path, &SmbcXAttr::AclAttr(SmbcAclAttr::Acl(old_acl.clone())))
+    {
+        let err =
+            format!("Error {}, failed to remove the old acl {} from {:?}", e, old_acl, dest_path);
+        return Err(ForkliftError::FSError(err));
     };
+    trace!("Removed old acl {}", old_acl);
     //set new acl
     let xattr = SmbcXAttr::AclAttr(SmbcAclAttr::AclNone);
     let val = SmbcXAttrValue::Ace(new_acl.clone());
@@ -1074,21 +779,10 @@ fn replace_acl(
     Ok(())
 }
 
-///
 /// map the named source sid to a numeric destination sid
-///
-/// @param dest_path    the path of the destination file
-///
-/// @param dest_ctx     the Samba context of the destination filesystem
-///
-/// @param sid          the named source sid
-///
-/// @return             return the mapped Sid, or an Error should
-///                     the mapping fail
-///
 fn map_name(dest_path: &Path, dest_ctx: &Smbc, sid: &str) -> ForkliftResult<Sid> {
     let destplus = get_acl_list(dest_path, dest_ctx, true)?;
-    match get_mapped_sid(dest_path, &sid, &destplus, dest_ctx) {
+    match get_mapped_sid(dest_path, dest_ctx, &sid, &destplus) {
         //add the acl to the file and call get_mapped_sid again
         Ok(None) => Ok(map_temp_acl(dest_path, dest_ctx, &sid)?),
         //the acl is in, map a to the returned sid
@@ -1097,20 +791,7 @@ fn map_name(dest_path: &Path, dest_ctx: &Smbc, sid: &str) -> ForkliftResult<Sid>
     }
 }
 
-///
 /// Copy the acl from source to destination if they are different
-///
-/// @param dest_path    The destination filepath
-///
-/// @param dest_ctx     The Samba context of the destination filesystem
-///
-/// @param src          The ACE parts of the source acl
-///
-/// @param dest         The ACE parts of the destination acl
-///
-/// @return bool        return true if an acl was copied, false if not
-///                     otherwise, there was an error in the copy process
-///
 fn copy_if_diff(
     dest_path: &Path,
     dest_ctx: &Smbc,
@@ -1131,21 +812,8 @@ fn copy_if_diff(
     Ok(false)
 }
 
-///
 /// check if a source acl needs to be copied to the destination
 /// if yes, copy the file, otherwise do nothing
-///
-/// @param dest_path    The destination filepath
-///
-/// @param dest_ctx     The Samba context of the destination filesystem
-///
-/// @param src          The ACE parts of the source acl
-///
-/// @param dest_acls    The list of destination acls
-///
-/// @return bool        return true if an acl was copied, false if not
-///                     otherwise, there was an error in the copy process
-///
 fn copy_acl(
     dest_path: &Path,
     dest_ctx: &Smbc,
@@ -1165,18 +833,15 @@ fn copy_acl(
             trace!("New Acl {:?}", new_acl);
             let xattr_set = SmbcXAttr::AclAttr(SmbcAclAttr::AclNone);
             let val = SmbcXAttrValue::Ace(new_acl);
-            let err = "failed to copy new acl";
-            let suc = "Copied new acl";
+            let (err, suc) = ("failed to copy new acl", "Copied new acl");
             set_xattr(dest_path, dest_ctx, &xattr_set, &val, err, suc)?;
             Ok(true)
         }
     }
 }
 
-///
 /// map named acl Sids from a source file to their destinarion numeric Sids
 /// then replace the incorrect destination acls with the source acls
-///
 pub fn map_names_and_copy(
     dest_path: &Path,
     dest_ctx: &Smbc,
@@ -1184,21 +849,14 @@ pub fn map_names_and_copy(
     src_acls_plus: &[SmbcAclValue],
     dest_acls: &mut Vec<SmbcAclValue>,
 ) -> ForkliftResult<bool> {
-    let mut map = match NAME_MAP.lock() {
+    let mut map = match SID_NAME_MAP.lock() {
         Ok(hm) => hm,
         Err(_) => {
-            return Err(ForkliftError::FSError(
-                "Could not get sid name map".to_string(),
-            ))
+            return Err(ForkliftError::FSError("Could not get sid name map".to_string()));
         }
     };
-    trace!(
-        "ACLS:\nSRC: {:?}\n\nDEST {:?}\n",
-        &src_acls_plus,
-        &dest_acls
-    );
-    let (mut copied, mut count) = (false, 0);
-    let mut creator_reached = false;
+    trace!("ACLS:\nSRC: {:?}\n\nDEST {:?}\n", &src_acls_plus, &dest_acls);
+    let (mut copied, mut creator_reached, mut count) = (false, false, 0);
     for src_acl in src_acls_plus {
         match (src_acl.clone(), src_acls[count].clone()) {
             (
@@ -1215,19 +873,15 @@ pub fn map_names_and_copy(
                 };
                 trace!("Sid: {}, mapped: {}", sid, mapped);
                 //if reached "CREATOR" sids, ignore the rest
+                let temp_ace = (mapped.clone(), atype, aflags, mask);
                 if !creator_reached {
-                    copied = copy_acl(
-                        dest_path,
-                        dest_ctx,
-                        (mapped.clone(), atype, aflags, mask),
-                        dest_acls,
-                    )?;
+                    copied = copy_acl(dest_path, dest_ctx, temp_ace, dest_acls)?;
                 }
             }
-            (_, _) => {
+            (..) => {
                 return Err(ForkliftError::FSError(
                     "input src acls are not formatted correctly!!".to_string(),
-                ))
+                ));
             }
         }
         count += 1;
@@ -1238,67 +892,46 @@ pub fn map_names_and_copy(
                 //if not \\CREATOR Owner or Creator Group
                 if !(dest_sid == Sid(vec![3, 0]) || dest_sid == Sid(vec![3, 1])) {
                     let ace = ACE::Numeric(SidType::Numeric(Some(dest_sid)), a, f, m);
-                    match dest_ctx.removexattr(
-                        dest_path,
-                        &SmbcXAttr::AclAttr(SmbcAclAttr::Acl(ace.clone())),
-                    ) {
-                        Ok(_) => debug!("Removed extra acl {}", ace),
-                        Err(e) => {
-                            let err = format!(
-                                "Error {}, failed to remove the old acl {} from {:?}",
-                                e, ace, dest_path
-                            );
-                            error!("{}", err);
-                            return Err(ForkliftError::FSError(err));
-                        }
+                    if let Err(e) = dest_ctx
+                        .removexattr(dest_path, &SmbcXAttr::AclAttr(SmbcAclAttr::Acl(ace.clone())))
+                    {
+                        let err = format!(
+                            "Error {}, failed to remove the old acl {} from {:?}",
+                            e, ace, dest_path
+                        );
+                        return Err(ForkliftError::FSError(err));
                     }
+                    debug!("Removed extra acl {}", ace);
                 }
             }
             _ => {
                 return Err(ForkliftError::FSError(
                     "input dest acls are not formatted correctly!".to_string(),
-                ))
+                ));
             }
         }
     }
     Ok(copied || !dest_acls.is_empty())
 }
 
-///
 /// get list of acl values
-///
-/// @param path the path of the file to grab the xattrs from
-///
-/// @param ctx  the context of the filesystem
-///
-/// @param plus boolean value denoting whether the returned list is named
-///             or numeric
-///
-/// @return     return the list of acls of the input file
-///
+/// plus denotes whether the returned list is named or numeric
 pub fn get_acl_list(path: &Path, fs: &Smbc, plus: bool) -> ForkliftResult<Vec<SmbcAclValue>> {
     let err = format!("unable to get acls from {:?}", path);
     let suc = "acl all get success";
-    let mut acls = {
-        if plus {
-            let acl_plus_xattr = SmbcXAttr::AclAttr(SmbcAclAttr::AclAllPlus);
-            get_xattr(path, fs, &acl_plus_xattr, &err, suc)?
-        } else {
-            let acl_xattr = SmbcXAttr::AclAttr(SmbcAclAttr::AclAll);
-            get_xattr(path, fs, &acl_xattr, &err, &suc)?
-        }
+    let mut acls = if plus {
+        let acl_plus_xattr = SmbcXAttr::AclAttr(SmbcAclAttr::AclAllPlus);
+        get_xattr(path, fs, &acl_plus_xattr, &err, suc)?
+    } else {
+        let acl_xattr = SmbcXAttr::AclAttr(SmbcAclAttr::AclAll);
+        get_xattr(path, fs, &acl_xattr, &err, &suc)?
     };
-
     acls.pop();
     let acl_list = match xattr_parser(CompleteByteSlice(&acls)) {
         Ok((_, acl_list)) => acl_list,
         Err(e) => {
-            let err = format!(
-                "Error {}, unable to parse acls {}",
-                e,
-                String::from_utf8_lossy(&acls)
-            );
-            error!("{}", err);
+            let err =
+                format!("Error {}, unable to parse acls {}", e, String::from_utf8_lossy(&acls));
             return Err(ForkliftError::FSError(err));
         }
     };
@@ -1308,79 +941,42 @@ pub fn get_acl_list(path: &Path, fs: &Smbc, plus: bool) -> ForkliftResult<Vec<Sm
     }
 }
 
-///
 /// change the destination linux stat mode to that of the source file
-///
-/// @param path     the path to the destination file
-///
-/// @param context  the filesystem context of the destination file
-///
-/// @param mode     the source mode
-///
-/// @return         Nothing if successful, otherwise an error is raised
-///
 /// @note           In a Samba Context, chmod will change the Dos Mode
 ///                 (it's necessary for Normal Dos Mode, otherwise
 ///                 a normal Dos Mode will be treated as an Archive file)
 ///                 However, it may not change the linux stat mode
 ///                 correctly (depends on your config file, see Smbc for
 ///                 details)
-///
-fn change_stat_mode(path: &Path, context: &NetworkContext, mode: u32) -> ForkliftResult<()> {
-    match context.chmod(path, Mode::from_bits_truncate(mode)) {
-        Ok(_) => {
-            debug!("Chmod of file {:?} to {} ran", path, mode);
-            Ok(())
-        }
-        Err(e) => {
-            let err = format!("Error {}, mode {:?}", e, Mode::from_bits_truncate(mode));
-            error!("{}", err);
-            Err(ForkliftError::FSError(err))
-        }
+fn change_stat_mode(path: &Path, context: &ProtocolContext, mode: u32) -> ForkliftResult<()> {
+    if let Err(e) = context.chmod(path, Mode::from_bits_truncate(mode)) {
+        let err = format!("Error {}, mode {:?}", e, Mode::from_bits_truncate(mode));
+        return Err(ForkliftError::FSError(err));
     }
+    debug!("Chmod of file {:?} to {} ran", path, mode);
+    Ok(())
 }
 
-///
 /// Copy the source permissions to the destination file and return the
 /// current status of the rsync (specifically of the permissions)
-///
-/// @param src          Source file entry
-///
-/// @param dest         Dest file entry
-///
-/// @param src_context  the context of the source filesystem
-///
-/// @param dest_context the context of the destination filesystem
-///
-/// @return             the outcome of the permission rsync (or a ForkliftError if it fails)
-///
 pub fn copy_permissions(
     src: &Entry,
     dest: &Entry,
-    src_context: &NetworkContext,
-    dest_context: &NetworkContext,
+    src_context: &ProtocolContext,
+    dest_context: &ProtocolContext,
 ) -> ForkliftResult<SyncOutcome> {
     let src_mode = match (src.is_link(), src.metadata()) {
-        (Some(true), _) => return Ok(SyncOutcome::UpToDate),
-        (None, _) => {
-            let err = format!("is_link was None for {:?}", src.path());
-            error!("{}", err);
-            return Err(ForkliftError::FSError(err));
-        }
-        (_, None) => {
-            let err = format!("src file does not exist for {:?}", src.path());
-            error!("{}", err);
-            return Err(ForkliftError::FSError(err));
-        }
         (Some(false), Some(stat)) => stat.mode(),
+        (Some(true), _) => return Ok(SyncOutcome::UpToDate),
+        (..) => {
+            return Err(ForkliftError::FSError(format!("src {:?} does not exist", src.path())));
+        }
     };
-
     let (src_path, dest_path) = (src.path(), dest.path());
     let outcome;
-
     match (src_context, dest_context) {
         //stat mode diff
-        (NetworkContext::Nfs(_), NetworkContext::Nfs(_)) => {
+        (ProtocolContext::Nfs(_), ProtocolContext::Nfs(_)) => {
             match has_different_permissions(src, dest, src_context, dest_context) {
                 Ok(true) => {
                     change_stat_mode(dest_path, dest_context, src_mode)?;
@@ -1393,14 +989,11 @@ pub fn copy_permissions(
             }
         }
         //dos mode diff
-        (NetworkContext::Samba(src_ctx), NetworkContext::Samba(dest_ctx)) => {
-            let copied = map_names_and_copy(
-                dest_path,
-                dest_ctx,
-                &get_acl_list(src_path, src_ctx, false)?,
-                &get_acl_list(src_path, src_ctx, true)?,
-                &mut get_acl_list(dest_path, dest_ctx, false)?,
-            )?;
+        (ProtocolContext::Samba(src_ctx), ProtocolContext::Samba(dest_ctx)) => {
+            let src_acl = &get_acl_list(src_path, src_ctx, false)?;
+            let src_plus_acl = &get_acl_list(src_path, src_ctx, true)?;
+            let dest_acl = &mut get_acl_list(dest_path, dest_ctx, false)?;
+            let copied = map_names_and_copy(dest_path, dest_ctx, src_acl, src_plus_acl, dest_acl)?;
             match has_different_permissions(src, dest, src_context, dest_context) {
                 Ok(true) => {
                     trace!("src mode {}", src_mode);
@@ -1409,19 +1002,18 @@ pub fn copy_permissions(
                     outcome = SyncOutcome::PermissionsUpdated
                 }
                 Ok(false) => {
-                    if copied {
-                        outcome = SyncOutcome::PermissionsUpdated;
+                    outcome = if copied {
+                        SyncOutcome::PermissionsUpdated
                     } else {
-                        outcome = SyncOutcome::UpToDate
-                    }
+                        SyncOutcome::UpToDate
+                    };
                 }
                 Err(e) => {
                     return Err(e);
                 }
             }
         }
-        (_, _) => return Err(ForkliftError::FSError("Different contexts!".to_string())),
+        (..) => return Err(ForkliftError::FSError("Different contexts!".to_string())),
     }
-
     Ok(outcome)
 }
