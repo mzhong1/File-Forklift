@@ -25,39 +25,26 @@ lazy_static! {
 #[postgres(name = "ErrorType")]
 /// Usable ErrorTypes logged in Postgres
 pub enum ErrorType {
-    #[postgres(name = "IoError")]
-    IoError,
-    #[postgres(name = "SystemTimeError")]
-    SystemTimeError,
-    #[postgres(name = "NanomsgError")]
-    NanomsgError,
-    #[postgres(name = "AddrParseError")]
     AddrParseError,
-    #[postgres(name = "SmbcError")]
-    SmbcError,
-    #[postgres(name = "FromUtf16Error")]
-    FromUtf16Error,
-    #[postgres(name = "FromUtf8Error")]
-    FromUtf8Error,
-    #[postgres(name = "StringParseError")]
-    StringParseError,
-    #[postgres(name = "IpLocalError")]
-    IpLocalError,
-    #[postgres(name = "InvalidConfigError")]
-    InvalidConfigError,
-    #[postgres(name = "FSError")]
-    FSError,
-    #[postgres(name = "RecvError")]
-    RecvError,
-    #[postgres(name = "SerdeJsonError")]
-    SerdeJsonError,
-    #[postgres(name = "ChecksumError")]
     ChecksumError,
     CrossbeamChannelError,
-    PostgresError,
-    PoisonedMutexError,
-    TimeoutError,
+    FromUtf16Error,
+    FromUtf8Error,
+    FSError,
     HeartbeatError,
+    InvalidConfigError,
+    IoError,
+    IpLocalError,
+    NanomsgError,
+    PoisonedMutexError,
+    PostgresError,
+    ProtobufError,
+    RecvError,
+    SerdeJsonError,
+    SmbcError,
+    StringParseError,
+    SystemTimeError,
+    TimeoutError,
 }
 #[derive(Debug, Clone)]
 /// an ErrorLog table entry
@@ -106,6 +93,7 @@ impl ErrorLog {
             ForkliftError::TimeoutError(_) => ErrorType::TimeoutError,
             ForkliftError::HeartbeatError(_) => ErrorType::HeartbeatError,
             ForkliftError::CLIError(_) => ErrorType::InvalidConfigError,
+            ForkliftError::ProtobufError(_) => ErrorType::ProtobufError,
         };
         let reason = format!("{:?}", err);
         ErrorLog { failure_id, reason, timestamp }
@@ -241,7 +229,8 @@ pub fn init_errortypes(conn: &Connection) -> ForkliftResult<()> {
             'PostgresError',
             'PoisonedMutexError',
             'TimeoutError',
-            'HeartbeatError');
+            'HeartbeatError',
+            'ProtobufError');
             END IF;
         END
         $$",

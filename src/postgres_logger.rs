@@ -26,8 +26,8 @@ pub enum LogMessage {
 pub enum EndState {
     /// End the process
     EndProgram,
-    /// Rerun the program
-    Rerun,
+    // Rerun the program
+    //Rerun,
 }
 
 pub struct PostgresLogger {

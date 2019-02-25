@@ -1,4 +1,4 @@
-use self::api::service_generated::*;
+use self::api::service::*;
 use api;
 
 use crossbeam::channel::{Receiver, Sender};
@@ -106,7 +106,7 @@ impl Cluster {
         if request.get_fds()[0].can_write() && self.pulse.beat() {
             trace!("Send a GETLIST from {}", self.node_address);
             let msg =
-                message::create_message(MessageType::GETLIST, &[self.node_address.to_string()]);
+                message::create_message(MessageType::GETLIST, &[self.node_address.to_string()])?;
             self.send_message(&msg, "Getlist sent!")?;
         }
         Ok(())
@@ -122,7 +122,7 @@ impl Cluster {
     /// Do nothing if the GETLIST request is empty
     pub fn send_nodelist(&mut self, msg_body: &[String]) -> ForkliftResult<()> {
         let address_names = self.names.to_string_vector();
-        let msg = message::create_message(MessageType::NODELIST, &address_names);
+        let msg = message::create_message(MessageType::NODELIST, &address_names)?;
         self.is_valid_cluster()?;
         if !msg_body.is_empty() {
             match &msg_body[0].parse::<SocketAddr>() {
@@ -166,7 +166,7 @@ impl Cluster {
     pub fn send_heartbeat(&mut self) -> ForkliftResult<()> {
         debug!("Send a HEARTBEAT!");
         let buffer = vec![self.node_address.to_string()];
-        let msg = message::create_message(MessageType::HEARTBEAT, &buffer);
+        let msg = message::create_message(MessageType::HEARTBEAT, &buffer)?;
         self.send_message(&msg, "Heeartbeat sent!")?;
         Ok(())
     }
@@ -230,17 +230,6 @@ impl Cluster {
         Ok(buffer)
     }
 
-    /// read serialized message to Vec<String>
-    fn read_message(&self, msg: &[u8], err: &str) -> ForkliftResult<Vec<String>> {
-        match message::read_message(msg) {
-            Some(buf) => Ok(buf),
-            None => {
-                self.send_log(LogMessage::ErrorType(ErrorType::HeartbeatError, err.to_string()))?;
-                Ok(vec![])
-            }
-        }
-    }
-
     /// parse a NODELIST message into a list of nodes and create/add the nodes to the cluster
     /// @note: if has_nodelist is true, then exit without changing anything
     pub fn parse_nodelist_message(
@@ -254,7 +243,7 @@ impl Cluster {
             return Ok(());
         }
         debug!("Parse the NODELIST!");
-        let node_list = self.read_message(msg, "NODELIST message is empty")?;
+        let node_list = message::read_message(msg)?;
         for address in &node_list {
             match address.parse::<SocketAddr>() {
                 Ok(node) => {
@@ -322,8 +311,8 @@ impl Cluster {
         if request.get_fds()[0].can_read() {
             //check message type
             let msg = self.read_message_to_u8()?;
-            let msgtype = message::get_message_type(&msg);
-            let msg_body = self.read_message(&msg, "Message body is empty, Ifnore the message")?;
+            let msgtype = message::get_message_type(&msg)?;
+            let msg_body = message::read_message(&msg)?;
             match msgtype {
                 MessageType::NODELIST => {
                     debug!("Can read message of type NODELIST");

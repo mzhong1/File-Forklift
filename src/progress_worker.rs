@@ -35,7 +35,7 @@ impl ProgressWorker {
         let mut file_done;
         let mut current_file = "".to_string();
         let mut index = 0;
-        let mut total_done;
+        let mut total_done = 0;
         let now = Instant::now();
         for progress in self.input.iter() {
             match progress {
@@ -80,7 +80,7 @@ impl ProgressWorker {
                 }
                 ProgressMessage::CheckSyncing { done, size, .. } => {
                     file_done = done;
-                    total_done = done;
+                    total_done += done;
                     let elapsed = now.elapsed().as_secs() as usize;
                     let eta = if total_done == 0 {
                         elapsed

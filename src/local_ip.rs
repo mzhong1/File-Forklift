@@ -12,7 +12,7 @@ use std::io::{BufRead, BufReader, Result};
 use std::net::{SocketAddr, SocketAddrV4, SocketAddrV6};
 use std::path::Path;
 
-// get the default gateway ip address
+/// get the default gateway ip address
 fn get_default_v4_iface() -> Result<Option<String>> {
     let p = Path::new("/proc/net/route");
     trace!("Try to open path /proc/net/route");
@@ -67,7 +67,7 @@ pub fn get_ip(send_log: &Sender<LogMessage>) -> ForkliftResult<Option<SocketAddr
     Err(ForkliftError::IpLocalError("Could not determine local ip address".to_string()))
 }
 
-//get the ip in ipv6.
+/// get the ip in ipv6.
 pub fn get_ipv6() -> ForkliftResult<Option<SocketAddr>> {
     let default_iface = get_default_v4_iface()?;
     let default_iface = default_iface.unwrap();

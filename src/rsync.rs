@@ -93,7 +93,7 @@ pub struct Rsyncer {
     filesystem_type: FileSystemType,
     /// console ouput functions
     progress_info: Box<ProgressInfo + Send + Sync>,
-    /// channe to send postgres logs
+    /// channel to send postgres logs
     log_output: Sender<LogMessage>,
 }
 
@@ -183,7 +183,7 @@ impl Rsyncer {
         (level, num_threads): (DebugLevel, u32),
         (workgroup, username, password): (String, String, String),
         nodelist: Arc<Mutex<RendezvousNodes<SocketNode, DefaultNodeHasher>>>,
-        my_node: SocketNode,
+        current_node: SocketNode,
     ) -> ForkliftResult<()> {
         let auth = (workgroup, username, password);
         let (servers, shares) = ((src_ip, dest_ip), (src_share, dest_share));
@@ -195,7 +195,7 @@ impl Rsyncer {
         //create workers
         let (send_handles, syncers) = self.create_syncers(num_threads, &send_prog);
         let walk_worker =
-            WalkWorker::new(self.source.as_path(), my_node, nodelist, send_handles, send_prog);
+            WalkWorker::new(self.source.as_path(), current_node, nodelist, send_handles, send_prog);
         let progress_worker =
             ProgressWorker::new(src_share.to_string(), self.progress_info, rec_prog);
         rayon::spawn(move || {
