@@ -8,7 +8,7 @@ use self::api::service::Message;
 use self::api::service::*;
 use crate::error::*;
 /// create a new message to send
-pub fn create_message(m_type: MessageType, message: &[String]) -> Vec<u8> {
+pub fn create_message(m_type: MessageType, message: &[String]) -> ForkliftResult<Vec<u8>> {
     trace!("Creating Message {:?} with body {:?}", m_type, message);
     let mut new_message = Message::new();
     let v = RepeatedField::from_slice(message);
@@ -16,7 +16,7 @@ pub fn create_message(m_type: MessageType, message: &[String]) -> Vec<u8> {
     new_message.set_members(v);
     new_message.set_mtype(m_type);
     trace!("Set all Message fields");
-    new_message.write_to_bytes().unwrap() //handle this later
+    Ok(new_message.write_to_bytes()?) //handle this later
 }
 
 /// read a serialized message to a vector of string

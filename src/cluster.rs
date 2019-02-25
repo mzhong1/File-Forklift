@@ -106,7 +106,7 @@ impl Cluster {
         if request.get_fds()[0].can_write() && self.pulse.beat() {
             trace!("Send a GETLIST from {}", self.node_address);
             let msg =
-                message::create_message(MessageType::GETLIST, &[self.node_address.to_string()]);
+                message::create_message(MessageType::GETLIST, &[self.node_address.to_string()])?;
             self.send_message(&msg, "Getlist sent!")?;
         }
         Ok(())
@@ -122,7 +122,7 @@ impl Cluster {
     /// Do nothing if the GETLIST request is empty
     pub fn send_nodelist(&mut self, msg_body: &[String]) -> ForkliftResult<()> {
         let address_names = self.names.to_string_vector();
-        let msg = message::create_message(MessageType::NODELIST, &address_names);
+        let msg = message::create_message(MessageType::NODELIST, &address_names)?;
         self.is_valid_cluster()?;
         if !msg_body.is_empty() {
             match &msg_body[0].parse::<SocketAddr>() {
@@ -166,7 +166,7 @@ impl Cluster {
     pub fn send_heartbeat(&mut self) -> ForkliftResult<()> {
         debug!("Send a HEARTBEAT!");
         let buffer = vec![self.node_address.to_string()];
-        let msg = message::create_message(MessageType::HEARTBEAT, &buffer);
+        let msg = message::create_message(MessageType::HEARTBEAT, &buffer)?;
         self.send_message(&msg, "Heeartbeat sent!")?;
         Ok(())
     }
