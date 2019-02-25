@@ -40,9 +40,9 @@ impl WalkWorker {
 
     /// stop all senders, ending walk
     pub fn stop(&self) -> ForkliftResult<()> {
-        for s in self.entry_outputs.iter() {
+        for output in self.entry_outputs.iter() {
             // Stop all the senders
-            if s.send(None).is_err() {
+            if output.send(None).is_err() {
                 return Err(ForkliftError::CrossbeamChannelError(
                     "Error, channel disconnected, unable to stop rsync_worker".to_string(),
                 ));
