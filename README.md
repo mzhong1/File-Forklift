@@ -33,8 +33,7 @@ Fields for this file are:
     "database_url": "postgresql://postgres:meow@127.0.0.1:8080
 }
 
-### Dependencies"
+### Dependencies
 1. libnanomsg-dev
 2. libsmbclient-dev
 3. libsmbclient (smbclient, depends on your operating system)
-4. flatbuffers?

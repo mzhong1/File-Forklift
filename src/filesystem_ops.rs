@@ -86,12 +86,12 @@ pub fn get_rel_path(base_path: &Path, comp_path: &Path) -> ForkliftResult<PathBu
 pub fn set_xattr(
     path: &Path,
     context: &Smbc,
-    attribute: &SmbcXAttr,
+    attr: &SmbcXAttr,
     value: &SmbcXAttrValue,
     error: &str,
     success: &str,
 ) -> ForkliftResult<()> {
-    if let Err(e) = context.setxattr(path, attribute, value, XAttrFlags::SMBC_XATTR_FLAG_CREATE) {
+    if let Err(e) = context.setxattr(path, attr, value, XAttrFlags::SMBC_XATTR_FLAG_CREATE) {
         let err = format!("Error {}, {}", e, error);
         return Err(ForkliftError::FSError(err));
     }
@@ -916,15 +916,19 @@ pub fn map_names_and_copy(
 
 /// get list of acl values
 /// plus denotes whether the returned list is named or numeric
-pub fn get_acl_list(path: &Path, fs: &Smbc, plus: bool) -> ForkliftResult<Vec<SmbcAclValue>> {
+pub fn get_acl_list(
+    path: &Path,
+    smb_context: &Smbc,
+    plus: bool,
+) -> ForkliftResult<Vec<SmbcAclValue>> {
     let err = format!("unable to get acls from {:?}", path);
     let suc = "acl all get success";
     let mut acls = if plus {
         let acl_plus_xattr = SmbcXAttr::AclAttr(SmbcAclAttr::AclAllPlus);
-        get_xattr(path, fs, &acl_plus_xattr, &err, suc)?
+        get_xattr(path, smb_context, &acl_plus_xattr, &err, suc)?
     } else {
         let acl_xattr = SmbcXAttr::AclAttr(SmbcAclAttr::AclAll);
-        get_xattr(path, fs, &acl_xattr, &err, &suc)?
+        get_xattr(path, smb_context, &acl_xattr, &err, &suc)?
     };
     acls.pop();
     let acl_list = match xattr_parser(CompleteByteSlice(&acls)) {

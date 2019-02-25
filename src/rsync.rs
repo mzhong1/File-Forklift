@@ -93,7 +93,7 @@ pub struct Rsyncer {
     filesystem_type: FileSystemType,
     /// console ouput functions
     progress_info: Box<ProgressInfo + Send + Sync>,
-    /// channe to send postgres logs
+    /// channel to send postgres logs
     log_output: Sender<LogMessage>,
 }
 

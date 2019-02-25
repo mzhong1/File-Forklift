@@ -230,11 +230,6 @@ impl Cluster {
         Ok(buffer)
     }
 
-    /// read serialized message to Vec<String>
-    fn read_message(&self, msg: &[u8], err: &str) -> ForkliftResult<Vec<String>> {
-        message::read_message(msg)
-    }
-
     /// parse a NODELIST message into a list of nodes and create/add the nodes to the cluster
     /// @note: if has_nodelist is true, then exit without changing anything
     pub fn parse_nodelist_message(
@@ -248,7 +243,7 @@ impl Cluster {
             return Ok(());
         }
         debug!("Parse the NODELIST!");
-        let node_list = self.read_message(msg, "NODELIST message is empty")?;
+        let node_list = message::read_message(msg)?;
         for address in &node_list {
             match address.parse::<SocketAddr>() {
                 Ok(node) => {
@@ -317,7 +312,7 @@ impl Cluster {
             //check message type
             let msg = self.read_message_to_u8()?;
             let msgtype = message::get_message_type(&msg)?;
-            let msg_body = self.read_message(&msg, "Message body is empty, Ifnore the message")?;
+            let msg_body = message::read_message(&msg)?;
             match msgtype {
                 MessageType::NODELIST => {
                     debug!("Can read message of type NODELIST");
