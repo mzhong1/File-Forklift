@@ -144,7 +144,7 @@ impl Rsyncer {
         let mut contexts: Vec<(ProtocolContext, ProtocolContext)> = Vec::new();
         let level = &config.debug_level;
         let workgroup = &config.workgroup;
-        let smbc = init_samba(&workgroup, username, password, level)?;
+        let smbc = init_samba(&workgroup, username, password, *level)?;
         for _ in 0..config.num_threads {
             match self.filesystem_type {
                 FileSystemType::Samba => {
@@ -156,8 +156,8 @@ impl Rsyncer {
                 }
                 FileSystemType::Nfs => {
                     let (src_context, dest_context) = (
-                        create_nfs_context(&config.src_server, &config.src_share, level)?,
-                        create_nfs_context(&config.dest_server, &config.dest_share, level)?,
+                        create_nfs_context(&config.src_server, &config.src_share, *level)?,
+                        create_nfs_context(&config.dest_server, &config.dest_share, *level)?,
                     );
                     contexts.push((src_context, dest_context));
                 }
@@ -221,7 +221,7 @@ impl Rsyncer {
                     });
                 }
             });
-            if let Err(_) = send_prog_thread.send(ProgressMessage::EndSync) {
+            if send_prog_thread.send(ProgressMessage::EndSync).is_err() {
                 return Err(ForkliftError::CrossbeamChannelError(
                     "Unable to send End signal to progress_worker".to_string(),
                 ));

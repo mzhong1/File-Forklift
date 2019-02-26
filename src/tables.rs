@@ -65,8 +65,8 @@ pub fn current_time() -> NaiveDateTime {
 
 impl ErrorLog {
     /// create a new ErrorLog
-    pub fn new(failure_id: ErrorType, reason: String, timestamp: NaiveDateTime) -> Self {
-        ErrorLog { failure_id, reason, timestamp }
+    pub fn new(failure_id: ErrorType, reason: &str, timestamp: NaiveDateTime) -> Self {
+        ErrorLog { failure_id, reason: reason.to_string(), timestamp }
     }
     /// create a new ErrorLog from a ForkliftError
     pub fn from_err(err: &ForkliftError, timestamp: NaiveDateTime) -> Self {
@@ -115,19 +115,19 @@ pub struct Nodes {
 impl Nodes {
     /// create a new Nodes
     pub fn new_all(
-        node_ip: String,
+        node_ip: &str,
         node_port: i32,
         node_status: NodeStatus,
         last_updated: NaiveDateTime,
     ) -> Self {
-        Nodes { node_ip, node_port, node_status, last_updated }
+        Nodes { node_ip: node_ip.to_string(), node_port, node_status, last_updated }
     }
     /// create a new Nodes from a NodeStatus
     pub fn new(node_status: NodeStatus) -> ForkliftResult<Self> {
         let socket = get_current_node()?;
         let last_updated = current_time();
         Ok(Nodes::new_all(
-            socket.get_ip().to_string(),
+            &socket.get_ip().to_string(),
             i32::from(socket.get_port()),
             node_status,
             last_updated,
@@ -198,13 +198,13 @@ pub struct Files {
 impl Files {
     /// create a new Files
     pub fn new(
-        path: String,
+        path: &str,
         src_checksum: Vec<u8>,
         dest_checksum: Vec<u8>,
         size: i64,
         last_modified_time: NaiveDateTime,
     ) -> Self {
-        Files { path, src_checksum, dest_checksum, size, last_modified_time }
+        Files { path: path.to_string(), src_checksum, dest_checksum, size, last_modified_time }
     }
 }
 
@@ -365,7 +365,7 @@ pub fn get_current_node() -> ForkliftResult<SocketNode> {
         }
     };
     match n.get(0) {
-        Some(e) => Ok(e.clone()),
+        Some(e) => Ok(*e),
         None => Err(ForkliftError::FSError("Lazy_static is empty!".to_string())),
     }
 }
@@ -501,7 +501,7 @@ pub fn post_update_nodes(
 /// post an ErrorType error
 pub fn post_err(
     err_type: ErrorType,
-    reason: String,
+    reason: &str,
     conn: &Option<PooledConnection<PostgresConnectionManager>>,
 ) -> ForkliftResult<()> {
     error!("{}", reason);

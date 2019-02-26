@@ -13,7 +13,7 @@ use serde_derive::*;
 use std::path::Path;
 
 /// initialize the Samba context
-pub fn init_samba(wg: &str, un: &str, pw: &str, level: &DebugLevel) -> ForkliftResult<Smbc> {
+pub fn init_samba(wg: &str, un: &str, pw: &str, level: DebugLevel) -> ForkliftResult<Smbc> {
     let debug_level = match level {
         DebugLevel::OFF => 0,
         DebugLevel::FATAL => 1,
@@ -46,10 +46,10 @@ pub fn get_index_or_rand(pool: &ThreadPool) -> usize {
 pub fn create_nfs_context(
     ip: &str,
     share: &str,
-    level: &DebugLevel,
+    level: DebugLevel,
 ) -> ForkliftResult<ProtocolContext> {
     let nfs = Nfs::new()?;
-    nfs.set_debug(*level as i32)?;
+    nfs.set_debug(level as i32)?;
     nfs.mount(ip, share)?;
     Ok(ProtocolContext::Nfs(nfs))
 }

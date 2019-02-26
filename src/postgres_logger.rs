@@ -86,7 +86,7 @@ impl PostgresLogger {
                         post_forklift_err(&e, &conn).expect("Add error to ErrorLogs failed");
                     }
                     LogMessage::ErrorType(e, r) => {
-                        post_err(e, r, &conn).expect("Add error to ErrorLogs failed");
+                        post_err(e, &r, &conn).expect("Add error to ErrorLogs failed");
                     }
                     LogMessage::File(f) => {
                         post_update_files(&f, &conn).expect("Add File to Files failed");

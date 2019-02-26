@@ -54,7 +54,7 @@ impl ProgressWorker {
                     match x {
                         SyncOutcome::FileCopied(path, src_check, dest_check, size, update) => {
                             let file = Files::new(
-                                format!("{:?}/{:?}", self.src_share, path),
+                                &format!("{:?}/{:?}", self.src_share, path),
                                 src_check,
                                 dest_check,
                                 size,
@@ -64,7 +64,7 @@ impl ProgressWorker {
                         }
                         SyncOutcome::ChecksumUpdated(path, src_check, dest_check, size, update) => {
                             let file = Files::new(
-                                format!("{:?}/{:?}", self.src_share, path),
+                                &format!("{:?}/{:?}", self.src_share, path),
                                 src_check,
                                 dest_check,
                                 size,

@@ -285,7 +285,7 @@ impl WalkWorker {
                 let mut list = e;
                 trace!("{:?}", list.calc_candidates(&entry.to_string_lossy()).collect::<Vec<_>>());
                 match list.calc_candidates(&entry.to_string_lossy()).nth(0) {
-                    Some(p) => p.clone(),
+                    Some(p) => *p,
                     None => {
                         return Err(ForkliftError::FSError("calc candidates failed".to_string()));
                     }
