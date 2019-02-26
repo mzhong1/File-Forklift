@@ -21,11 +21,11 @@ pub struct ProgressWorker {
 impl ProgressWorker {
     /// create a new ProgressWorker
     pub fn new(
-        src_share: String,
+        src_share: &str,
         progress_info: Box<ProgressInfo + Send + Sync>,
         input: Receiver<ProgressMessage>,
     ) -> ProgressWorker {
-        ProgressWorker { src_share, input, progress_info }
+        ProgressWorker { src_share: src_share.to_string(), input, progress_info }
     }
 
     /// Process ProgressMessages, sending logs to postgres_logger, and track current progress through

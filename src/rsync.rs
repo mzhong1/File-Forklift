@@ -174,7 +174,7 @@ impl Rsyncer {
         nodelist: Arc<Mutex<RendezvousNodes<SocketNode, DefaultNodeHasher>>>,
         current_node: SocketNode,
     ) -> ForkliftResult<()> {
-        let (num_threads, src_share) = (config.num_threads, config.src_share.clone());
+        let (num_threads, src_share) = (config.num_threads, &config.src_share);
         let (send_prog, rec_prog) = channel::unbounded::<ProgressMessage>();
         let (send_prog_thread, copy_log_output) = (send_prog.clone(), self.log_output.clone());
         let mut contexts = self.create_contexts(config, username, password)?;
@@ -184,13 +184,13 @@ impl Rsyncer {
             WalkWorker::new(self.source.as_path(), current_node, nodelist, send_handles, send_prog);
         let progress_worker = ProgressWorker::new(src_share, self.progress_info, rec_prog);
         rayon::spawn(move || {
-            progress_worker.start(&copy_log_output).unwrap();
+            progress_worker.start(&copy_log_output).expect("Progress Worker Failed");
         });
         let pool = rayon::ThreadPoolBuilder::new()
             .num_threads(num_threads as usize)
             .breadth_first()
             .build()
-            .unwrap();
+            .expect("Unable to build ThreadPool");
 
         if num_threads == 1 {
             let (mut fs, mut destfs) = contexts[0].clone();
@@ -211,7 +211,7 @@ impl Rsyncer {
                         let input = syncer.input.clone();
                         if let Err(e) = syncer.start(&mut contexts.clone(), &pool) {
                             let mess = ProgressMessage::SendError(e);
-                            send_prog_thread.send(mess).unwrap();
+                            send_prog_thread.send(mess).expect("Unable to send progress");
                         };
                         debug!(
                             "Syncer Stopped, Thread {:?}, num left {:?}",
