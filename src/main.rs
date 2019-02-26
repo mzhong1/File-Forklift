@@ -229,7 +229,7 @@ fn main() -> ForkliftResult<()> {
     };
     let postgres_logger =
         PostgresLogger::new(conn, log_input, end_heartbeat.clone(), end_rendezvous.clone());
-    rayon::spawn(move || postgres_logger.start().unwrap());
+    rayon::spawn(move || postgres_logger.start().expect("unable to log to Postgres"));
     if input.nodes.len() < 2 {
         let mess = LogMessage::ErrorType(
             ErrorType::InvalidConfigError,
@@ -303,7 +303,7 @@ fn main() -> ForkliftResult<()> {
             debug!("Started Sync");
             if let Err(e) = syncer.sync(&config, auth, active_nodes.clone(), current_address) {
                 // Note, only Errors if there IS a database and query/execution fails
-                send_mess(LogMessage::Error(e), &log_output).unwrap();
+                send_mess(LogMessage::Error(e), &log_output).expect("unable to log to postgres");
                 if send_mess(LogMessage::End, &log_output).is_err() {
                     error!(
                         "Channel to postgres_logger is broken, attempting to manually end program"

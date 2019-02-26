@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::net::SocketAddr;
 
-#[derive(Debug, Clone, Eq)]
+#[derive(Debug, Clone, Copy, Eq)]
 /// object storing the information of a node
 pub struct Node {
     /// name of node
@@ -126,7 +126,7 @@ impl NodeList {
         trace!("Attempting to add address {} to list of sockets", node_address);
         if !self.contains_address(node_address) {
             trace!("Address {} not already in list, attempting to parse to socket", node_address);
-            self.node_list.push(node_address.clone());
+            self.node_list.push(*node_address);
         }
     }
 

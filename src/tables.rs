@@ -24,7 +24,7 @@ lazy_static! {
     };
 }
 
-#[derive(Debug, ToSql, FromSql, Clone, PartialEq)]
+#[derive(Debug, ToSql, FromSql, Copy, Clone, PartialEq)]
 #[postgres(name = "ErrorType")]
 /// Usable ErrorTypes logged in Postgres
 pub enum ErrorType {
@@ -143,7 +143,7 @@ pub enum NodeStatus {
     NodeFinished,
 }
 
-#[derive(Debug, Clone, ToSql, FromSql)]
+#[derive(Debug, Clone, Copy, ToSql, FromSql)]
 /// entry for TotalSync table
 pub struct TotalSync {
     total_files: i64,

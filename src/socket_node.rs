@@ -7,7 +7,7 @@ use std::hash::{Hash, Hasher};
 use std::net::IpAddr;
 use std::net::SocketAddr;
 
-#[derive(Debug, Clone, Eq)]
+#[derive(Debug, Copy, Clone, Eq)]
 /// hashable node containing a Socket Address
 pub struct SocketNode {
     id: SocketAddr,

@@ -24,6 +24,7 @@ pub enum LogMessage {
     /// end signal
     End,
 }
+#[derive(Copy, Clone, Debug)]
 pub enum EndState {
     /// End the process
     EndProgram,

@@ -1,7 +1,7 @@
 use log::*;
 use std::time::{Duration, Instant};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Copy, Clone)]
 ///  the pulse of the heartbeat protocol, determining when to beat
 pub struct Pulse {
     pub interval: u64,

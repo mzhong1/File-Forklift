@@ -19,6 +19,7 @@ pub enum ProgressMessage {
 }
 
 /// Store the progress of the rsync
+#[derive(Clone, Debug)]
 pub struct Progress {
     /// Name of the file being transferred
     pub current_file: String,
