@@ -534,9 +534,6 @@ pub fn checksum_copy(
             update_buffer(&mut src_buf, &mut src_total, num_written);
             offset += src_buf.len() as u64;
         }
-        if src_buf.is_empty() {
-            break;
-        }
         //send progress
         let progress = ProgressMessage::CheckSyncing {
             description: path.clone(),
@@ -544,6 +541,9 @@ pub fn checksum_copy(
             done: offset as usize,
         };
         send_progress(progress, progress_output, log_output)?;
+        if src_buf.is_empty() {
+            break;
+        }
     }
     let (src_check, dest_check) = (hash(&src_total, &mut hasher), hash(&dest_total, &mut hasher));
     if src_check != dest_check {

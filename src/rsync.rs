@@ -141,12 +141,8 @@ impl Rsyncer {
         (src_share, dest_share): (&str, &str),
         (workgroup, username, password): (String, String, String),
         level: DebugLevel,
-    ) -> ForkliftResult<(
-        Vec<(ProtocolContext, ProtocolContext)>,
-        Vec<(ProtocolContext, ProtocolContext)>,
-    )> {
+    ) -> ForkliftResult<Vec<(ProtocolContext, ProtocolContext)>> {
         let mut contexts: Vec<(ProtocolContext, ProtocolContext)> = Vec::new();
-        let mut sync_contexts: Vec<(ProtocolContext, ProtocolContext)> = Vec::new();
         let smbc = init_samba(workgroup, username, password, level.clone())?;
         for _ in 0..num_threads {
             match self.filesystem_type {
@@ -156,23 +152,17 @@ impl Rsyncer {
                         ProtocolContext::Samba(Box::new(smbc.clone())),
                     );
                     contexts.push((src_context, dest_context));
-                    let (src_context, dest_context) = (
-                        ProtocolContext::Samba(Box::new(smbc.clone())),
-                        ProtocolContext::Samba(Box::new(smbc.clone())),
-                    );
-                    sync_contexts.push((src_context, dest_context));
                 }
                 FileSystemType::Nfs => {
                     let (src_context, dest_context) = (
                         create_nfs_context(src_ip, src_share, level.clone())?,
                         create_nfs_context(dest_ip, dest_share, level.clone())?,
                     );
-                    contexts.push((src_context.clone(), dest_context.clone()));
-                    sync_contexts.push((src_context, dest_context));
+                    contexts.push((src_context, dest_context));
                 }
             }
         }
-        Ok((contexts, sync_contexts))
+        Ok(contexts)
     }
 
     /// run the rsync protocol
@@ -190,8 +180,7 @@ impl Rsyncer {
         let (send_prog, rec_prog) = channel::unbounded::<ProgressMessage>();
         let send_prog_thread = send_prog.clone();
         let copy_log_output = self.log_output.clone();
-        let (mut contexts, sync_contexts) =
-            self.create_contexts(num_threads, servers, shares, auth, level)?;
+        let mut contexts = self.create_contexts(num_threads, servers, shares, auth, level)?;
         //create workers
         let (send_handles, syncers) = self.create_syncers(num_threads, &send_prog);
         let walk_worker =
@@ -224,7 +213,7 @@ impl Rsyncer {
                 for syncer in syncers {
                     spawner.spawn(|_| {
                         let input = syncer.input.clone();
-                        if let Err(e) = syncer.start(&mut sync_contexts.clone(), &pool) {
+                        if let Err(e) = syncer.start(&mut contexts.clone(), &pool) {
                             let mess = ProgressMessage::SendError(e);
                             send_prog_thread.send(mess).unwrap();
                         };
