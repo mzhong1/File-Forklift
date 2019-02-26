@@ -53,26 +53,20 @@ impl RsyncWorker {
     ) -> ForkliftResult<()> {
         let id = get_index_or_rand(pool);
         let index = id % contexts.len();
-        let (mut src, mut dest) = match contexts.get(index) {
-            Some((s, d)) => (s.clone(), d.clone()),
+        let (mut src_context, mut dest_context) = match contexts.get(index) {
+            Some((src, dest)) => (src.clone(), dest.clone()),
             None => {
-                error!("unable to retrieve contexts");
                 return Err(ForkliftError::FSError("Unable to retrieve contexts".to_string()));
             }
         };
-
         for entry in self.input.iter() {
             let input_entry = match entry {
                 Some(e) => e,
                 None => break,
             };
-            let sync_outcome = self.sync(&input_entry, &mut src, &mut dest)?;
-            debug!(
-                "Sync Thread {:?} Outcome: {:?} Num left {:?}",
-                id,
-                sync_outcome,
-                self.input.len(),
-            );
+            let sync_outcome = self.sync(&input_entry, &mut src_context, &mut dest_context)?;
+            let len = self.input.len();
+            debug!("Sync Thread {:?} Outcome: {:?} Num left {:?}", id, sync_outcome, len,);
             let progress = ProgressMessage::DoneSyncing(sync_outcome);
             if let Err(e) = self.progress_output.send(progress) {
                 return Err(ForkliftError::CrossbeamChannelError(format!(
@@ -80,7 +74,7 @@ impl RsyncWorker {
                     e
                 )));
             };
-            trace!("rec len {:?}", self.input.len());
+            trace!("rec len {:?}", len);
         }
         Ok(())
     }
@@ -94,31 +88,24 @@ impl RsyncWorker {
     ) -> ForkliftResult<SyncOutcome> {
         let rel_path = get_rel_path(&src_entry.path(), &self.source)?;
         let dest_path = &self.destination.join(&rel_path);
-        let mut src_context = src_context;
-        let mut dest_context = dest_context;
-        make_dir_all(
-            &src_entry.path(),
-            &dest_path,
-            &self.destination,
-            &mut src_context,
-            &mut dest_context,
-        )?;
+        make_dir_all(&src_entry.path(), &dest_path, &self.destination, src_context, dest_context)?;
         let dest_entry = Entry::new(&dest_path, &dest_context);
         let mut outcome = sync_entry(
-            &src_entry,
+            src_entry,
             &dest_entry,
             src_context,
             dest_context,
             &self.progress_output,
             &self.log_output,
         )?;
-        let dir = match src_entry.is_dir() {
+        let is_dir = match src_entry.is_dir() {
             Some(d) => d,
-            None => true,
+            None => {
+                return Err(ForkliftError::FSError("src entry does not exist".to_string()));
+            }
         };
-        if !dir {
-            let temp_outcome =
-                copy_permissions(&src_entry, &dest_entry, src_context, dest_context)?;
+        if !is_dir {
+            let temp_outcome = copy_permissions(src_entry, &dest_entry, src_context, dest_context)?;
             let current_outcome = outcome.clone();
             outcome = match (outcome, temp_outcome) {
                 (SyncOutcome::UpToDate, SyncOutcome::PermissionsUpdated) => {

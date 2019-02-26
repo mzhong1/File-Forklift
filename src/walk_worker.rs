@@ -93,8 +93,8 @@ impl WalkWorker {
     /// threaded, recursive filetree walker
     pub fn t_walk(
         &self,
-        root_path: &Path,
-        path: &Path,
+        dest_root: &Path,
+        src_path: &Path,
         contexts: &mut Vec<(ProtocolContext, ProtocolContext)>,
         pool: &ThreadPool,
     ) -> ForkliftResult<()> {
@@ -109,9 +109,9 @@ impl WalkWorker {
             };
             let (this, parent) = (Path::new("."), Path::new(".."));
             let mut check_paths: Vec<PathBuf> = vec![];
-            let check_path = self.get_check_path(&path, root_path)?;
+            let check_path = self.get_check_path(&src_path, dest_root)?;
             let check = exist(&check_path, &mut dest_context);
-            let dir = src_context.opendir(&path)?;
+            let dir = src_context.opendir(&src_path)?;
             for entrytype in dir {
                 let entry = match entrytype {
                     Ok(f) => f,
@@ -121,21 +121,8 @@ impl WalkWorker {
                 };
                 let file_path = entry.path();
                 if file_path != this && file_path != parent {
-                    let newpath = path.join(&file_path);
-                    let meta =
-                        self.process_file(&newpath, &mut src_context, &self.nodes.clone())?;
-                    if let Some(meta) = meta {
-                        debug!("Sent: {:?}", &file_path);
-                        if let Err(e) = self.progress_output.send(ProgressMessage::Todo {
-                            num_files: 1,
-                            total_size: meta.size() as usize,
-                        }) {
-                            return Err(ForkliftError::CrossbeamChannelError(format!(
-                                "Error {:?}, unable to send progress",
-                                e
-                            )));
-                        }
-                    }
+                    let newpath = src_path.join(&file_path);
+                    self.send_file(&newpath, &mut src_context)?;
                     match entry.filetype() {
                         GenericFileType::Directory => {
                             debug!("dir: {:?}", &newpath);
@@ -144,7 +131,7 @@ impl WalkWorker {
                                 let mut contexts = loop_contexts;
                                 let newpath = newpath;
                                 if let Err(e) =
-                                    self.t_walk(&root_path, &newpath, &mut contexts, &pool)
+                                    self.t_walk(&dest_root, &newpath, &mut contexts, &pool)
                                 {
                                     let mess = ProgressMessage::SendError(ForkliftError::FSError(
                                         format!("Error {:?}, Unable to recursively call", e),
@@ -170,45 +157,51 @@ impl WalkWorker {
             // check through dest files
             self.check_and_remove(
                 (check, &mut check_paths),
-                (root_path, &path, &mut dest_context),
+                (dest_root, &src_path, &mut dest_context),
                 (this, parent),
             )?;
             Ok(())
         })?;
         Ok(())
     }
+    /// send a file to the rsync worker
+    fn send_file(&self, path: &Path, context: &mut ProtocolContext) -> ForkliftResult<bool> {
+        let meta = self.process_file(path, context, &self.nodes.clone())?;
+        if let Some(meta) = meta {
+            if let Err(e) = self
+                .progress_output
+                .send(ProgressMessage::Todo { num_files: 1, total_size: meta.size() as usize })
+            {
+                return Err(ForkliftError::CrossbeamChannelError(format!(
+                    "Error: {:?}, unable to send progress",
+                    e
+                )));
+            };
+            return Ok(true);
+        }
+        Ok(false)
+    }
     /// linear walking loop
     fn walk_loop(
         &self,
-        (num_files, total_size): (&mut u64, &mut u64),
         (this, parent, path, stack): (&Path, &Path, &Path, &mut Vec<PathBuf>),
         (check, check_path, check_paths): (bool, &Path, &mut Vec<PathBuf>),
         (dir, src_context): (DirectoryType, &mut ProtocolContext),
-    ) -> ForkliftResult<()> {
+    ) -> ForkliftResult<u64> {
+        let mut total_files = 0;
         for entrytype in dir {
             let entry = entrytype?;
             let file_path = entry.path();
             if file_path != this && file_path != parent {
                 let newpath = path.join(&file_path);
                 //file exists?
-                let meta = self.process_file(&newpath, src_context, &self.nodes.clone())?;
-                if let Some(meta) = meta {
-                    *num_files = 1;
-                    *total_size = meta.size() as u64;
-                    if let Err(e) = self.progress_output.send(ProgressMessage::Todo {
-                        num_files: *num_files,
-                        total_size: *total_size as usize,
-                    }) {
-                        return Err(ForkliftError::CrossbeamChannelError(format!(
-                            "Error: {:?}, unable to send progress",
-                            e
-                        )));
-                    };
-                }
+                if self.send_file(&newpath, src_context)? {
+                    total_files += 1;
+                };
                 match entry.filetype() {
                     GenericFileType::Directory => {
                         debug!("dir: {:?}", &newpath);
-                        stack.push(newpath.clone());
+                        stack.push(newpath);
                     }
                     GenericFileType::File => {
                         debug!("file: {:?}", newpath);
@@ -224,7 +217,7 @@ impl WalkWorker {
                 }
             }
         }
-        Ok(())
+        Ok(total_files)
     }
     /// Linear filesystem walker
     pub fn s_walk(
@@ -233,7 +226,7 @@ impl WalkWorker {
         src_context: &mut ProtocolContext,
         dest_context: &mut ProtocolContext,
     ) -> ForkliftResult<()> {
-        let (mut num_files, mut total_size) = (0, 0);
+        let mut num_files = 0;
         let mut stack: Vec<PathBuf> = vec![self.source.clone()];
         let (this, parent) = (Path::new("."), Path::new(".."));
         loop {
@@ -244,8 +237,7 @@ impl WalkWorker {
                     let check_path = self.get_check_path(&path, root_path)?;
                     check = exist(&check_path, dest_context);
                     let dir = src_context.opendir(&path)?;
-                    self.walk_loop(
-                        (&mut num_files, &mut total_size),
+                    num_files += self.walk_loop(
                         (this, parent, &path, &mut stack),
                         (check, &check_path, &mut check_paths),
                         (dir, src_context),
@@ -296,7 +288,7 @@ impl WalkWorker {
                             }
                             _ => {
                                 debug!("remove: {:?}", &newpath);
-                                remove_extra(&newpath, dest_context)?;
+                                dest_context.unlink(&newpath)?;
                             }
                         }
                     }
@@ -338,7 +330,7 @@ impl WalkWorker {
             };
             //Note, send only returns an error should the channel disconnect ->
             //Should we attempt to reconnect the channel?
-            self.do_work(Some(src_entry.clone()))?;
+            self.do_work(Some(src_entry))?;
             return Ok(Some(metadata));
         }
         Ok(None)
@@ -354,11 +346,6 @@ fn contains_and_remove(check_paths: &mut Vec<PathBuf>, check_path: &Path) -> boo
         }
     }
     false
-}
-
-/// remove all paths in destination not in source
-fn remove_extra(path: &Path, dest_context: &mut ProtocolContext) -> ForkliftResult<()> {
-    dest_context.unlink(path)
 }
 
 /// recursively remove a directory in destination that is not in source
@@ -385,10 +372,10 @@ fn remove_dir(path: &Path, dest_context: &mut ProtocolContext) -> ForkliftResult
                         remove_stack.push(newpath);
                     }
                     GenericFileType::File => {
-                        remove_extra(&newpath, dest_context)?;
+                        dest_context.unlink(&newpath)?;
                     }
                     GenericFileType::Link => {
-                        remove_extra(&newpath, dest_context)?;
+                        dest_context.unlink(&newpath)?;
                     }
                     GenericFileType::Other => {}
                 }
