@@ -187,8 +187,7 @@ impl Cluster {
                             ErrorType::CrossbeamChannelError,
                             "Channel to rendezvous is broken".to_string(),
                         );
-                        send_mess(mess, log_output).unwrap();
-                        panic!("Channel to rendezvous is broken!");
+                        send_mess(mess, log_output).expect("Channel to rendezvous is broken!");
                     }
                 } else {
                     n.has_heartbeat = false;
@@ -285,8 +284,7 @@ impl Cluster {
                             ErrorType::CrossbeamChannelError,
                             "Channel to rendezvous is broken".to_string(),
                         );
-                        send_mess(mess, log_output).unwrap();
-                        panic!("Channel to rendezvous is broken!");
+                        send_mess(mess, log_output).expect("Channel to rendezvous is broken!");
                     }
                 });
             }

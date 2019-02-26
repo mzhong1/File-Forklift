@@ -223,7 +223,7 @@ fn main() -> ForkliftResult<()> {
 
     let conn = if !database_url.is_empty() {
         //init databases;
-        Some(init_connection(database_url.clone())?)
+        Some(init_connection(&database_url)?)
     } else {
         None
     };
@@ -235,7 +235,7 @@ fn main() -> ForkliftResult<()> {
             ErrorType::InvalidConfigError,
             "Not enough input nodes.  Need at least 2".to_string(),
         );
-        send_mess(mess, &log_output.clone())?;
+        send_mess(mess, &log_output)?;
         return Err(ForkliftError::InvalidConfigError(
             "No input nodes!  Please have at least 2 node in the nodes section of your
         config file"
@@ -244,25 +244,25 @@ fn main() -> ForkliftResult<()> {
     }
 
     trace!("Attempting to get local ip address");
-    let ip_address = match local_ip::get_ip(&log_output.clone()) {
+    let ip_address = match local_ip::get_ip(&log_output) {
         Ok(Some(ip)) => ip.ip(),
         Ok(None) => {
             send_mess(
                 LogMessage::ErrorType(ErrorType::IpLocalError, "No local ip".to_string()),
-                &log_output.clone(),
+                &log_output,
             )?;
             return Err(ForkliftError::IpLocalError("No local ip".to_string()));
         }
         Err(e) => {
             send_mess(
                 LogMessage::ErrorType(ErrorType::IpLocalError, "No local ip".to_string()),
-                &log_output.clone(),
+                &log_output,
             )?;
             return Err(e);
         }
     };
     let nodes = input.nodes.clone();
-    let node_names: NodeList = NodeList::new_with_list(nodes.clone());
+    let node_names: NodeList = NodeList::new_with_list(nodes);
     let full_address = match node_names.get_full_address(&ip_address.to_string()) {
         Some(a) => a,
         None => {
@@ -270,7 +270,7 @@ fn main() -> ForkliftResult<()> {
                 ErrorType::IpLocalError,
                 format!("Ip Address {} not in the node_list", ip_address),
             );
-            send_mess(mess, &log_output.clone())?;
+            send_mess(mess, &log_output)?;
             return Err(ForkliftError::IpLocalError(format!(
                 "ip address {} not in the node list",
                 ip_address
@@ -280,7 +280,7 @@ fn main() -> ForkliftResult<()> {
     debug!("current full address: {:?}", full_address);
     let current_address = SocketNode::new(full_address);
     if let Err(e) = set_current_node(&current_address) {
-        send_mess(LogMessage::Error(e), &log_output.clone())?;
+        send_mess(LogMessage::Error(e), &log_output)?;
     };
     let mut joined = input.nodes.len() != 2;
     let console_info = ConsoleProgressOutput::new();
@@ -303,8 +303,8 @@ fn main() -> ForkliftResult<()> {
             debug!("Started Sync");
             if let Err(e) = syncer.sync(&config, auth, active_nodes.clone(), current_address) {
                 // Note, only Errors if there IS a database and query/execution fails
-                send_mess(LogMessage::Error(e), &log_output.clone()).unwrap();
-                if send_mess(LogMessage::End, &log_output.clone()).is_err() {
+                send_mess(LogMessage::Error(e), &log_output).unwrap();
+                if send_mess(LogMessage::End, &log_output).is_err() {
                     error!(
                         "Channel to postgres_logger is broken, attempting to manually end program"
                     );
@@ -329,16 +329,16 @@ fn main() -> ForkliftResult<()> {
                 log_output.clone(),
             ) {
                 Ok(_) => Ok(()),
-                Err(e) => send_mess(LogMessage::Error(e), &log_output.clone()),
+                Err(e) => send_mess(LogMessage::Error(e), &log_output),
             },
             || match rendezvous(
                 &mut active_nodes.clone(),
                 &node_change_input,
                 &rendezvous_input,
-                &log_output.clone(),
+                &log_output,
             ) {
                 Ok(_) => Ok(()),
-                Err(e) => send_mess(LogMessage::Error(e), &log_output.clone()),
+                Err(e) => send_mess(LogMessage::Error(e), &log_output),
             },
         )
     });

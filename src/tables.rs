@@ -316,7 +316,7 @@ pub fn init_totalsync(conn: &Connection) -> ForkliftResult<()> {
 }
 
 /// initialize connection to postgres database and initialize all tables
-pub fn init_connection(path: String) -> ForkliftResult<Pool<PostgresConnectionManager>> {
+pub fn init_connection(path: &str) -> ForkliftResult<Pool<PostgresConnectionManager>> {
     let manager = PostgresConnectionManager::new(path, TlsMode::None)?;
     let pool = r2d2::Pool::builder()
         .max_size(10)

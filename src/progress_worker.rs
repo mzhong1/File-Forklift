@@ -50,7 +50,8 @@ impl ProgressWorker {
                 }
                 ProgressMessage::DoneSyncing(x) => {
                     self.progress_info.done_syncing();
-                    match x.clone() {
+                    stats.add_outcome(&x);
+                    match x {
                         SyncOutcome::FileCopied(path, src_check, dest_check, size, update) => {
                             let file = Files::new(
                                 format!("{:?}/{:?}", self.src_share, path),
@@ -73,7 +74,6 @@ impl ProgressWorker {
                         }
                         _ => {}
                     }
-                    stats.add_outcome(&x);
                 }
                 ProgressMessage::SendError(error) => {
                     send_mess(LogMessage::Error(error), send_log)?;
