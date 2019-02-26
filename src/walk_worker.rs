@@ -177,10 +177,9 @@ impl WalkWorker {
                     e
                 )));
             };
-            Ok(true)
-        } else {
-            Ok(false)
+            return Ok(true);
         }
+        Ok(false)
     }
     /// linear walking loop
     fn walk_loop(
