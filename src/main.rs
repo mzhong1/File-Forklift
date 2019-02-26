@@ -213,6 +213,7 @@ fn main() -> ForkliftResult<()> {
     let (log_output, log_input) = channel::unbounded::<LogMessage>();
 
     let input = parse_matches(&matches)?;
+    let config = input.clone();
     //get database url and check if we are logging anything to database
     //SOME if yes, NONE if not logging to DB
     let database_url = match input.database_url {
@@ -299,17 +300,12 @@ fn main() -> ForkliftResult<()> {
         Box::new(console_info),
         log_output.clone(),
     );
-    let servers = (&*input.src_server, &*input.dest_server);
-    let shares = (&*input.src_share, &*input.dest_share);
-    let levels = (input.debug_level, input.num_threads);
-    let auth = (input.workgroup, username.to_string(), password.to_string());
+    let auth = (username, password);
     let lifetime = input.lifetime;
     rayon::scope(|s| {
         s.spawn(|_| {
             debug!("Started Sync");
-            if let Err(e) =
-                syncer.sync(servers, shares, levels, auth, active_nodes.clone(), current_address)
-            {
+            if let Err(e) = syncer.sync(&config, auth, active_nodes.clone(), current_address) {
                 // Note, only Errors if there IS a database and query/execution fails
                 send_mess(LogMessage::Error(e), &log_output.clone()).unwrap();
                 if send_mess(LogMessage::End, &log_output.clone()).is_err() {

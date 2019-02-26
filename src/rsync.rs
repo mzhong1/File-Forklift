@@ -3,6 +3,7 @@ use crate::error::ForkliftResult;
 use crate::filesystem::*;
 use crate::filesystem_entry::Entry;
 use crate::filesystem_ops::SyncOutcome;
+use crate::input::Input;
 use crate::progress_message::*;
 use crate::progress_worker::*;
 use crate::rsync_worker::*;
@@ -136,15 +137,15 @@ impl Rsyncer {
     /// create the Filesystem contexts and store them in vectors
     pub fn create_contexts(
         &self,
-        num_threads: u32,
-        (src_ip, dest_ip): (&str, &str),
-        (src_share, dest_share): (&str, &str),
-        (workgroup, username, password): (String, String, String),
-        level: DebugLevel,
+        config: &Input,
+        username: &str,
+        password: &str,
     ) -> ForkliftResult<Vec<(ProtocolContext, ProtocolContext)>> {
         let mut contexts: Vec<(ProtocolContext, ProtocolContext)> = Vec::new();
-        let smbc = init_samba(workgroup, username, password, level.clone())?;
-        for _ in 0..num_threads {
+        let level = &config.debug_level;
+        let workgroup = &config.workgroup;
+        let smbc = init_samba(&workgroup, username, password, level)?;
+        for _ in 0..config.num_threads {
             match self.filesystem_type {
                 FileSystemType::Samba => {
                     let (src_context, dest_context) = (
@@ -155,8 +156,8 @@ impl Rsyncer {
                 }
                 FileSystemType::Nfs => {
                     let (src_context, dest_context) = (
-                        create_nfs_context(src_ip, src_share, level.clone())?,
-                        create_nfs_context(dest_ip, dest_share, level.clone())?,
+                        create_nfs_context(&config.src_server, &config.src_share, level.clone())?,
+                        create_nfs_context(&config.dest_server, &config.dest_share, level.clone())?,
                     );
                     contexts.push((src_context, dest_context));
                 }
@@ -168,25 +169,20 @@ impl Rsyncer {
     /// run the rsync protocol
     pub fn sync(
         self,
-        (src_ip, dest_ip): (&str, &str),
-        (src_share, dest_share): (&str, &str),
-        (level, num_threads): (DebugLevel, u32),
-        (workgroup, username, password): (String, String, String),
+        config: &Input,
+        (username, password): (&str, &str),
         nodelist: Arc<Mutex<RendezvousNodes<SocketNode, DefaultNodeHasher>>>,
         current_node: SocketNode,
     ) -> ForkliftResult<()> {
-        let auth = (workgroup, username, password);
-        let (servers, shares) = ((src_ip, dest_ip), (src_share, dest_share));
+        let (num_threads, src_share) = (config.num_threads, config.src_share.clone());
         let (send_prog, rec_prog) = channel::unbounded::<ProgressMessage>();
-        let send_prog_thread = send_prog.clone();
-        let copy_log_output = self.log_output.clone();
-        let mut contexts = self.create_contexts(num_threads, servers, shares, auth, level)?;
+        let (send_prog_thread, copy_log_output) = (send_prog.clone(), self.log_output.clone());
+        let mut contexts = self.create_contexts(config, username, password)?;
         //create workers
         let (send_handles, syncers) = self.create_syncers(num_threads, &send_prog);
         let walk_worker =
             WalkWorker::new(self.source.as_path(), current_node, nodelist, send_handles, send_prog);
-        let progress_worker =
-            ProgressWorker::new(src_share.to_string(), self.progress_info, rec_prog);
+        let progress_worker = ProgressWorker::new(src_share, self.progress_info, rec_prog);
         rayon::spawn(move || {
             progress_worker.start(&copy_log_output).unwrap();
         });

@@ -13,7 +13,7 @@ use serde_derive::*;
 use std::path::Path;
 
 /// initialize the Samba context
-pub fn init_samba(wg: String, un: String, pw: String, level: DebugLevel) -> ForkliftResult<Smbc> {
+pub fn init_samba(wg: &str, un: &str, pw: &str, level: &DebugLevel) -> ForkliftResult<Smbc> {
     let debug_level = match level {
         DebugLevel::OFF => 0,
         DebugLevel::FATAL => 1,
@@ -23,7 +23,7 @@ pub fn init_samba(wg: String, un: String, pw: String, level: DebugLevel) -> Fork
         DebugLevel::DEBUG => 3,
         DebugLevel::ALL => 10,
     };
-    Smbc::set_data(wg, un, pw);
+    Smbc::set_data(wg.to_string(), un.to_string(), pw.to_string());
     match Smbc::new_with_auth(debug_level) {
         Ok(e) => Ok(e),
         Err(e) => Err(ForkliftError::SmbcError(e)),

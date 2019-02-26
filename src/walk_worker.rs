@@ -208,7 +208,7 @@ impl WalkWorker {
                 match entry.filetype() {
                     GenericFileType::Directory => {
                         debug!("dir: {:?}", &newpath);
-                        stack.push(newpath.clone());
+                        stack.push(newpath);
                     }
                     GenericFileType::File => {
                         debug!("file: {:?}", newpath);
@@ -338,7 +338,7 @@ impl WalkWorker {
             };
             //Note, send only returns an error should the channel disconnect ->
             //Should we attempt to reconnect the channel?
-            self.do_work(Some(src_entry.clone()))?;
+            self.do_work(Some(src_entry))?;
             return Ok(Some(metadata));
         }
         Ok(None)
