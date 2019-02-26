@@ -1,5 +1,5 @@
 //SyncStats
-use crate::error::ForkliftResult;
+use crate::error::{ForkliftError, ForkliftResult};
 use crate::filesystem::*;
 use crate::filesystem_entry::Entry;
 use crate::filesystem_ops::SyncOutcome;
@@ -221,6 +221,11 @@ impl Rsyncer {
                     });
                 }
             });
+            if let Err(_) = send_prog_thread.send(ProgressMessage::EndSync) {
+                return Err(ForkliftError::CrossbeamChannelError(
+                    "Unable to send End signal to progress_worker".to_string(),
+                ));
+            };
             Ok(())
         })?;
         Ok(())

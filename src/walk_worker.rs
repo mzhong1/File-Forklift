@@ -6,11 +6,17 @@ use crate::progress_message::ProgressMessage;
 use crate::socket_node::*;
 
 use crossbeam::channel::Sender;
+use lazy_static::*;
 use log::*;
 use rayon::*;
 use rendezvous_hash::{DefaultNodeHasher, RendezvousNodes};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+
+lazy_static! {
+    pub static ref this: PathBuf = Path::new(".").to_path_buf();
+    pub static ref parent: PathBuf = Path::new("..").to_path_buf();
+}
 
 /// threaded worker to walk through a filesystem
 pub struct WalkWorker {
@@ -107,7 +113,6 @@ impl WalkWorker {
                     return Err(ForkliftError::FSError("Unable to retrieve contexts".to_string()));
                 }
             };
-            let (this, parent) = (Path::new("."), Path::new(".."));
             let mut check_paths: Vec<PathBuf> = vec![];
             let check_path = self.get_check_path(&src_path, dest_root)?;
             let check = exist(&check_path, &mut dest_context);
@@ -120,7 +125,7 @@ impl WalkWorker {
                     }
                 };
                 let file_path = entry.path();
-                if file_path != this && file_path != parent {
+                if file_path != this.as_path() && file_path != parent.as_path() {
                     let newpath = src_path.join(&file_path);
                     self.send_file(&newpath, &mut src_context)?;
                     match entry.filetype() {
@@ -154,12 +159,9 @@ impl WalkWorker {
                     }
                 }
             }
+            let check_path = self.get_check_path(&src_path, &dest_root)?;
             // check through dest files
-            self.check_and_remove(
-                (check, &mut check_paths),
-                (dest_root, &src_path, &mut dest_context),
-                (this, parent),
-            )?;
+            self.check_and_remove((check, &mut check_paths), (&check_path, &mut dest_context))?;
             Ok(())
         })?;
         Ok(())
@@ -184,7 +186,7 @@ impl WalkWorker {
     /// linear walking loop
     fn walk_loop(
         &self,
-        (this, parent, path, stack): (&Path, &Path, &Path, &mut Vec<PathBuf>),
+        (path, stack): (&Path, &mut Vec<PathBuf>),
         (check, check_path, check_paths): (bool, &Path, &mut Vec<PathBuf>),
         (dir, src_context): (DirectoryType, &mut ProtocolContext),
     ) -> ForkliftResult<u64> {
@@ -192,7 +194,7 @@ impl WalkWorker {
         for entrytype in dir {
             let entry = entrytype?;
             let file_path = entry.path();
-            if file_path != this && file_path != parent {
+            if file_path != this.as_path() && file_path != parent.as_path() {
                 let newpath = path.join(&file_path);
                 //file exists?
                 if self.send_file(&newpath, src_context)? {
@@ -228,7 +230,6 @@ impl WalkWorker {
     ) -> ForkliftResult<()> {
         let mut num_files = 0;
         let mut stack: Vec<PathBuf> = vec![self.source.clone()];
-        let (this, parent) = (Path::new("."), Path::new(".."));
         loop {
             let check: bool;
             let mut check_paths: Vec<PathBuf> = vec![];
@@ -238,16 +239,12 @@ impl WalkWorker {
                     check = exist(&check_path, dest_context);
                     let dir = src_context.opendir(&path)?;
                     num_files += self.walk_loop(
-                        (this, parent, &path, &mut stack),
+                        (&path, &mut stack),
                         (check, &check_path, &mut check_paths),
                         (dir, src_context),
                     )?;
                     // check through dest files
-                    self.check_and_remove(
-                        (check, &mut check_paths),
-                        (root_path, &path, dest_context),
-                        (this, parent),
-                    )?;
+                    self.check_and_remove((check, &mut check_paths), (&check_path, dest_context))?;
                 }
                 None => {
                     debug!("Total number of files sent {:?}", num_files);
@@ -257,7 +254,6 @@ impl WalkWorker {
         }
         Ok(())
     }
-
     /// get the destination path to check against
     fn get_check_path(&self, source_path: &Path, root_path: &Path) -> ForkliftResult<PathBuf> {
         let rel_path = get_rel_path(&source_path, &self.source)?;
@@ -268,17 +264,15 @@ impl WalkWorker {
     fn check_and_remove(
         &self,
         (check, check_paths): (bool, &mut Vec<PathBuf>),
-        (root_path, source_path, dest_context): (&Path, &Path, &mut ProtocolContext),
-        (this, parent): (&Path, &Path),
+        (check_path, dest_context): (&PathBuf, &mut ProtocolContext),
     ) -> ForkliftResult<()> {
         // check through dest files
         if check {
-            let check_path = self.get_check_path(&source_path, root_path)?;
             let dir = dest_context.opendir(&check_path)?;
             for entrytype in dir {
                 let entry = entrytype?;
                 let file_path = entry.path();
-                if file_path != this && file_path != parent {
+                if file_path != this.as_path() && file_path != parent.as_path() {
                     let newpath = check_path.join(file_path);
                     if !contains_and_remove(check_paths, &newpath) {
                         match entry.filetype() {
@@ -350,7 +344,6 @@ fn contains_and_remove(check_paths: &mut Vec<PathBuf>, check_path: &Path) -> boo
 
 /// recursively remove a directory in destination that is not in source
 fn remove_dir(path: &Path, dest_context: &mut ProtocolContext) -> ForkliftResult<()> {
-    let (this, parent) = (Path::new("."), Path::new(".."));
     let mut stack: Vec<PathBuf> = vec![(*path).to_path_buf()];
     let mut remove_stack: Vec<PathBuf> = vec![(*path).to_path_buf()];
     while let Some(p) = stack.pop() {
@@ -363,7 +356,7 @@ fn remove_dir(path: &Path, dest_context: &mut ProtocolContext) -> ForkliftResult
                 }
             };
             let file_path = entry.path();
-            if file_path != this && file_path != parent {
+            if file_path != this.as_path() && file_path != parent.as_path() {
                 let newpath = p.join(&file_path);
                 debug!("remove: {:?}", &newpath);
                 match entry.filetype() {

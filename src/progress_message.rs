@@ -14,6 +14,8 @@ pub enum ProgressMessage {
     SendError(ForkliftError),
     /// sync in progress
     CheckSyncing { description: String, size: usize, done: usize },
+    /// end the Sync
+    EndSync,
 }
 
 /// Store the progress of the rsync

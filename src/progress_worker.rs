@@ -13,7 +13,7 @@ pub struct ProgressWorker {
     /// source share name
     src_share: String,
     /// output printing program
-    progress_info: Box<ProgressInfo + Send>,
+    progress_info: Box<ProgressInfo + Send + Sync>,
     /// channel input for ProgressMessages
     input: Receiver<ProgressMessage>,
 }
@@ -22,7 +22,7 @@ impl ProgressWorker {
     /// create a new ProgressWorker
     pub fn new(
         src_share: String,
-        progress_info: Box<ProgressInfo + Send>,
+        progress_info: Box<ProgressInfo + Send + Sync>,
         input: Receiver<ProgressMessage>,
     ) -> ProgressWorker {
         ProgressWorker { src_share, input, progress_info }
@@ -98,6 +98,9 @@ impl ProgressWorker {
                         eta,
                     };
                     self.progress_info.progress(&detailed_progress);
+                }
+                ProgressMessage::EndSync => {
+                    break;
                 }
             }
             send_mess(LogMessage::TotalSync(stats), send_log)?;
