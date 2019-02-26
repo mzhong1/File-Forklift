@@ -128,30 +128,19 @@ impl WalkWorker {
                 if file_path != this.as_path() && file_path != parent.as_path() {
                     let newpath = src_path.join(&file_path);
                     self.send_file(&newpath, &mut src_context)?;
-                    match entry.filetype() {
-                        GenericFileType::Directory => {
-                            debug!("dir: {:?}", &newpath);
-                            let loop_contexts = contexts.clone();
-                            spawner.spawn(|_| {
-                                let mut contexts = loop_contexts;
-                                let newpath = newpath;
-                                if let Err(e) =
-                                    self.t_walk(&dest_root, &newpath, &mut contexts, &pool)
-                                {
-                                    let mess = ProgressMessage::SendError(ForkliftError::FSError(
-                                        format!("Error {:?}, Unable to recursively call", e),
-                                    ));
-                                    self.progress_output.send(mess).unwrap()
-                                }
-                            });
-                        }
-                        GenericFileType::File => {
-                            debug!("file: {:?}", &newpath);
-                        }
-                        GenericFileType::Link => {
-                            debug!("link: {:?}", &newpath);
-                        }
-                        GenericFileType::Other => {}
+                    if let Some(true) = is_dir(&newpath, &entry) {
+                        let loop_contexts = contexts.clone();
+                        spawner.spawn(|_| {
+                            let mut contexts = loop_contexts;
+                            let newpath = newpath;
+                            if let Err(e) = self.t_walk(&dest_root, &newpath, &mut contexts, &pool)
+                            {
+                                let mess = ProgressMessage::SendError(ForkliftError::FSError(
+                                    format!("Error {:?}, Unable to recursively call", e),
+                                ));
+                                self.progress_output.send(mess).expect("Unable to send progress")
+                            }
+                        });
                     }
                     if check {
                         let check_path = check_path.join(&file_path);
@@ -159,13 +148,14 @@ impl WalkWorker {
                     }
                 }
             }
-            let check_path = self.get_check_path(&src_path, &dest_root)?;
             // check through dest files
+            let check_path = self.get_check_path(&src_path, &dest_root)?;
             self.check_and_remove((check, &mut check_paths), (&check_path, &mut dest_context))?;
             Ok(())
         })?;
         Ok(())
     }
+
     /// send a file to the rsync worker
     fn send_file(&self, path: &Path, context: &mut ProtocolContext) -> ForkliftResult<bool> {
         let meta = self.process_file(path, context, &self.nodes.clone())?;
@@ -200,18 +190,8 @@ impl WalkWorker {
                 if self.send_file(&newpath, src_context)? {
                     total_files += 1;
                 };
-                match entry.filetype() {
-                    GenericFileType::Directory => {
-                        debug!("dir: {:?}", &newpath);
-                        stack.push(newpath);
-                    }
-                    GenericFileType::File => {
-                        debug!("file: {:?}", newpath);
-                    }
-                    GenericFileType::Link => {
-                        debug!("link: {:?}", newpath);
-                    }
-                    GenericFileType::Other => {}
+                if let Some(true) = is_dir(&newpath, &entry) {
+                    stack.push(newpath);
                 }
                 if check {
                     let check_path = check_path.join(file_path);
@@ -221,6 +201,7 @@ impl WalkWorker {
         }
         Ok(total_files)
     }
+
     /// Linear filesystem walker
     pub fn s_walk(
         &self,
@@ -331,6 +312,25 @@ impl WalkWorker {
     }
 }
 
+/// check if directory entry is a directory
+fn is_dir(path: &Path, entry: &DirEntryType) -> Option<bool> {
+    match entry.filetype() {
+        GenericFileType::Directory => {
+            debug!("dir: {:?}", path);
+            Some(true)
+        }
+        GenericFileType::File => {
+            debug!("file: {:?}", path);
+            Some(false)
+        }
+        GenericFileType::Link => {
+            debug!("link: {:?}", path);
+            Some(false)
+        }
+        GenericFileType::Other => None,
+    }
+}
+
 /// check if path is in check_paths, and remove if so
 fn contains_and_remove(check_paths: &mut Vec<PathBuf>, check_path: &Path) -> bool {
     for (count, source_path) in check_paths.iter().enumerate() {
@@ -359,18 +359,15 @@ fn remove_dir(path: &Path, dest_context: &mut ProtocolContext) -> ForkliftResult
             if file_path != this.as_path() && file_path != parent.as_path() {
                 let newpath = p.join(&file_path);
                 debug!("remove: {:?}", &newpath);
-                match entry.filetype() {
-                    GenericFileType::Directory => {
+                match is_dir(&newpath, &entry) {
+                    Some(true) => {
                         stack.push(newpath.clone());
                         remove_stack.push(newpath);
                     }
-                    GenericFileType::File => {
+                    Some(false) => {
                         dest_context.unlink(&newpath)?;
                     }
-                    GenericFileType::Link => {
-                        dest_context.unlink(&newpath)?;
-                    }
-                    GenericFileType::Other => {}
+                    None => {}
                 }
             }
         }
