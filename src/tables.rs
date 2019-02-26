@@ -349,7 +349,7 @@ pub fn set_current_node(node: &SocketNode) -> ForkliftResult<()> {
         }
     };
     n.pop();
-    n.push(node.clone());
+    n.push(*node);
     Ok(())
 }
 

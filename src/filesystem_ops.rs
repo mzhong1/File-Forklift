@@ -654,7 +654,7 @@ fn check_acl_sid_remove(check_sid: &Sid, dest_acls: &mut Vec<SmbcAclValue>) -> O
             trace!("Sid to check {}, dest sid {}", *check_sid, &dest_sid);
             if check_sid == dest_sid {
                 let sid = SidType::Numeric(Some(dest_sid.clone()));
-                let return_ace = ACE::Numeric(sid, atype.clone(), *flag, *mask);
+                let return_ace = ACE::Numeric(sid, *atype, *flag, *mask);
                 dest_acls.remove(count);
                 return Some(return_ace);
             }
