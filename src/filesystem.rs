@@ -46,10 +46,10 @@ pub fn get_index_or_rand(pool: &ThreadPool) -> usize {
 pub fn create_nfs_context(
     ip: &str,
     share: &str,
-    level: DebugLevel,
+    level: &DebugLevel,
 ) -> ForkliftResult<ProtocolContext> {
     let nfs = Nfs::new()?;
-    nfs.set_debug(level as i32)?;
+    nfs.set_debug(*level as i32)?;
     nfs.mount(ip, share)?;
     Ok(ProtocolContext::Nfs(nfs))
 }
@@ -60,7 +60,7 @@ pub enum FileSystemType {
     Samba,
     Nfs,
 }
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 /// Debug Level of a Context;
 /// Note, it is not recommended to set the log level above 3 for Samba, as it will cause
 /// significant server slowdown
@@ -68,17 +68,17 @@ pub enum DebugLevel {
     /// Samba level 0
     OFF = 0,
     /// Samba level 1
-    FATAL,
+    FATAL = 1,
     /// Samba level 1
-    ERROR,
+    ERROR = 2,
     /// Samba level 2
-    WARN,
+    WARN = 3,
     /// Samba level 2
-    INFO,
+    INFO = 4,
     /// Samba level 3
-    DEBUG,
+    DEBUG = 5,
     /// Samba level 10
-    ALL,
+    ALL = 6,
 }
 
 #[derive(Clone)]

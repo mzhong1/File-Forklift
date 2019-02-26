@@ -156,8 +156,8 @@ impl Rsyncer {
                 }
                 FileSystemType::Nfs => {
                     let (src_context, dest_context) = (
-                        create_nfs_context(&config.src_server, &config.src_share, level.clone())?,
-                        create_nfs_context(&config.dest_server, &config.dest_share, level.clone())?,
+                        create_nfs_context(&config.src_server, &config.src_share, level)?,
+                        create_nfs_context(&config.dest_server, &config.dest_share, level)?,
                     );
                     contexts.push((src_context, dest_context));
                 }
