@@ -322,8 +322,7 @@ pub fn init_connection(path: String) -> ForkliftResult<Pool<PostgresConnectionMa
         .max_size(10)
         .connection_timeout(Duration::from_secs(300))
         .build(manager)?;
-    //let conn = Connection::connect(path, TlsMode::None).expect("Cannot connect to database");
-    let conn = pool.get().expect("Unable to get postgres connection from pool");
+    let conn = pool.get()?;
     init_errortypes(&conn)?;
     debug!("ErrorTypes Created!");
     init_nodetable(&conn)?;
