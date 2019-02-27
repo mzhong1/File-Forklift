@@ -342,7 +342,7 @@ pub fn copy_link(
     dest: &Entry,
     src_context: &mut ProtocolContext,
     dest_context: &mut ProtocolContext,
-    log_output: &Sender<LogMessage>,
+    logs_send: &Sender<LogMessage>,
 ) -> ForkliftResult<SyncOutcome> {
     //Check if correct Filesytem
     let (src_nfs_context, dest_nfs_context) = match (src_context.clone(), dest_context.clone()) {
@@ -389,7 +389,7 @@ pub fn copy_link(
             ErrorType::FSError,
             format!("Error {}, could not create link from {:?} to {:?}", e, dest_path, src_target),
         );
-        send_mess(mess, log_output)?;
+        send_mess(mess, logs_send)?;
         outcome = SyncOutcome::SymlinkSkipped;
     }
     Ok(outcome)
@@ -467,15 +467,15 @@ fn update_buffer(buf: &mut Vec<u8>, total_buf: &mut Vec<u8>, num_written: u64) {
 /// Send progress and log errors
 fn send_progress(
     progress: ProgressMessage,
-    progress_output: &Sender<ProgressMessage>,
-    log_output: &Sender<LogMessage>,
+    progress_send: &Sender<ProgressMessage>,
+    logs_send: &Sender<LogMessage>,
 ) -> ForkliftResult<()> {
-    if progress_output.send(progress).is_err() {
+    if progress_send.send(progress).is_err() {
         let mess = LogMessage::ErrorType(
             ErrorType::CrossbeamChannelError,
             "Unable to send progress".to_string(),
         );
-        send_mess(mess, log_output)?;
+        send_mess(mess, logs_send)?;
     }
     Ok(())
 }
@@ -487,8 +487,8 @@ pub fn checksum_copy(
     src_context: &mut ProtocolContext,
     dest_context: &mut ProtocolContext,
     is_copy: bool,
-    progress_output: &Sender<ProgressMessage>,
-    log_output: &Sender<LogMessage>,
+    progress_send: &Sender<ProgressMessage>,
+    logs_send: &Sender<LogMessage>,
 ) -> ForkliftResult<SyncOutcome> {
     let (src_path, dest_path) = (src.path(), dest.path());
     let size = match src.metadata() {
@@ -540,7 +540,7 @@ pub fn checksum_copy(
             size: size as usize,
             done: offset as usize,
         };
-        send_progress(progress, progress_output, log_output)?;
+        send_progress(progress, progress_send, logs_send)?;
         if src_buf.is_empty() {
             break;
         }
@@ -573,15 +573,15 @@ pub fn sync_entry(
     dest: &Entry,
     src_context: &mut ProtocolContext,
     dest_context: &mut ProtocolContext,
-    progress_output: &Sender<ProgressMessage>,
-    log_output: &Sender<LogMessage>,
+    progress_send: &Sender<ProgressMessage>,
+    logs_send: &Sender<LogMessage>,
 ) -> ForkliftResult<SyncOutcome> {
     let description = src.path().to_string_lossy().into_owned();
-    send_progress(ProgressMessage::StartSync(description), progress_output, log_output)?;
+    send_progress(ProgressMessage::StartSync(description), progress_send, logs_send)?;
     match src.is_link() {
         Some(true) => {
             trace!("Is link!");
-            return copy_link(src, dest, src_context, dest_context, log_output);
+            return copy_link(src, dest, src_context, dest_context, logs_send);
         }
         Some(false) => (),
         None => {
@@ -604,30 +604,14 @@ pub fn sync_entry(
     match (dest.metadata(), has_different_size(src, dest), is_more_recent(src, dest)) {
         (None, _, _) => {
             debug!("Destination does not exist yet!");
-            checksum_copy(src, dest, src_context, dest_context, true, progress_output, log_output)
+            checksum_copy(src, dest, src_context, dest_context, true, progress_send, logs_send)
         }
         (Some(_), Ok(size_dif), Ok(recent)) => {
             debug!("Is different!!! size {}  recent {}", size_dif, recent);
             if size_dif || recent {
-                checksum_copy(
-                    src,
-                    dest,
-                    src_context,
-                    dest_context,
-                    true,
-                    progress_output,
-                    log_output,
-                )
+                checksum_copy(src, dest, src_context, dest_context, true, progress_send, logs_send)
             } else {
-                checksum_copy(
-                    src,
-                    dest,
-                    src_context,
-                    dest_context,
-                    false,
-                    progress_output,
-                    log_output,
-                )
+                checksum_copy(src, dest, src_context, dest_context, false, progress_send, logs_send)
             }
         }
         (_, Err(e), _) => Err(e),

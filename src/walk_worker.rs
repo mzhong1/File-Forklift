@@ -303,8 +303,6 @@ impl WalkWorker {
                     return Ok(None);
                 }
             };
-            //Note, send only returns an error should the channel disconnect ->
-            //Should we attempt to reconnect the channel?
             self.do_work(Some(src_entry))?;
             return Ok(Some(metadata));
         }

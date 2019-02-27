@@ -3,6 +3,7 @@ use crate::filesystem_ops::SyncOutcome;
 use crate::rsync::SyncStats;
 
 /// enum holding progress messages
+#[derive(Debug)]
 pub enum ProgressMessage {
     /// wrapper for SyncOutcomes
     DoneSyncing(SyncOutcome),

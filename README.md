@@ -31,10 +31,11 @@ Fields for this file are:
     "workgroup": "WORKGROUP",
     "src_path": "/ starting directory of src share",
     "dest_path": "/ starting directory of destination share",
-    "database_url": "postgresql://postgres:meow@127.0.0.1:8080
+    "database_url": "postgresql://postgres:meow@127.0.0.1:8080"
 }
 ```
 ### Dependencies
 1. libnanomsg-dev
 2. libsmbclient-dev
-3. libsmbclient (smbclient, depends on your operating system)
+3. libnfs-dev
+4. libsmbclient (smbclient, depends on your operating system)
