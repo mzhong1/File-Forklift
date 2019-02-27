@@ -1,7 +1,7 @@
 use self::api::service::*;
 use api;
 
-use crossbeam::channel::{Receiver, Sender};
+use crossbeam::channel::{Receiver, Sender, TryRecvError};
 use log::*;
 use nanomsg::{Error, PollFd, PollInOut, PollRequest, Socket};
 use std::net::SocketAddr;
@@ -357,9 +357,16 @@ impl Cluster {
     ) -> ForkliftResult<()> {
         let mut countdown = 0;
         loop {
-            if end_heartbeat_input.try_recv().is_ok() {
-                println!("Got exit");
-                break;
+            match end_heartbeat_input.try_recv() {
+                Ok(_) => {
+                    println!("Got exit");
+                    break;
+                }
+                Err(TryRecvError::Empty) => (),
+                Err(_) => {
+                    println!("Channel to heartbeat broken!");
+                    break;
+                }
             }
             if countdown > 5000 && !*has_nodelist {
                 return Err(ForkliftError::TimeoutError(format!(
@@ -367,7 +374,7 @@ impl Cluster {
                     self.node_address
                 )));
             }
-            ::std::thread::sleep(::std::time::Duration::from_millis(10));
+            std::thread::sleep(std::time::Duration::from_millis(10));
             countdown += 10;
             let mut items: Vec<PollFd> = vec![self.router.new_pollfd(PollInOut::InOut)];
             let mut request = PollRequest::new(&mut items);

@@ -7,9 +7,12 @@ use lazy_static::*;
 use log::*;
 use postgres::*;
 use postgres_derive::*;
+use r2d2::{Pool, PooledConnection};
+use r2d2_postgres::{PostgresConnectionManager, TlsMode};
 
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::Mutex;
+use std::time::Duration;
 
 lazy_static! {
     /// hold the current machine's Socket Address
@@ -94,6 +97,7 @@ impl ErrorLog {
             ForkliftError::HeartbeatError(_) => ErrorType::HeartbeatError,
             ForkliftError::CLIError(_) => ErrorType::InvalidConfigError,
             ForkliftError::ProtobufError(_) => ErrorType::ProtobufError,
+            ForkliftError::R2D2Error(_) => ErrorType::PostgresError,
         };
         let reason = format!("{:?}", err);
         ErrorLog { failure_id, reason, timestamp }
@@ -312,8 +316,13 @@ pub fn init_totalsync(conn: &Connection) -> ForkliftResult<()> {
 }
 
 /// initialize connection to postgres database and initialize all tables
-pub fn init_connection(path: String) -> ForkliftResult<Connection> {
-    let conn = Connection::connect(path, TlsMode::None).expect("Cannot connect to database");
+pub fn init_connection(path: String) -> ForkliftResult<Pool<PostgresConnectionManager>> {
+    let manager = PostgresConnectionManager::new(path, TlsMode::None)?;
+    let pool = r2d2::Pool::builder()
+        .max_size(10)
+        .connection_timeout(Duration::from_secs(300))
+        .build(manager)?;
+    let conn = pool.get()?;
     init_errortypes(&conn)?;
     debug!("ErrorTypes Created!");
     init_nodetable(&conn)?;
@@ -324,7 +333,7 @@ pub fn init_connection(path: String) -> ForkliftResult<Connection> {
     debug!("Files Created!");
     init_totalsync(&conn)?;
     debug!("TotalSync Created!");
-    Ok(conn)
+    Ok(pool)
 }
 
 /// set the current node to this machine's socket address
@@ -455,7 +464,10 @@ pub fn update_files(file: &Files, conn: &Connection) -> ForkliftResult<()> {
 }
 
 /// wrapper for update_files
-pub fn post_update_files(file: &Files, conn: &Option<Connection>) -> ForkliftResult<()> {
+pub fn post_update_files(
+    file: &Files,
+    conn: &Option<PooledConnection<PostgresConnectionManager>>,
+) -> ForkliftResult<()> {
     if let Some(e) = conn {
         update_files(&file, &e)?
     }
@@ -463,7 +475,10 @@ pub fn post_update_files(file: &Files, conn: &Option<Connection>) -> ForkliftRes
 }
 
 /// wrapper for update_totalsync
-pub fn post_update_totalsync(stat: &SyncStats, conn: &Option<Connection>) -> ForkliftResult<()> {
+pub fn post_update_totalsync(
+    stat: &SyncStats,
+    conn: &Option<PooledConnection<PostgresConnectionManager>>,
+) -> ForkliftResult<()> {
     if let Some(e) = conn {
         let tot_stat = TotalSync::new(&stat);
         update_totalsync(&tot_stat, e)?;
@@ -472,7 +487,10 @@ pub fn post_update_totalsync(stat: &SyncStats, conn: &Option<Connection>) -> For
 }
 
 /// wrapper for update_nodes
-pub fn post_update_nodes(status: &Nodes, conn: &Option<Connection>) -> ForkliftResult<()> {
+pub fn post_update_nodes(
+    status: &Nodes,
+    conn: &Option<PooledConnection<PostgresConnectionManager>>,
+) -> ForkliftResult<()> {
     if let Some(e) = conn {
         update_nodes(&status, &e)?;
     }
@@ -483,7 +501,7 @@ pub fn post_update_nodes(status: &Nodes, conn: &Option<Connection>) -> ForkliftR
 pub fn post_err(
     err_type: ErrorType,
     reason: String,
-    conn: &Option<Connection>,
+    conn: &Option<PooledConnection<PostgresConnectionManager>>,
 ) -> ForkliftResult<()> {
     error!("{}", reason);
     if let Some(e) = &conn {
@@ -494,7 +512,10 @@ pub fn post_err(
 }
 
 /// post a ForkliftError
-pub fn post_forklift_err(e: &ForkliftError, conn: &Option<Connection>) -> ForkliftResult<()> {
+pub fn post_forklift_err(
+    e: &ForkliftError,
+    conn: &Option<PooledConnection<PostgresConnectionManager>>,
+) -> ForkliftResult<()> {
     error!("{:?}", e);
     if let Some(c) = &conn {
         let fail = ErrorLog::from_err(e, current_time());

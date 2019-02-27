@@ -5,6 +5,7 @@ use derive_error as de;
 use nanomsg::Error as NanomsgError;
 use postgres::Error as PostgresError;
 use protobuf::ProtobufError;
+use r2d2::Error as R2D2Error;
 use serde_json::Error as SerdeJsonError;
 use smbc::Error as SmbcError;
 use std::io::Error as IoError;
@@ -51,6 +52,7 @@ pub enum ForkliftError {
     SystemTimeError(SystemTimeError),
     #[error(msg_embedded, non_std, no_from)]
     TimeoutError(String),
+    R2D2Error(R2D2Error),
 }
 
 impl From<FromUtf16Error> for ForkliftError {

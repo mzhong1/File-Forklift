@@ -1,7 +1,7 @@
 use clap::*;
 use clap::{App, Arg};
 use crossbeam::channel;
-use crossbeam::channel::{Receiver, Sender};
+use crossbeam::channel::{Receiver, Sender, TryRecvError};
 use log::*;
 use nanomsg::{Protocol, Socket};
 use rendezvous_hash::{DefaultNodeHasher, RendezvousNodes};
@@ -227,12 +227,8 @@ fn main() -> ForkliftResult<()> {
     } else {
         None
     };
-    let postgres_logger = PostgresLogger::new(
-        &Arc::new(Mutex::new(conn)),
-        log_input,
-        end_heartbeat.clone(),
-        end_rendezvous.clone(),
-    );
+    let postgres_logger =
+        PostgresLogger::new(conn, log_input, end_heartbeat.clone(), end_rendezvous.clone());
     rayon::spawn(move || postgres_logger.start().unwrap());
     if input.nodes.len() < 2 {
         let mess = LogMessage::ErrorType(
@@ -358,11 +354,18 @@ fn rendezvous(
 ) -> ForkliftResult<()> {
     debug!("Started Rendezvous");
     loop {
-        if heartbeat_input.try_recv().is_ok() {
-            println!("Got exit");
-            let node = Nodes::new(NodeStatus::NodeFinished)?;
-            send_mess(LogMessage::Nodes(node), &log_output)?;
-            break;
+        match heartbeat_input.try_recv() {
+            Ok(_) => {
+                println!("Got exit");
+                let node = Nodes::new(NodeStatus::NodeFinished)?;
+                send_mess(LogMessage::Nodes(node), &log_output)?;
+                break;
+            }
+            Err(TryRecvError::Empty) => (),
+            Err(_) => {
+                println!("Channel to heartbeat broken!");
+                break;
+            }
         }
         let mut list = match active_nodes.lock() {
             Ok(arr) => arr,
