@@ -215,26 +215,26 @@ pub fn init_errortypes(conn: &Connection) -> ForkliftResult<()> {
         BEGIN
             IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'ErrorType') THEN
             CREATE TYPE \"ErrorType\" AS ENUM (
-            'IoError',
-            'SystemTimeError', 
-            'NanomsgError', 
-            'AddrParseError', 
-            'SmbcError',
-            'FromUtf16Error',
-            'FromUtf8Error',
-            'StringParseError',
-            'IpLocalError',
-            'InvalidConfigError',
-            'FSError',
-            'RecvError', 
-            'SerdeJsonError',
+            'AddrParseError',
             'ChecksumError',
             'CrossbeamChannelError',
-            'PostgresError',
-            'PoisonedMutexError',
-            'TimeoutError',
+            'FromUtf16Error',
+            'FromUtf8Error',
+            'FSError',
             'HeartbeatError',
-            'ProtobufError');
+            'InvalidConfigError',
+            'IoError',
+            'IpLocalError',
+            'NanomsgError',
+            'PoisonedMutexError',
+            'PostgresError',
+            'ProtobufError',
+            'RecvError',
+            'SerdeJsonError',
+            'SmbcError',
+            'StringParseError',
+            'SystemTimeError',
+            'TimeoutError');
             END IF;
         END
         $$",
@@ -322,8 +322,7 @@ pub fn init_connection(path: &str) -> ForkliftResult<Pool<PostgresConnectionMana
         .max_size(10)
         .connection_timeout(Duration::from_secs(300))
         .build(manager)?;
-    //let conn = Connection::connect(path, TlsMode::None).expect("Cannot connect to database");
-    let conn = pool.get().expect("Unable to get postgres connection from pool");
+    let conn = pool.get()?;
     init_errortypes(&conn)?;
     debug!("ErrorTypes Created!");
     init_nodetable(&conn)?;
@@ -377,7 +376,7 @@ pub fn update_nodes(node: &Nodes, conn: &Connection) -> ForkliftResult<()> {
     if let NodeStatus::NodeDied = node.node_status {
         let mut status: NodeStatus = NodeStatus::NodeAdded;
         for row in &conn.query(
-            "SELECT node_status FROM Nodes WHERE node.ip = $1 AND node.port = $2",
+            "SELECT node_status FROM Nodes WHERE ip = $1 AND port = $2",
             &[&node.node_ip, &node.node_port],
         )? {
             status = row.get(0);
