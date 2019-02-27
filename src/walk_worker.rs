@@ -22,6 +22,8 @@ lazy_static! {
 pub struct WalkWorker {
     /// source path
     source: PathBuf,
+    /// destination root path
+    destination: PathBuf,
     /// Current Node to determine what is processed
     node: SocketNode,
     /// Nodes to calculate entry processor
@@ -36,12 +38,20 @@ impl WalkWorker {
     /// create a new WalkWorker
     pub fn new(
         source: &Path,
+        destination: &Path,
         node: SocketNode,
         nodes: Arc<Mutex<RendezvousNodes<SocketNode, DefaultNodeHasher>>>,
         entry_outputs: Vec<Sender<Option<Entry>>>,
         progress_output: Sender<ProgressMessage>,
     ) -> WalkWorker {
-        WalkWorker { entry_outputs, progress_output, source: source.to_path_buf(), nodes, node }
+        WalkWorker {
+            entry_outputs,
+            progress_output,
+            source: source.to_path_buf(),
+            destination: destination.to_path_buf(),
+            nodes,
+            node,
+        }
     }
 
     /// stop all senders, ending walk
@@ -99,8 +109,7 @@ impl WalkWorker {
     /// threaded, recursive filetree walker
     pub fn t_walk(
         &self,
-        dest_root: &Path,
-        src_path: &Path,
+        path: &Path,
         contexts: &mut Vec<(ProtocolContext, ProtocolContext)>,
         pool: &ThreadPool,
     ) -> ForkliftResult<()> {
@@ -114,9 +123,9 @@ impl WalkWorker {
                 }
             };
             let mut check_paths: Vec<PathBuf> = vec![];
-            let check_path = self.get_check_path(&src_path, dest_root)?;
+            let check_path = self.get_check_path(&path)?;
             let check = exist(&check_path, &mut dest_context);
-            let dir = src_context.opendir(&src_path)?;
+            let dir = src_context.opendir(&path)?;
             for entrytype in dir {
                 let entry = match entrytype {
                     Ok(f) => f,
@@ -126,15 +135,14 @@ impl WalkWorker {
                 };
                 let file_path = entry.path();
                 if file_path != this.as_path() && file_path != parent.as_path() {
-                    let newpath = src_path.join(&file_path);
+                    let newpath = path.join(&file_path);
                     self.send_file(&newpath, &mut src_context)?;
                     if let Some(true) = is_dir(&newpath, &entry) {
                         let loop_contexts = contexts.clone();
                         spawner.spawn(|_| {
                             let mut contexts = loop_contexts;
                             let newpath = newpath;
-                            if let Err(e) = self.t_walk(&dest_root, &newpath, &mut contexts, &pool)
-                            {
+                            if let Err(e) = self.t_walk(&newpath, &mut contexts, &pool) {
                                 let mess = ProgressMessage::SendError(ForkliftError::FSError(
                                     format!("Error {:?}, Unable to recursively call", e),
                                 ));
@@ -149,7 +157,7 @@ impl WalkWorker {
                 }
             }
             // check through dest files
-            let check_path = self.get_check_path(&src_path, &dest_root)?;
+            let check_path = self.get_check_path(&path)?;
             self.check_and_remove((check, &mut check_paths), (&check_path, &mut dest_context))?;
             Ok(())
         })?;
@@ -205,7 +213,6 @@ impl WalkWorker {
     /// Linear filesystem walker
     pub fn s_walk(
         &self,
-        root_path: &Path,
         src_context: &mut ProtocolContext,
         dest_context: &mut ProtocolContext,
     ) -> ForkliftResult<()> {
@@ -216,7 +223,7 @@ impl WalkWorker {
             let mut check_paths: Vec<PathBuf> = vec![];
             match stack.pop() {
                 Some(path) => {
-                    let check_path = self.get_check_path(&path, root_path)?;
+                    let check_path = self.get_check_path(&path)?;
                     check = exist(&check_path, dest_context);
                     let dir = src_context.opendir(&path)?;
                     num_files += self.walk_loop(
@@ -236,9 +243,9 @@ impl WalkWorker {
         Ok(())
     }
     /// get the destination path to check against
-    fn get_check_path(&self, source_path: &Path, root_path: &Path) -> ForkliftResult<PathBuf> {
+    fn get_check_path(&self, source_path: &Path) -> ForkliftResult<PathBuf> {
         let rel_path = get_rel_path(&source_path, &self.source)?;
-        Ok(root_path.join(rel_path))
+        Ok(self.destination.join(rel_path))
     }
 
     /// check if path exists and remove from list of paths in directory
@@ -255,6 +262,9 @@ impl WalkWorker {
                 let file_path = entry.path();
                 if file_path != this.as_path() && file_path != parent.as_path() {
                     let newpath = check_path.join(file_path);
+                    if newpath == Path::new("/removeeee") {
+                        println!("{:?}", &newpath);
+                    }
                     if !contains_and_remove(check_paths, &newpath) {
                         match entry.filetype() {
                             GenericFileType::Directory => {

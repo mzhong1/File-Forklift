@@ -180,8 +180,9 @@ impl Rsyncer {
         let mut contexts = self.create_contexts(config, username, password)?;
         //create workers
         let (send_handles, syncers) = self.create_syncers(num_threads, &send_prog);
+        let (src_path, dest_path) = (self.source.as_path(), self.destination.as_path());
         let walk_worker =
-            WalkWorker::new(self.source.as_path(), current_node, nodelist, send_handles, send_prog);
+            WalkWorker::new(src_path, dest_path, current_node, nodelist, send_handles, send_prog);
         let progress_worker = ProgressWorker::new(src_share, self.progress_info, rec_prog);
         rayon::spawn(move || {
             progress_worker.start(&copy_log_output).expect("Progress Worker Failed");
@@ -194,13 +195,12 @@ impl Rsyncer {
 
         if num_threads == 1 {
             let (mut fs, mut destfs) = contexts[0].clone();
-            walk_worker.s_walk(self.source.as_path(), &mut fs, &mut destfs)?;
+            walk_worker.s_walk(&mut fs, &mut destfs)?;
             walk_worker.stop()?;
         }
-        let (src_path, dest_path) = (self.source.as_path(), self.destination.as_path());
         pool.install(|| {
             if num_threads > 1 {
-                if let Err(e) = walk_worker.t_walk(dest_path, src_path, &mut contexts, &pool) {
+                if let Err(e) = walk_worker.t_walk(src_path, &mut contexts, &pool) {
                     return Err(e);
                 }
                 walk_worker.stop()?;
