@@ -12,6 +12,8 @@ use crate::tables::*;
 pub struct ProgressWorker {
     /// source share name
     src_share: String,
+    /// destination share name
+    dest_share: String,
     /// output printing program
     progress_info: Box<ProgressInfo + Send + Sync>,
     /// channel input for ProgressMessages
@@ -22,10 +24,16 @@ impl ProgressWorker {
     /// create a new ProgressWorker
     pub fn new(
         src_share: &str,
+        dest_share: &str,
         progress_info: Box<ProgressInfo + Send + Sync>,
         input: Receiver<ProgressMessage>,
     ) -> ProgressWorker {
-        ProgressWorker { src_share: src_share.to_string(), input, progress_info }
+        ProgressWorker {
+            src_share: src_share.to_string(),
+            dest_share: dest_share.to_string(),
+            input,
+            progress_info,
+        }
     }
 
     /// Process ProgressMessages, sending logs to postgres_logger, and track current progress through
@@ -37,6 +45,7 @@ impl ProgressWorker {
         let mut index = 0;
         let mut total_done = 0;
         let now = Instant::now();
+        self.progress_info.start(&self.src_share, &self.dest_share);
         for progress in self.input.iter() {
             match progress {
                 ProgressMessage::Todo { num_files, total_size } => {

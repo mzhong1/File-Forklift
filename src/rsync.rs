@@ -176,7 +176,8 @@ impl Rsyncer {
         nodelist: Arc<Mutex<RendezvousNodes<SocketNode, DefaultNodeHasher>>>,
         current_node: SocketNode,
     ) -> ForkliftResult<()> {
-        let (num_threads, src_share) = (config.num_threads, &config.src_share);
+        let (num_threads, src_share, dest_share) =
+            (config.num_threads, &config.src_share, &config.dest_share);
         let (send_prog, rec_prog) = channel::unbounded::<ProgressMessage>();
         let (send_prog_thread, copy_log_output) = (send_prog.clone(), self.log_output.clone());
         let contexts = self.create_contexts(config, username, password)?;
@@ -192,7 +193,8 @@ impl Rsyncer {
             send_handles,
             send_prog,
         );
-        let progress_worker = ProgressWorker::new(src_share, self.progress_info, rec_prog);
+        let progress_worker =
+            ProgressWorker::new(src_share, dest_share, self.progress_info, rec_prog);
         rayon::spawn(move || {
             progress_worker.start(&copy_log_output).expect("Progress Worker Failed");
         });
