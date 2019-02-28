@@ -24,6 +24,8 @@ pub struct WalkWorker {
     source: PathBuf,
     /// destination root path
     destination: PathBuf,
+    /// list of contexts
+    contexts: Vec<(ProtocolContext, ProtocolContext)>,
     /// Current Node to determine what is processed
     node: SocketNode,
     /// Nodes to calculate entry processor
@@ -39,6 +41,7 @@ impl WalkWorker {
     pub fn new(
         source: &Path,
         destination: &Path,
+        contexts: Vec<(ProtocolContext, ProtocolContext)>,
         node: SocketNode,
         nodes: Arc<Mutex<RendezvousNodes<SocketNode, DefaultNodeHasher>>>,
         entry_outputs: Vec<Sender<Option<Entry>>>,
@@ -47,6 +50,7 @@ impl WalkWorker {
         WalkWorker {
             entry_outputs,
             progress_output,
+            contexts,
             source: source.to_path_buf(),
             destination: destination.to_path_buf(),
             nodes,
@@ -107,24 +111,19 @@ impl WalkWorker {
     }
 
     /// threaded, recursive filetree walker
-    pub fn t_walk(
-        &self,
-        path: &Path,
-        contexts: &mut Vec<(ProtocolContext, ProtocolContext)>,
-        pool: &ThreadPool,
-    ) -> ForkliftResult<()> {
+    pub fn t_walk(&self, path: &Path, pool: &ThreadPool) -> ForkliftResult<()> {
         rayon::scope(|spawner| {
-            let index = get_index_or_rand(pool) % contexts.len();
+            let index = get_index_or_rand(pool) % self.contexts.len();
             debug!("{:?}", index);
-            let (mut src_context, mut dest_context) = match contexts.get(index) {
-                Some((src, dest)) => (src.clone(), dest.clone()),
+            let (src_context, dest_context) = match self.contexts.get(index) {
+                Some((src, dest)) => (src, dest),
                 None => {
                     return Err(ForkliftError::FSError("Unable to retrieve contexts".to_string()));
                 }
             };
             let mut check_paths: Vec<PathBuf> = vec![];
             let check_path = self.get_check_path(&path)?;
-            let check = exist(&check_path, &mut dest_context);
+            let check = exist(&check_path, dest_context);
             let dir = src_context.opendir(&path)?;
             for entrytype in dir {
                 let entry = match entrytype {
@@ -136,13 +135,11 @@ impl WalkWorker {
                 let file_path = entry.path();
                 if file_path != this.as_path() && file_path != parent.as_path() {
                     let newpath = path.join(&file_path);
-                    self.send_file(&newpath, &mut src_context)?;
+                    self.send_file(&newpath, src_context)?;
                     if let Some(true) = is_dir(&newpath, &entry) {
-                        let loop_contexts = contexts.clone();
                         spawner.spawn(|_| {
-                            let mut contexts = loop_contexts;
                             let newpath = newpath;
-                            if let Err(e) = self.t_walk(&newpath, &mut contexts, &pool) {
+                            if let Err(e) = self.t_walk(&newpath, &pool) {
                                 let mess = ProgressMessage::SendError(ForkliftError::FSError(
                                     format!("Error {:?}, Unable to recursively call", e),
                                 ));
@@ -158,15 +155,15 @@ impl WalkWorker {
             }
             // check through dest files
             let check_path = self.get_check_path(&path)?;
-            self.check_and_remove((check, &mut check_paths), (&check_path, &mut dest_context))?;
+            self.check_and_remove((check, &mut check_paths), (&check_path, dest_context))?;
             Ok(())
         })?;
         Ok(())
     }
 
     /// send a file to the rsync worker
-    fn send_file(&self, path: &Path, context: &mut ProtocolContext) -> ForkliftResult<bool> {
-        let meta = self.process_file(path, context, &self.nodes.clone())?;
+    fn send_file(&self, path: &Path, context: &ProtocolContext) -> ForkliftResult<bool> {
+        let meta = self.process_file(path, context)?;
         if let Some(meta) = meta {
             if let Err(e) = self
                 .progress_output
@@ -186,7 +183,7 @@ impl WalkWorker {
         &self,
         (path, stack): (&Path, &mut Vec<PathBuf>),
         (check, check_path, check_paths): (bool, &Path, &mut Vec<PathBuf>),
-        (dir, src_context): (DirectoryType, &mut ProtocolContext),
+        (dir, src_context): (DirectoryType, &ProtocolContext),
     ) -> ForkliftResult<u64> {
         let mut total_files = 0;
         for entrytype in dir {
@@ -211,11 +208,13 @@ impl WalkWorker {
     }
 
     /// Linear filesystem walker
-    pub fn s_walk(
-        &self,
-        src_context: &mut ProtocolContext,
-        dest_context: &mut ProtocolContext,
-    ) -> ForkliftResult<()> {
+    pub fn s_walk(&self) -> ForkliftResult<()> {
+        let (src_context, dest_context) = match self.contexts.get(0) {
+            Some((src, dest)) => (src, dest),
+            None => {
+                return Err(ForkliftError::FSError("Unable to retrieve contexts".to_string()));
+            }
+        };
         let mut num_files = 0;
         let mut stack: Vec<PathBuf> = vec![self.source.clone()];
         loop {
@@ -252,7 +251,7 @@ impl WalkWorker {
     fn check_and_remove(
         &self,
         (check, check_paths): (bool, &mut Vec<PathBuf>),
-        (check_path, dest_context): (&PathBuf, &mut ProtocolContext),
+        (check_path, dest_context): (&Path, &ProtocolContext),
     ) -> ForkliftResult<()> {
         // check through dest files
         if check {
@@ -287,10 +286,9 @@ impl WalkWorker {
     fn process_file(
         &self,
         entry: &Path,
-        src_context: &mut ProtocolContext,
-        nodes: &Arc<Mutex<RendezvousNodes<SocketNode, DefaultNodeHasher>>>,
+        src_context: &ProtocolContext,
     ) -> ForkliftResult<Option<Stat>> {
-        let node = match nodes.lock() {
+        let node = match self.nodes.lock() {
             Ok(e) => {
                 let mut list = e;
                 trace!("{:?}", list.calc_candidates(&entry.to_string_lossy()).collect::<Vec<_>>());
@@ -351,7 +349,7 @@ fn contains_and_remove(check_paths: &mut Vec<PathBuf>, check_path: &Path) -> boo
 }
 
 /// recursively remove a directory in destination that is not in source
-fn remove_dir(path: &Path, dest_context: &mut ProtocolContext) -> ForkliftResult<()> {
+fn remove_dir(path: &Path, dest_context: &ProtocolContext) -> ForkliftResult<()> {
     let mut stack: Vec<PathBuf> = vec![(*path).to_path_buf()];
     let mut remove_stack: Vec<PathBuf> = vec![(*path).to_path_buf()];
     while let Some(p) = stack.pop() {

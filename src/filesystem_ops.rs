@@ -61,7 +61,7 @@ pub enum SyncOutcome {
 }
 
 /// checks if a path is valid
-pub fn exist(path: &Path, context: &mut ProtocolContext) -> bool {
+pub fn exist(path: &Path, context: &ProtocolContext) -> bool {
     context.stat(path).is_ok()
 }
 
@@ -138,8 +138,8 @@ pub fn get_xattr(
 pub fn make_dir(
     src_path: &Path,
     dest_path: &Path,
-    src_context: &mut ProtocolContext,
-    dest_context: &mut ProtocolContext,
+    src_context: &ProtocolContext,
+    dest_context: &ProtocolContext,
 ) -> ForkliftResult<SyncOutcome> {
     let outcome: SyncOutcome;
     let exists = exist(dest_path, dest_context);
@@ -176,8 +176,8 @@ pub fn make_dir_all(
     src_path: &Path,
     dest_path: &Path,
     root_file_path: &Path,
-    src_context: &mut ProtocolContext,
-    dest_context: &mut ProtocolContext,
+    src_context: &ProtocolContext,
+    dest_context: &ProtocolContext,
 ) -> ForkliftResult<()> {
     let (mut stack, mut src_stack) = (vec![], vec![]);
     let (mut dest_parent, mut src_parent) = (dest_path.parent(), src_path.parent());
@@ -340,8 +340,8 @@ pub fn unlink_outdated_link(path: &Path, nfs_context: &Nfs) -> ForkliftResult<()
 pub fn copy_link(
     src: &Entry,
     dest: &Entry,
-    src_context: &mut ProtocolContext,
-    dest_context: &mut ProtocolContext,
+    src_context: &ProtocolContext,
+    dest_context: &ProtocolContext,
     logs_send: &Sender<LogMessage>,
 ) -> ForkliftResult<SyncOutcome> {
     //Check if correct Filesytem
@@ -417,7 +417,7 @@ fn read_chunk(path: &Path, file: &FileType, offset: u64) -> ForkliftResult<Vec<u
 /// @note since mode is never used, we can set mode to be anything
 fn open_file(
     path: &Path,
-    context: &mut ProtocolContext,
+    context: &ProtocolContext,
     flags: OFlag,
     error: &str,
 ) -> ForkliftResult<FileType> {
@@ -446,7 +446,7 @@ fn write_file(path: &Path, file: &FileType, buffer: &[u8], offset: u64) -> Forkl
     }
 }
 /// helper for checksum copy; creates a new file at path
-fn file_create(path: &Path, context: &mut ProtocolContext, err: &str) -> ForkliftResult<FileType> {
+fn file_create(path: &Path, context: &ProtocolContext, err: &str) -> ForkliftResult<FileType> {
     match context.create(&path, OFlag::O_CREAT, Mode::S_IRWXU | Mode::S_IRWXO | Mode::S_IRWXG) {
         Ok(f) => Ok(f),
         Err(e) => Err(ForkliftError::FSError(format!("Error {}, {}", e, err))),
@@ -484,8 +484,8 @@ fn send_progress(
 pub fn checksum_copy(
     src: &Entry,
     dest: &Entry,
-    src_context: &mut ProtocolContext,
-    dest_context: &mut ProtocolContext,
+    src_context: &ProtocolContext,
+    dest_context: &ProtocolContext,
     is_copy: bool,
     progress_send: &Sender<ProgressMessage>,
     logs_send: &Sender<LogMessage>,
@@ -571,8 +571,8 @@ pub fn checksum_copy(
 pub fn sync_entry(
     src: &Entry,
     dest: &Entry,
-    src_context: &mut ProtocolContext,
-    dest_context: &mut ProtocolContext,
+    src_context: &ProtocolContext,
+    dest_context: &ProtocolContext,
     progress_send: &Sender<ProgressMessage>,
     logs_send: &Sender<LogMessage>,
 ) -> ForkliftResult<SyncOutcome> {

@@ -114,18 +114,20 @@ impl Rsyncer {
     /// respective input channels
     pub fn create_syncers(
         &self,
-        num_threads: u32,
+        contexts: &[(ProtocolContext, ProtocolContext)],
         send_progress: &Sender<ProgressMessage>,
     ) -> (Vec<Sender<Option<Entry>>>, Vec<RsyncWorker>) {
         let mut send_handles: Vec<Sender<Option<Entry>>> = Vec::new();
         let mut syncers: Vec<RsyncWorker> = Vec::new();
-        for _ in 0..num_threads {
+        for (src_context, dest_context) in contexts {
             let (send_e, rec_e) = channel::unbounded();
             send_handles.push(send_e);
             let sync_progress = send_progress.clone();
             syncers.push(RsyncWorker::new(
                 self.source.as_path(),
                 self.destination.as_path(),
+                src_context.clone(),
+                dest_context.clone(),
                 rec_e,
                 sync_progress,
                 self.log_output.clone(),
@@ -177,12 +179,19 @@ impl Rsyncer {
         let (num_threads, src_share) = (config.num_threads, &config.src_share);
         let (send_prog, rec_prog) = channel::unbounded::<ProgressMessage>();
         let (send_prog_thread, copy_log_output) = (send_prog.clone(), self.log_output.clone());
-        let mut contexts = self.create_contexts(config, username, password)?;
+        let contexts = self.create_contexts(config, username, password)?;
         //create workers
-        let (send_handles, syncers) = self.create_syncers(num_threads, &send_prog);
+        let (send_handles, syncers) = self.create_syncers(&contexts, &send_prog);
         let (src_path, dest_path) = (self.source.as_path(), self.destination.as_path());
-        let walk_worker =
-            WalkWorker::new(src_path, dest_path, current_node, nodelist, send_handles, send_prog);
+        let walk_worker = WalkWorker::new(
+            src_path,
+            dest_path,
+            contexts,
+            current_node,
+            nodelist,
+            send_handles,
+            send_prog,
+        );
         let progress_worker = ProgressWorker::new(src_share, self.progress_info, rec_prog);
         rayon::spawn(move || {
             progress_worker.start(&copy_log_output).expect("Progress Worker Failed");
@@ -194,13 +203,12 @@ impl Rsyncer {
             .expect("Unable to build ThreadPool");
 
         if num_threads == 1 {
-            let (mut fs, mut destfs) = contexts[0].clone();
-            walk_worker.s_walk(&mut fs, &mut destfs)?;
+            walk_worker.s_walk()?;
             walk_worker.stop()?;
         }
         pool.install(|| {
             if num_threads > 1 {
-                if let Err(e) = walk_worker.t_walk(src_path, &mut contexts, &pool) {
+                if let Err(e) = walk_worker.t_walk(src_path, &pool) {
                     return Err(e);
                 }
                 walk_worker.stop()?;
@@ -209,7 +217,7 @@ impl Rsyncer {
                 for syncer in syncers {
                     spawner.spawn(|_| {
                         let input = syncer.input.clone();
-                        if let Err(e) = syncer.start(&mut contexts.clone(), &pool) {
+                        if let Err(e) = syncer.start(&pool) {
                             let mess = ProgressMessage::SendError(e);
                             send_prog_thread.send(mess).expect("Unable to send progress");
                         };

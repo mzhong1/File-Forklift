@@ -89,7 +89,7 @@ pub enum ProtocolContext {
 }
 
 impl FileSystem for ProtocolContext {
-    fn create(&mut self, path: &Path, flags: OFlag, mode: Mode) -> ForkliftResult<FileType> {
+    fn create(&self, path: &Path, flags: OFlag, mode: Mode) -> ForkliftResult<FileType> {
         match self {
             ProtocolContext::Nfs(nfs) => {
                 let file = nfs.create(path, flags, mode)?;
@@ -171,7 +171,7 @@ impl FileSystem for ProtocolContext {
     /// Please note that neither Samba nor Nfs use mode in their open function (
     /// the option might exist, but does nothing.) the mode parameter exists should
     /// another Filesystem need to be implemented where it's open function uses mode.
-    fn open(&mut self, path: &Path, flags: OFlag, mode: Mode) -> ForkliftResult<FileType> {
+    fn open(&self, path: &Path, flags: OFlag, mode: Mode) -> ForkliftResult<FileType> {
         match self {
             ProtocolContext::Nfs(nfs) => {
                 let file = nfs.open(path, flags)?;
@@ -183,7 +183,7 @@ impl FileSystem for ProtocolContext {
             }
         }
     }
-    fn opendir(&mut self, path: &Path) -> ForkliftResult<DirectoryType> {
+    fn opendir(&self, path: &Path) -> ForkliftResult<DirectoryType> {
         match self {
             ProtocolContext::Nfs(nfs) => {
                 let dir = nfs.opendir(path)?;
@@ -577,7 +577,7 @@ impl Stat {
 /// General trait describing a Filesystem
 pub trait FileSystem {
     /// create a new FileType with the File trait
-    fn create(&mut self, path: &Path, flags: OFlag, mode: Mode) -> ForkliftResult<FileType>;
+    fn create(&self, path: &Path, flags: OFlag, mode: Mode) -> ForkliftResult<FileType>;
     /// change the permissions on a file/directory to mode
     fn chmod(&self, path: &Path, mode: Mode) -> ForkliftResult<()>;
     /// get the metadata of a file
@@ -585,9 +585,9 @@ pub trait FileSystem {
     /// make a new directory at path
     fn mkdir(&self, path: &Path) -> ForkliftResult<()>;
     /// open a file at path
-    fn open(&mut self, path: &Path, flags: OFlag, mode: Mode) -> ForkliftResult<FileType>;
+    fn open(&self, path: &Path, flags: OFlag, mode: Mode) -> ForkliftResult<FileType>;
     /// open a directory at path
-    fn opendir(&mut self, path: &Path) -> ForkliftResult<DirectoryType>;
+    fn opendir(&self, path: &Path) -> ForkliftResult<DirectoryType>;
     /// rename a file/directory
     fn rename(&self, oldpath: &Path, newpath: &Path) -> ForkliftResult<()>;
     /// remove a directory

@@ -19,6 +19,10 @@ pub struct RsyncWorker {
     source: PathBuf,
     /// destination root path
     destination: PathBuf,
+    /// source context
+    src_context: ProtocolContext,
+    /// destination context
+    dest_context: ProtocolContext,
     /// input channel from WalkWorker
     pub input: Receiver<Option<Entry>>,
     /// channel to send progress
@@ -32,6 +36,8 @@ impl RsyncWorker {
     pub fn new(
         source: &Path,
         destination: &Path,
+        src_context: ProtocolContext,
+        dest_context: ProtocolContext,
         input: Receiver<Option<Entry>>,
         progress_output: Sender<ProgressMessage>,
         log_output: Sender<LogMessage>,
@@ -39,6 +45,8 @@ impl RsyncWorker {
         RsyncWorker {
             source: source.to_path_buf(),
             destination: destination.to_path_buf(),
+            src_context,
+            dest_context,
             input,
             progress_output,
             log_output,
@@ -46,25 +54,14 @@ impl RsyncWorker {
     }
 
     /// Process the entries sent through input channel
-    pub fn start(
-        self,
-        contexts: &mut Vec<(ProtocolContext, ProtocolContext)>,
-        pool: &ThreadPool,
-    ) -> ForkliftResult<()> {
+    pub fn start(self, pool: &ThreadPool) -> ForkliftResult<()> {
         let id = get_index_or_rand(pool);
-        let index = id % contexts.len();
-        let (mut src_context, mut dest_context) = match contexts.get(index) {
-            Some((src, dest)) => (src.clone(), dest.clone()),
-            None => {
-                return Err(ForkliftError::FSError("Unable to retrieve contexts".to_string()));
-            }
-        };
         for entry in self.input.iter() {
             let input_entry = match entry {
                 Some(e) => e,
                 None => break,
             };
-            let sync_outcome = self.sync(&input_entry, &mut src_context, &mut dest_context)?;
+            let sync_outcome = self.sync(&input_entry)?;
             let len = self.input.len();
             debug!("Sync Thread {:?} Outcome: {:?} Num left {:?}", id, sync_outcome, len,);
             let progress = ProgressMessage::DoneSyncing(sync_outcome);
@@ -80,16 +77,12 @@ impl RsyncWorker {
     }
 
     /// process an Entry according to rsync rules
-    fn sync(
-        &self,
-        src_entry: &Entry,
-        src_context: &mut ProtocolContext,
-        dest_context: &mut ProtocolContext,
-    ) -> ForkliftResult<SyncOutcome> {
+    fn sync(&self, src_entry: &Entry) -> ForkliftResult<SyncOutcome> {
         let rel_path = get_rel_path(&src_entry.path(), &self.source)?;
         let dest_path = &self.destination.join(&rel_path);
+        let (src_context, dest_context) = (&self.src_context, &self.dest_context);
         make_dir_all(&src_entry.path(), &dest_path, &self.destination, src_context, dest_context)?;
-        let dest_entry = Entry::new(&dest_path, &dest_context);
+        let dest_entry = Entry::new(&dest_path, dest_context);
         let mut outcome = sync_entry(
             src_entry,
             &dest_entry,
