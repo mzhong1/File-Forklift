@@ -4,15 +4,18 @@ use std::time::{Duration, Instant};
 #[derive(Debug, Copy, Clone)]
 ///  the pulse of the heartbeat protocol, determining when to beat
 pub struct Pulse {
+    /// amount of time b/t each heartbeat in millis
     pub interval: u64,
+    /// The time of the last heartbeat
     c_time: Instant,
+    /// The amount of time b/t each heartbeat as a Duration
     timeout: Duration,
 }
 
 impl Pulse {
     /// create a new Pulse
-    pub fn new(i: u64) -> Self {
-        Pulse { interval: i, c_time: Instant::now(), timeout: Duration::from_millis(i) }
+    pub fn new(interval: u64) -> Self {
+        Pulse { interval, c_time: Instant::now(), timeout: Duration::from_millis(interval) }
     }
 
     /// tell if it is time to heartbeat (if the time elapsed is more than timeout duration)

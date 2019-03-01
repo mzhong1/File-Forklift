@@ -38,24 +38,24 @@ impl Node {
     /// ENSURES: returns true if the node was "dead" before the heartbeat was called
     pub fn heartbeat(&mut self) -> bool {
         trace!("Before Heartbeat: Node {}, liveness {}", self.name, self.liveness);
-        let prev_liveness = self.liveness;
+        let was_dead = self.liveness <= 0;
         self.liveness = self.lifetime as i64;
         self.has_heartbeat = true;
         debug!("Heartbeat Node {}, liveness {}", self.name, self.liveness);
-        prev_liveness <= 0
+        was_dead
     }
 
     /// if a heartbeat is missed, tickdown the liveness of a node
     /// ENSURES: return true if the node "died", reaching liveness 0 in this call to tickdown
     pub fn tickdown(&mut self) -> bool {
         trace!("Before Tickdown: Node {}, liveness {}", self.name, self.liveness);
-        let prev_liveness = self.liveness;
+        let just_died = self.liveness == 1;
         if self.liveness > 0 {
             self.liveness -= 1;
         }
         self.has_heartbeat = false;
         debug!("Tickdown Node {}, liveness {}", self.name, self.liveness);
-        prev_liveness == 1
+        just_died
     }
 }
 impl Hash for Node {
@@ -119,7 +119,7 @@ impl NodeList {
     /// returns true if the socket address is in node_names,
     ///    false otherwise
     pub fn contains_address(&self, node_address: &SocketAddr) -> bool {
-        self.node_list.iter().any(|n| n == node_address)
+        self.node_list.iter().any(|name| name == node_address)
     }
 
     /// add a new node to node_names, else do nothing if address already in node_names
@@ -138,8 +138,8 @@ impl NodeList {
             self.node_list
         );
         let mut names = Vec::new();
-        for n in &self.node_list {
-            names.push(n.to_string());
+        for name in &self.node_list {
+            names.push(name.to_string());
         }
         trace!("Success! returning {:?} from socket list", names);
         names
@@ -173,9 +173,7 @@ impl NodeMap {
         for node_ip in node_names {
             if node_ip != node_address {
                 debug!("node ip addresses and port: {:?}", node_ip);
-                let temp_node = Node::new(*node_ip, lifetime);
-                debug!("Node successfully created : {:?}", &temp_node);
-                nodes.node_map.insert(*node_ip, temp_node);
+                nodes.node_map.insert(*node_ip, Node::new(*node_ip, lifetime));
             }
         }
         Ok(nodes)
@@ -193,10 +191,12 @@ impl NodeMap {
                 "Lifetime of added node is trivial!".to_string(),
             ));
         }
-        trace!("Adding node to map");
-        let temp_node = Node::node_new(*node_address, lifetime, 0, heartbeat);
-        debug!("Node successfully created : {:?}", &temp_node);
-        self.node_map.entry(*node_address).or_insert(temp_node);
+        self.node_map.entry(*node_address).or_insert(Node::node_new(
+            *node_address,
+            lifetime,
+            0,
+            heartbeat,
+        ));
         Ok(())
     }
 }
