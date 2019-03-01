@@ -57,12 +57,6 @@ pub struct ErrorLog {
     timestamp: NaiveDateTime,
 }
 
-/// get the current time
-pub fn current_time() -> NaiveDateTime {
-    let now = Utc::now();
-    NaiveDateTime::from_timestamp(now.timestamp(), now.timestamp_subsec_nanos())
-}
-
 impl ErrorLog {
     /// create a new ErrorLog
     pub fn new(failure_id: ErrorType, reason: &str, timestamp: NaiveDateTime) -> Self {
@@ -106,8 +100,8 @@ impl ErrorLog {
 #[derive(Debug, Clone, ToSql, FromSql)]
 /// Node table entry
 pub struct Nodes {
-    node_ip: String, //as inet?
-    node_port: i32,  //since u16 is not available in postgres
+    node_ip: String,
+    node_port: i32,
     node_status: NodeStatus,
     last_updated: NaiveDateTime,
 }
@@ -162,12 +156,8 @@ pub struct TotalSync {
 
 impl TotalSync {
     /// create a new TotalSync from SyncStats
-    pub fn new(
-        //node_id: Nodes,
-        stats: &SyncStats
-    ) -> Self {
+    pub fn new(stats: &SyncStats) -> Self {
         TotalSync {
-            // node_id,
             total_files: stats.tot_files as i64,
             total_size: stats.tot_size as i64,
             num_synced: stats.num_synced as i64,
@@ -208,7 +198,7 @@ impl Files {
     }
 }
 
-// create ErrorTypes Table
+// create ErrorTypes Enum
 pub fn init_errortypes(conn: &Connection) -> ForkliftResult<()> {
     conn.execute(
         "DO $$
@@ -369,7 +359,7 @@ pub fn get_current_node() -> ForkliftResult<SocketNode> {
     }
 }
 
-/// update Nodelist
+/// update Nodes Table
 /// If current node is Finished, then can only change if node becomes Active
 /// otherwise, store the most recent change message
 pub fn update_nodes(node: &Nodes, conn: &Connection) -> ForkliftResult<()> {
@@ -513,13 +503,19 @@ pub fn post_err(
 
 /// post a ForkliftError
 pub fn post_forklift_err(
-    e: &ForkliftError,
+    err: &ForkliftError,
     conn: &Option<PooledConnection<PostgresConnectionManager>>,
 ) -> ForkliftResult<()> {
-    error!("{:?}", e);
+    error!("{:?}", err);
     if let Some(c) = &conn {
-        let fail = ErrorLog::from_err(e, current_time());
+        let fail = ErrorLog::from_err(err, current_time());
         log_errorlog(&fail, &c)?;
     }
     Ok(())
+}
+
+/// get the current time
+pub fn current_time() -> NaiveDateTime {
+    let now = Utc::now();
+    NaiveDateTime::from_timestamp(now.timestamp(), now.timestamp_subsec_nanos())
 }

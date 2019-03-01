@@ -47,17 +47,6 @@ pub struct PostgresLogger {
     recv_exit: Receiver<EndState>,
 }
 
-/// Send a message to PostgresLogger input
-pub fn send_mess(log: LogMessage, send_log: &Sender<LogMessage>) -> ForkliftResult<()> {
-    trace!("Sending {:?} to postgres", log);
-    if send_log.send(log).is_err() {
-        return Err(ForkliftError::CrossbeamChannelError(
-            "Unable to send error to postgres_logger".to_string(),
-        ));
-    }
-    Ok(())
-}
-
 impl PostgresLogger {
     /// Create new PostgresLogger
     pub fn new(
@@ -122,4 +111,15 @@ impl PostgresLogger {
         }
         Ok(())
     }
+}
+
+/// Send a message to PostgresLogger input
+pub fn send_mess(log: LogMessage, send_log: &Sender<LogMessage>) -> ForkliftResult<()> {
+    trace!("Sending {:?} to postgres", log);
+    if send_log.send(log).is_err() {
+        return Err(ForkliftError::CrossbeamChannelError(
+            "Unable to send error to postgres_logger".to_string(),
+        ));
+    }
+    Ok(())
 }
