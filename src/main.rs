@@ -354,12 +354,12 @@ fn main() -> ForkliftResult<()> {
 fn rendezvous(
     active_nodes: &mut Arc<Mutex<RendezvousNodes<SocketNode, DefaultNodeHasher>>>,
     node_change_input: &Receiver<ChangeList>,
-    heartbeat_input: &Receiver<EndState>,
+    rendezvous_input: &Receiver<EndState>,
     log_output: &Sender<LogMessage>,
 ) -> ForkliftResult<()> {
     debug!("Started Rendezvous");
     loop {
-        match heartbeat_input.try_recv() {
+        match rendezvous_input.try_recv() {
             Ok(_) => {
                 println!("Got exit");
                 let node = Nodes::new(NodeStatus::NodeFinished)?;
