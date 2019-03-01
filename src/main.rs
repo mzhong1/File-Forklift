@@ -134,9 +134,7 @@ fn init_logs(path: &Path, level: simplelog::LevelFilter) -> ForkliftResult<()> {
     Ok(())
 }
 
-/// Main takes in a config file, username, password, debuglevel, and debug path. the 'v' flag
-/// is used to determine debug level of the program
-fn main() -> ForkliftResult<()> {
+fn init_args() -> ForkliftResult<(String, String, Input)> {
     let matches = App::new(crate_name!())
         .author(crate_authors!())
         .about("NFS and Samba filesystem migration program")
@@ -207,12 +205,19 @@ fn main() -> ForkliftResult<()> {
     debug!("Log path: {:?}", logfile);
     info!("Logs made");
 
+    let input = parse_matches(&matches)?;
+
+    Ok((username.to_string(), password.to_string(), input))
+}
+
+/// Main takes in a config file, username, password, debuglevel, and debug path. the 'v' flag
+/// is used to determine debug level of the program
+fn main() -> ForkliftResult<()> {
+    let (username, password, input) = init_args()?;
     let (node_change_output, node_change_input) = channel::unbounded::<ChangeList>();
     let (end_heartbeat, heartbeat_input) = channel::unbounded::<EndState>();
     let (end_rendezvous, rendezvous_input) = channel::unbounded::<EndState>();
     let (log_output, log_input) = channel::unbounded::<LogMessage>();
-
-    let input = parse_matches(&matches)?;
     let config = input.clone();
     //get database url and check if we are logging anything to database
     //SOME if yes, NONE if not logging to DB
@@ -296,7 +301,7 @@ fn main() -> ForkliftResult<()> {
         Box::new(console_info),
         log_output.clone(),
     );
-    let auth = (username, password);
+    let auth = (&*username, &*password);
     let lifetime = input.lifetime;
     rayon::scope(|s| {
         s.spawn(|_| {
