@@ -191,12 +191,9 @@ impl NodeMap {
                 "Lifetime of added node is trivial!".to_string(),
             ));
         }
-        self.node_map.entry(*node_address).or_insert(Node::node_new(
-            *node_address,
-            lifetime,
-            0,
-            heartbeat,
-        ));
+        self.node_map
+            .entry(*node_address)
+            .or_insert_with(|| Node::node_new(*node_address, lifetime, 0, heartbeat));
         Ok(())
     }
 }
