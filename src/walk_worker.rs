@@ -14,8 +14,8 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 lazy_static! {
-    pub static ref this: PathBuf = Path::new(".").to_path_buf();
-    pub static ref parent: PathBuf = Path::new("..").to_path_buf();
+    pub static ref THIS: PathBuf = Path::new(".").to_path_buf();
+    pub static ref PARENT: PathBuf = Path::new("..").to_path_buf();
 }
 
 /// threaded worker to walk through a filesystem
@@ -133,7 +133,7 @@ impl WalkWorker {
                     }
                 };
                 let file_path = entry.path();
-                if file_path != this.as_path() && file_path != parent.as_path() {
+                if file_path != THIS.as_path() && file_path != PARENT.as_path() {
                     let newpath = path.join(&file_path);
                     self.send_file(&newpath, src_context)?;
                     if let Some(true) = is_dir(&newpath, &entry) {
@@ -189,7 +189,7 @@ impl WalkWorker {
         for entrytype in dir {
             let entry = entrytype?;
             let file_path = entry.path();
-            if file_path != this.as_path() && file_path != parent.as_path() {
+            if file_path != THIS.as_path() && file_path != PARENT.as_path() {
                 let newpath = path.join(&file_path);
                 //file exists?
                 if self.send_file(&newpath, src_context)? {
@@ -259,11 +259,8 @@ impl WalkWorker {
             for entrytype in dir {
                 let entry = entrytype?;
                 let file_path = entry.path();
-                if file_path != this.as_path() && file_path != parent.as_path() {
+                if file_path != THIS.as_path() && file_path != PARENT.as_path() {
                     let newpath = check_path.join(file_path);
-                    if newpath == Path::new("/removeeee") {
-                        println!("{:?}", &newpath);
-                    }
                     if !contains_and_remove(check_paths, &newpath) {
                         match entry.filetype() {
                             GenericFileType::Directory => {
@@ -362,7 +359,7 @@ fn remove_dir(path: &Path, dest_context: &ProtocolContext) -> ForkliftResult<()>
                 }
             };
             let file_path = entry.path();
-            if file_path != this.as_path() && file_path != parent.as_path() {
+            if file_path != THIS.as_path() && file_path != PARENT.as_path() {
                 let newpath = p.join(&file_path);
                 debug!("remove: {:?}", &newpath);
                 match is_dir(&newpath, &entry) {
