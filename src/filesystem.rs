@@ -13,7 +13,7 @@ use serde_derive::*;
 use std::path::Path;
 
 /// initialize the Samba context
-pub fn init_samba(wg: &str, un: &str, pw: &str, level: &DebugLevel) -> ForkliftResult<Smbc> {
+pub fn init_samba(wg: &str, un: &str, pw: &str, level: DebugLevel) -> ForkliftResult<Smbc> {
     let debug_level = match level {
         DebugLevel::OFF => 0,
         DebugLevel::FATAL => 1,
@@ -60,7 +60,7 @@ pub enum FileSystemType {
     Samba,
     Nfs,
 }
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 /// Debug Level of a Context;
 /// Note, it is not recommended to set the log level above 3 for Samba, as it will cause
 /// significant server slowdown
@@ -68,17 +68,17 @@ pub enum DebugLevel {
     /// Samba level 0
     OFF = 0,
     /// Samba level 1
-    FATAL,
+    FATAL = 1,
     /// Samba level 1
-    ERROR,
+    ERROR = 2,
     /// Samba level 2
-    WARN,
+    WARN = 3,
     /// Samba level 2
-    INFO,
+    INFO = 4,
     /// Samba level 3
-    DEBUG,
+    DEBUG = 5,
     /// Samba level 10
-    ALL,
+    ALL = 6,
 }
 
 #[derive(Clone)]
@@ -89,7 +89,7 @@ pub enum ProtocolContext {
 }
 
 impl FileSystem for ProtocolContext {
-    fn create(&mut self, path: &Path, flags: OFlag, mode: Mode) -> ForkliftResult<FileType> {
+    fn create(&self, path: &Path, flags: OFlag, mode: Mode) -> ForkliftResult<FileType> {
         match self {
             ProtocolContext::Nfs(nfs) => {
                 let file = nfs.create(path, flags, mode)?;
@@ -171,7 +171,7 @@ impl FileSystem for ProtocolContext {
     /// Please note that neither Samba nor Nfs use mode in their open function (
     /// the option might exist, but does nothing.) the mode parameter exists should
     /// another Filesystem need to be implemented where it's open function uses mode.
-    fn open(&mut self, path: &Path, flags: OFlag, mode: Mode) -> ForkliftResult<FileType> {
+    fn open(&self, path: &Path, flags: OFlag, mode: Mode) -> ForkliftResult<FileType> {
         match self {
             ProtocolContext::Nfs(nfs) => {
                 let file = nfs.open(path, flags)?;
@@ -183,7 +183,7 @@ impl FileSystem for ProtocolContext {
             }
         }
     }
-    fn opendir(&mut self, path: &Path) -> ForkliftResult<DirectoryType> {
+    fn opendir(&self, path: &Path) -> ForkliftResult<DirectoryType> {
         match self {
             ProtocolContext::Nfs(nfs) => {
                 let dir = nfs.opendir(path)?;
@@ -577,7 +577,7 @@ impl Stat {
 /// General trait describing a Filesystem
 pub trait FileSystem {
     /// create a new FileType with the File trait
-    fn create(&mut self, path: &Path, flags: OFlag, mode: Mode) -> ForkliftResult<FileType>;
+    fn create(&self, path: &Path, flags: OFlag, mode: Mode) -> ForkliftResult<FileType>;
     /// change the permissions on a file/directory to mode
     fn chmod(&self, path: &Path, mode: Mode) -> ForkliftResult<()>;
     /// get the metadata of a file
@@ -585,9 +585,9 @@ pub trait FileSystem {
     /// make a new directory at path
     fn mkdir(&self, path: &Path) -> ForkliftResult<()>;
     /// open a file at path
-    fn open(&mut self, path: &Path, flags: OFlag, mode: Mode) -> ForkliftResult<FileType>;
+    fn open(&self, path: &Path, flags: OFlag, mode: Mode) -> ForkliftResult<FileType>;
     /// open a directory at path
-    fn opendir(&mut self, path: &Path) -> ForkliftResult<DirectoryType>;
+    fn opendir(&self, path: &Path) -> ForkliftResult<DirectoryType>;
     /// rename a file/directory
     fn rename(&self, oldpath: &Path, newpath: &Path) -> ForkliftResult<()>;
     /// remove a directory

@@ -176,10 +176,10 @@ impl Cluster {
     pub fn tickdown_nodes(&mut self) -> ForkliftResult<()> {
         self.is_valid_cluster()?;
         trace!("Tickdown and reset nodes");
-        for name in &self.names.to_string_vector() {
+        for name in &self.names.node_list {
             let change_output = &self.node_change_output;
             let log_output = &self.log_output;
-            self.nodes.node_map.entry(name.to_string()).and_modify(|n| {
+            self.nodes.node_map.entry(*name).and_modify(|n| {
                 if !n.has_heartbeat && n.tickdown() {
                     let change_list = ChangeList::new(ChangeType::RemNode, SocketNode::new(n.name));
                     if change_output.send(change_list).is_err() {
@@ -187,8 +187,7 @@ impl Cluster {
                             ErrorType::CrossbeamChannelError,
                             "Channel to rendezvous is broken".to_string(),
                         );
-                        send_mess(mess, log_output).unwrap();
-                        panic!("Channel to rendezvous is broken!");
+                        send_mess(mess, log_output).expect("Channel to rendezvous is broken!");
                     }
                 } else {
                     n.has_heartbeat = false;
@@ -277,7 +276,7 @@ impl Cluster {
                 self.add_node(&sent_address, true)?;
                 let node_change_output = &self.node_change_output;
                 let log_output = &self.log_output;
-                self.nodes.node_map.entry(sent_address.to_string()).and_modify(|n| {
+                self.nodes.node_map.entry(*sent_address).and_modify(|n| {
                     let change_list =
                         ChangeList::new(ChangeType::AddNode, SocketNode::new(*sent_address));
                     if n.heartbeat() && node_change_output.send(change_list).is_err() {
@@ -285,8 +284,7 @@ impl Cluster {
                             ErrorType::CrossbeamChannelError,
                             "Channel to rendezvous is broken".to_string(),
                         );
-                        send_mess(mess, log_output).unwrap();
-                        panic!("Channel to rendezvous is broken!");
+                        send_mess(mess, log_output).expect("Channel to rendezvous is broken!");
                     }
                 });
             }

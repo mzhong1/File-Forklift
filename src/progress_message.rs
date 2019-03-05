@@ -3,6 +3,7 @@ use crate::filesystem_ops::SyncOutcome;
 use crate::rsync::SyncStats;
 
 /// enum holding progress messages
+#[derive(Debug)]
 pub enum ProgressMessage {
     /// wrapper for SyncOutcomes
     DoneSyncing(SyncOutcome),
@@ -19,6 +20,7 @@ pub enum ProgressMessage {
 }
 
 /// Store the progress of the rsync
+#[derive(Clone, Debug)]
 pub struct Progress {
     /// Name of the file being transferred
     pub current_file: String,

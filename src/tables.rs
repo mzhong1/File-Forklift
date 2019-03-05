@@ -24,7 +24,7 @@ lazy_static! {
     };
 }
 
-#[derive(Debug, ToSql, FromSql, Clone, PartialEq)]
+#[derive(Debug, ToSql, FromSql, Copy, Clone, PartialEq)]
 #[postgres(name = "ErrorType")]
 /// Usable ErrorTypes logged in Postgres
 pub enum ErrorType {
@@ -57,16 +57,10 @@ pub struct ErrorLog {
     timestamp: NaiveDateTime,
 }
 
-/// get the current time
-pub fn current_time() -> NaiveDateTime {
-    let now = Utc::now();
-    NaiveDateTime::from_timestamp(now.timestamp(), now.timestamp_subsec_nanos())
-}
-
 impl ErrorLog {
     /// create a new ErrorLog
-    pub fn new(failure_id: ErrorType, reason: String, timestamp: NaiveDateTime) -> Self {
-        ErrorLog { failure_id, reason, timestamp }
+    pub fn new(failure_id: ErrorType, reason: &str, timestamp: NaiveDateTime) -> Self {
+        ErrorLog { failure_id, reason: reason.to_string(), timestamp }
     }
     /// create a new ErrorLog from a ForkliftError
     pub fn from_err(err: &ForkliftError, timestamp: NaiveDateTime) -> Self {
@@ -106,8 +100,8 @@ impl ErrorLog {
 #[derive(Debug, Clone, ToSql, FromSql)]
 /// Node table entry
 pub struct Nodes {
-    node_ip: String, //as inet?
-    node_port: i32,  //since u16 is not available in postgres
+    node_ip: String,
+    node_port: i32,
     node_status: NodeStatus,
     last_updated: NaiveDateTime,
 }
@@ -115,19 +109,19 @@ pub struct Nodes {
 impl Nodes {
     /// create a new Nodes
     pub fn new_all(
-        node_ip: String,
+        node_ip: &str,
         node_port: i32,
         node_status: NodeStatus,
         last_updated: NaiveDateTime,
     ) -> Self {
-        Nodes { node_ip, node_port, node_status, last_updated }
+        Nodes { node_ip: node_ip.to_string(), node_port, node_status, last_updated }
     }
     /// create a new Nodes from a NodeStatus
     pub fn new(node_status: NodeStatus) -> ForkliftResult<Self> {
         let socket = get_current_node()?;
         let last_updated = current_time();
         Ok(Nodes::new_all(
-            socket.get_ip().to_string(),
+            &socket.get_ip().to_string(),
             i32::from(socket.get_port()),
             node_status,
             last_updated,
@@ -143,7 +137,7 @@ pub enum NodeStatus {
     NodeFinished,
 }
 
-#[derive(Debug, Clone, ToSql, FromSql)]
+#[derive(Debug, Clone, Copy, ToSql, FromSql)]
 /// entry for TotalSync table
 pub struct TotalSync {
     total_files: i64,
@@ -162,12 +156,8 @@ pub struct TotalSync {
 
 impl TotalSync {
     /// create a new TotalSync from SyncStats
-    pub fn new(
-        //node_id: Nodes,
-        stats: &SyncStats
-    ) -> Self {
+    pub fn new(stats: &SyncStats) -> Self {
         TotalSync {
-            // node_id,
             total_files: stats.tot_files as i64,
             total_size: stats.tot_size as i64,
             num_synced: stats.num_synced as i64,
@@ -198,43 +188,43 @@ pub struct Files {
 impl Files {
     /// create a new Files
     pub fn new(
-        path: String,
+        path: &str,
         src_checksum: Vec<u8>,
         dest_checksum: Vec<u8>,
         size: i64,
         last_modified_time: NaiveDateTime,
     ) -> Self {
-        Files { path, src_checksum, dest_checksum, size, last_modified_time }
+        Files { path: path.to_string(), src_checksum, dest_checksum, size, last_modified_time }
     }
 }
 
-// create ErrorTypes Table
+// create ErrorTypes Enum
 pub fn init_errortypes(conn: &Connection) -> ForkliftResult<()> {
     conn.execute(
         "DO $$
         BEGIN
             IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'ErrorType') THEN
             CREATE TYPE \"ErrorType\" AS ENUM (
-            'IoError',
-            'SystemTimeError', 
-            'NanomsgError', 
-            'AddrParseError', 
-            'SmbcError',
-            'FromUtf16Error',
-            'FromUtf8Error',
-            'StringParseError',
-            'IpLocalError',
-            'InvalidConfigError',
-            'FSError',
-            'RecvError', 
-            'SerdeJsonError',
+            'AddrParseError',
             'ChecksumError',
             'CrossbeamChannelError',
-            'PostgresError',
-            'PoisonedMutexError',
-            'TimeoutError',
+            'FromUtf16Error',
+            'FromUtf8Error',
+            'FSError',
             'HeartbeatError',
-            'ProtobufError');
+            'InvalidConfigError',
+            'IoError',
+            'IpLocalError',
+            'NanomsgError',
+            'PoisonedMutexError',
+            'PostgresError',
+            'ProtobufError',
+            'RecvError',
+            'SerdeJsonError',
+            'SmbcError',
+            'StringParseError',
+            'SystemTimeError',
+            'TimeoutError');
             END IF;
         END
         $$",
@@ -316,7 +306,7 @@ pub fn init_totalsync(conn: &Connection) -> ForkliftResult<()> {
 }
 
 /// initialize connection to postgres database and initialize all tables
-pub fn init_connection(path: String) -> ForkliftResult<Pool<PostgresConnectionManager>> {
+pub fn init_connection(path: &str) -> ForkliftResult<Pool<PostgresConnectionManager>> {
     let manager = PostgresConnectionManager::new(path, TlsMode::None)?;
     let pool = r2d2::Pool::builder()
         .max_size(10)
@@ -348,7 +338,7 @@ pub fn set_current_node(node: &SocketNode) -> ForkliftResult<()> {
         }
     };
     n.pop();
-    n.push(node.clone());
+    n.push(*node);
     Ok(())
 }
 
@@ -364,19 +354,19 @@ pub fn get_current_node() -> ForkliftResult<SocketNode> {
         }
     };
     match n.get(0) {
-        Some(e) => Ok(e.clone()),
+        Some(e) => Ok(*e),
         None => Err(ForkliftError::FSError("Lazy_static is empty!".to_string())),
     }
 }
 
-/// update Nodelist
+/// update Nodes Table
 /// If current node is Finished, then can only change if node becomes Active
 /// otherwise, store the most recent change message
 pub fn update_nodes(node: &Nodes, conn: &Connection) -> ForkliftResult<()> {
     if let NodeStatus::NodeDied = node.node_status {
         let mut status: NodeStatus = NodeStatus::NodeAdded;
         for row in &conn.query(
-            "SELECT node_status FROM Nodes WHERE node.ip = $1 AND node.port = $2",
+            "SELECT node_status FROM Nodes WHERE ip = $1 AND port = $2",
             &[&node.node_ip, &node.node_port],
         )? {
             status = row.get(0);
@@ -500,7 +490,7 @@ pub fn post_update_nodes(
 /// post an ErrorType error
 pub fn post_err(
     err_type: ErrorType,
-    reason: String,
+    reason: &str,
     conn: &Option<PooledConnection<PostgresConnectionManager>>,
 ) -> ForkliftResult<()> {
     error!("{}", reason);
@@ -513,13 +503,19 @@ pub fn post_err(
 
 /// post a ForkliftError
 pub fn post_forklift_err(
-    e: &ForkliftError,
+    err: &ForkliftError,
     conn: &Option<PooledConnection<PostgresConnectionManager>>,
 ) -> ForkliftResult<()> {
-    error!("{:?}", e);
+    error!("{:?}", err);
     if let Some(c) = &conn {
-        let fail = ErrorLog::from_err(e, current_time());
+        let fail = ErrorLog::from_err(err, current_time());
         log_errorlog(&fail, &c)?;
     }
     Ok(())
+}
+
+/// get the current time
+pub fn current_time() -> NaiveDateTime {
+    let now = Utc::now();
+    NaiveDateTime::from_timestamp(now.timestamp(), now.timestamp_subsec_nanos())
 }

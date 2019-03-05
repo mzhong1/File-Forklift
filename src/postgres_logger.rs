@@ -24,6 +24,7 @@ pub enum LogMessage {
     /// end signal
     End,
 }
+#[derive(Copy, Clone, Debug)]
 pub enum EndState {
     /// End the process
     EndProgram,
@@ -44,17 +45,6 @@ pub struct PostgresLogger {
     send_exit: Sender<EndState>,
     /// channel to receive exit from postgres loop
     recv_exit: Receiver<EndState>,
-}
-
-/// Send a message to PostgresLogger input
-pub fn send_mess(log: LogMessage, send_log: &Sender<LogMessage>) -> ForkliftResult<()> {
-    trace!("Sending {:?} to postgres", log);
-    if send_log.send(log).is_err() {
-        return Err(ForkliftError::CrossbeamChannelError(
-            "Unable to send error to postgres_logger".to_string(),
-        ));
-    }
-    Ok(())
 }
 
 impl PostgresLogger {
@@ -85,7 +75,7 @@ impl PostgresLogger {
                         post_forklift_err(&e, &conn).expect("Add error to ErrorLogs failed");
                     }
                     LogMessage::ErrorType(e, r) => {
-                        post_err(e, r, &conn).expect("Add error to ErrorLogs failed");
+                        post_err(e, &r, &conn).expect("Add error to ErrorLogs failed");
                     }
                     LogMessage::File(f) => {
                         post_update_files(&f, &conn).expect("Add File to Files failed");
@@ -121,4 +111,15 @@ impl PostgresLogger {
         }
         Ok(())
     }
+}
+
+/// Send a message to PostgresLogger input
+pub fn send_mess(log: LogMessage, send_log: &Sender<LogMessage>) -> ForkliftResult<()> {
+    trace!("Sending {:?} to postgres", log);
+    if send_log.send(log).is_err() {
+        return Err(ForkliftError::CrossbeamChannelError(
+            "Unable to send error to postgres_logger".to_string(),
+        ));
+    }
+    Ok(())
 }

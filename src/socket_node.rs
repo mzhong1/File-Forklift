@@ -7,15 +7,16 @@ use std::hash::{Hash, Hasher};
 use std::net::IpAddr;
 use std::net::SocketAddr;
 
-#[derive(Debug, Clone, Eq)]
+#[derive(Debug, Copy, Clone, Eq)]
 /// hashable node containing a Socket Address
 pub struct SocketNode {
+    /// Socket Address and node identifier
     id: SocketAddr,
 }
 impl SocketNode {
     /// create a new SocketNode
-    pub fn new(s: SocketAddr) -> Self {
-        SocketNode { id: s }
+    pub fn new(id: SocketAddr) -> Self {
+        SocketNode { id }
     }
     /// get the ip address
     pub fn get_ip(&self) -> IpAddr {
@@ -73,20 +74,25 @@ impl PartialEq for SocketNode {
     }
 }
 
-/// enum determining how the node_list is changing
+/// enum determining how the active node list is changing
 pub enum ChangeType {
+    /// Add a node to the active node list
     AddNode,
+    /// remove a node from the active node list
     RemNode,
 }
 
 /// wrapper to hold change type and node it effects
 pub struct ChangeList {
+    /// kind of change to make to active node list
     pub change_type: ChangeType,
+    /// node to add/remove from active node list
     pub socket_node: SocketNode,
 }
 
 impl ChangeList {
-    pub fn new(ct: ChangeType, sn: SocketNode) -> Self {
-        ChangeList { change_type: ct, socket_node: sn }
+    /// create a new ChangeList
+    pub fn new(change_type: ChangeType, socket_node: SocketNode) -> Self {
+        ChangeList { change_type, socket_node }
     }
 }

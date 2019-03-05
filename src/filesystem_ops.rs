@@ -61,7 +61,7 @@ pub enum SyncOutcome {
 }
 
 /// checks if a path is valid
-pub fn exist(path: &Path, context: &mut ProtocolContext) -> bool {
+pub fn exist(path: &Path, context: &ProtocolContext) -> bool {
     context.stat(path).is_ok()
 }
 
@@ -138,8 +138,8 @@ pub fn get_xattr(
 pub fn make_dir(
     src_path: &Path,
     dest_path: &Path,
-    src_context: &mut ProtocolContext,
-    dest_context: &mut ProtocolContext,
+    src_context: &ProtocolContext,
+    dest_context: &ProtocolContext,
 ) -> ForkliftResult<SyncOutcome> {
     let outcome: SyncOutcome;
     let exists = exist(dest_path, dest_context);
@@ -176,8 +176,8 @@ pub fn make_dir_all(
     src_path: &Path,
     dest_path: &Path,
     root_file_path: &Path,
-    src_context: &mut ProtocolContext,
-    dest_context: &mut ProtocolContext,
+    src_context: &ProtocolContext,
+    dest_context: &ProtocolContext,
 ) -> ForkliftResult<()> {
     let (mut stack, mut src_stack) = (vec![], vec![]);
     let (mut dest_parent, mut src_parent) = (dest_path.parent(), src_path.parent());
@@ -340,9 +340,9 @@ pub fn unlink_outdated_link(path: &Path, nfs_context: &Nfs) -> ForkliftResult<()
 pub fn copy_link(
     src: &Entry,
     dest: &Entry,
-    src_context: &mut ProtocolContext,
-    dest_context: &mut ProtocolContext,
-    log_output: &Sender<LogMessage>,
+    src_context: &ProtocolContext,
+    dest_context: &ProtocolContext,
+    logs_send: &Sender<LogMessage>,
 ) -> ForkliftResult<SyncOutcome> {
     //Check if correct Filesytem
     let (src_nfs_context, dest_nfs_context) = match (src_context.clone(), dest_context.clone()) {
@@ -389,7 +389,7 @@ pub fn copy_link(
             ErrorType::FSError,
             format!("Error {}, could not create link from {:?} to {:?}", e, dest_path, src_target),
         );
-        send_mess(mess, log_output)?;
+        send_mess(mess, logs_send)?;
         outcome = SyncOutcome::SymlinkSkipped;
     }
     Ok(outcome)
@@ -417,7 +417,7 @@ fn read_chunk(path: &Path, file: &FileType, offset: u64) -> ForkliftResult<Vec<u
 /// @note since mode is never used, we can set mode to be anything
 fn open_file(
     path: &Path,
-    context: &mut ProtocolContext,
+    context: &ProtocolContext,
     flags: OFlag,
     error: &str,
 ) -> ForkliftResult<FileType> {
@@ -446,7 +446,7 @@ fn write_file(path: &Path, file: &FileType, buffer: &[u8], offset: u64) -> Forkl
     }
 }
 /// helper for checksum copy; creates a new file at path
-fn file_create(path: &Path, context: &mut ProtocolContext, err: &str) -> ForkliftResult<FileType> {
+fn file_create(path: &Path, context: &ProtocolContext, err: &str) -> ForkliftResult<FileType> {
     match context.create(&path, OFlag::O_CREAT, Mode::S_IRWXU | Mode::S_IRWXO | Mode::S_IRWXG) {
         Ok(f) => Ok(f),
         Err(e) => Err(ForkliftError::FSError(format!("Error {}, {}", e, err))),
@@ -467,15 +467,15 @@ fn update_buffer(buf: &mut Vec<u8>, total_buf: &mut Vec<u8>, num_written: u64) {
 /// Send progress and log errors
 fn send_progress(
     progress: ProgressMessage,
-    progress_output: &Sender<ProgressMessage>,
-    log_output: &Sender<LogMessage>,
+    progress_send: &Sender<ProgressMessage>,
+    logs_send: &Sender<LogMessage>,
 ) -> ForkliftResult<()> {
-    if progress_output.send(progress).is_err() {
+    if progress_send.send(progress).is_err() {
         let mess = LogMessage::ErrorType(
             ErrorType::CrossbeamChannelError,
             "Unable to send progress".to_string(),
         );
-        send_mess(mess, log_output)?;
+        send_mess(mess, logs_send)?;
     }
     Ok(())
 }
@@ -484,11 +484,11 @@ fn send_progress(
 pub fn checksum_copy(
     src: &Entry,
     dest: &Entry,
-    src_context: &mut ProtocolContext,
-    dest_context: &mut ProtocolContext,
+    src_context: &ProtocolContext,
+    dest_context: &ProtocolContext,
     is_copy: bool,
-    progress_output: &Sender<ProgressMessage>,
-    log_output: &Sender<LogMessage>,
+    progress_send: &Sender<ProgressMessage>,
+    logs_send: &Sender<LogMessage>,
 ) -> ForkliftResult<SyncOutcome> {
     let (src_path, dest_path) = (src.path(), dest.path());
     let size = match src.metadata() {
@@ -540,7 +540,7 @@ pub fn checksum_copy(
             size: size as usize,
             done: offset as usize,
         };
-        send_progress(progress, progress_output, log_output)?;
+        send_progress(progress, progress_send, logs_send)?;
         if src_buf.is_empty() {
             break;
         }
@@ -571,17 +571,17 @@ pub fn checksum_copy(
 pub fn sync_entry(
     src: &Entry,
     dest: &Entry,
-    src_context: &mut ProtocolContext,
-    dest_context: &mut ProtocolContext,
-    progress_output: &Sender<ProgressMessage>,
-    log_output: &Sender<LogMessage>,
+    src_context: &ProtocolContext,
+    dest_context: &ProtocolContext,
+    progress_send: &Sender<ProgressMessage>,
+    logs_send: &Sender<LogMessage>,
 ) -> ForkliftResult<SyncOutcome> {
     let description = src.path().to_string_lossy().into_owned();
-    send_progress(ProgressMessage::StartSync(description), progress_output, log_output)?;
+    send_progress(ProgressMessage::StartSync(description), progress_send, logs_send)?;
     match src.is_link() {
         Some(true) => {
             trace!("Is link!");
-            return copy_link(src, dest, src_context, dest_context, log_output);
+            return copy_link(src, dest, src_context, dest_context, logs_send);
         }
         Some(false) => (),
         None => {
@@ -604,30 +604,14 @@ pub fn sync_entry(
     match (dest.metadata(), has_different_size(src, dest), is_more_recent(src, dest)) {
         (None, _, _) => {
             debug!("Destination does not exist yet!");
-            checksum_copy(src, dest, src_context, dest_context, true, progress_output, log_output)
+            checksum_copy(src, dest, src_context, dest_context, true, progress_send, logs_send)
         }
         (Some(_), Ok(size_dif), Ok(recent)) => {
             debug!("Is different!!! size {}  recent {}", size_dif, recent);
             if size_dif || recent {
-                checksum_copy(
-                    src,
-                    dest,
-                    src_context,
-                    dest_context,
-                    true,
-                    progress_output,
-                    log_output,
-                )
+                checksum_copy(src, dest, src_context, dest_context, true, progress_send, logs_send)
             } else {
-                checksum_copy(
-                    src,
-                    dest,
-                    src_context,
-                    dest_context,
-                    false,
-                    progress_output,
-                    log_output,
-                )
+                checksum_copy(src, dest, src_context, dest_context, false, progress_send, logs_send)
             }
         }
         (_, Err(e), _) => Err(e),
@@ -654,7 +638,7 @@ fn check_acl_sid_remove(check_sid: &Sid, dest_acls: &mut Vec<SmbcAclValue>) -> O
             trace!("Sid to check {}, dest sid {}", *check_sid, &dest_sid);
             if check_sid == dest_sid {
                 let sid = SidType::Numeric(Some(dest_sid.clone()));
-                let return_ace = ACE::Numeric(sid, atype.clone(), *flag, *mask);
+                let return_ace = ACE::Numeric(sid, *atype, *flag, *mask);
                 dest_acls.remove(count);
                 return Some(return_ace);
             }
