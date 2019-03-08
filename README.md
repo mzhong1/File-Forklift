@@ -39,3 +39,4 @@ Fields for this file are:
 2. libsmbclient-dev
 3. libnfs-dev
 4. libsmbclient (smbclient, depends on your operating system)
+5. nanomsg (libnanomsg.so.5)

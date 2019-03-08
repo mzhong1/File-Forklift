@@ -148,10 +148,10 @@ pub fn make_dir(
             let exists_now = exist(dest_path, dest_context);
             //Note, this might occur due to another thread creating the directory
             let err = format!(
-                "Error {}, Could not create {:?}, check_exists: {:?}, current exists {:?}",
+                "Warning {}, Could not create {:?}, check_exists: {:?}, current exists {:?}, another thread/node has created it",
                 e, dest_path, exists, exists_now
             );
-            error!("{:?}", err); //this one does not need to be logged
+            warn!("{:?}", err); //this one does not need to be logged
             return Ok(SyncOutcome::UpToDate);
         }
     }
