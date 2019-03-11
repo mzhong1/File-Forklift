@@ -11,7 +11,7 @@ Filesystem Forklift is an open source tool for migrating NFS and CIFS shares.  T
 ## To Start Using Filesystem Forklift
 
 ### Configuration:
-1. Create your configuration file. The tool takes json config information.  The database_url, lifetime, and workgroup fields are optional.  Database_url will allow Filesystem Forklift to send log messages and updates to the specified Postgres database server. TimescaleDB is the preferred Postgres server type. Lifetime changes the timeout time of a node from the default of 5 seconds.  Workgroup is optional in that it is not needed for an NFS share, and can therefore be omitted.  
+1. Create your configuration file, forklift.json. The tool takes json config information.  The database_url, lifetime, and workgroup fields are optional.  Database_url will allow Filesystem Forklift to send log messages and updates to the specified Postgres database server. TimescaleDB is the preferred Postgres server type. Lifetime changes the timeout time of a node from the default of 5 seconds.  Workgroup is optional in that it is not needed for an NFS share, and can therefore be omitted.  
 Fields for this file are:
 ```
 {
@@ -38,5 +38,4 @@ Fields for this file are:
 1. libnanomsg-dev
 2. libsmbclient-dev
 3. libnfs-dev
-4. libsmbclient (smbclient, depends on your operating system)
-5. nanomsg (libnanomsg.so.5)
+4. nanomsg (libnanomsg.so.5)

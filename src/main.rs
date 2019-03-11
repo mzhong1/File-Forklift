@@ -237,7 +237,7 @@ fn init_args() -> ForkliftResult<(String, String, Input)> {
     Ok((username.to_string(), password.to_string(), input))
 }
 
-/// Main takes in a config file, username, password, debuglevel, and debug path. the 'v' flag
+/// Main takes in a config directory, username, password, debuglevel, and debug path. the 'v' flag
 /// is used to determine debug level of the program
 fn main() -> ForkliftResult<()> {
     let (username, password, input) = init_args()?;
