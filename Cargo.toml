@@ -1,8 +1,20 @@
 [package]
 name = "filesystem_forklift"
 version = "0.1.0"
-authors = ["mzhong215"]
+authors = ["Michelle Zhong <mzhong37@gmail.com>"]
+description = "Tool for migrating NFS and CIFS shares"
+readme = "README.md"
 edition = "2018"
+
+[package.metadata.deb]
+maintainer = "Michelle Zhong <mzhong37@gmail.com>"
+depends = "$auto"
+assets = [
+    ["config/forklift.json", "etc/forklift/forklift.json", "666"], 
+    ["target/release/filesystem_forklift", "usr/sbin/", "755"],
+    ["README.md", "usr/share/doc/forklift/README", "644"],
+]
+conf-files = ["/etc/forklift/forklift.json"]
 [workspace]
 
 [dependencies]

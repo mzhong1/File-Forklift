@@ -7,7 +7,7 @@ use nanomsg::{Protocol, Socket};
 use rendezvous_hash::{DefaultNodeHasher, RendezvousNodes};
 use simplelog::{CombinedLogger, Config, SharedLogger, TermLogger, WriteLogger};
 
-use std::fs::File;
+use std::fs::{create_dir, read_to_string, File};
 use std::net::SocketAddr;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
@@ -134,22 +134,43 @@ fn init_logs(path: &Path, level: simplelog::LevelFilter) -> ForkliftResult<()> {
     Ok(())
 }
 
+/// Load the config file (forklift.json) from the input or default (/etc/forklift) directory
+fn load_config(config_dir: &Path, name: &str) -> ForkliftResult<Input> {
+    let p = config_dir.join(name);
+    if !p.exists() {
+        error!("{} config file does not exist", p.display());
+    }
+    let input = match std::fs::read_to_string(p) {
+        Ok(e) => e,
+        Err(e) => {
+            error!("{:?}, Unable to read file", e);
+            return Err(ForkliftError::InvalidConfigError(format!(
+                "Error {:?}, unable to read file",
+                e
+            )));
+        }
+    };
+    Ok(Input::new_input(&input)?)
+}
+
+/// initialize the command line arguments
 fn init_args() -> ForkliftResult<(String, String, Input)> {
     let matches = App::new(crate_name!())
         .author(crate_authors!())
         .about("NFS and Samba filesystem migration program")
         .version(crate_version!())
         .arg(
-            Arg::with_name("config")
-                .help("The name of the JSON file storing the cluster configuration for the node")
-                .long_help("The name of the JSON file storing the cluster configurations for the node, formatted in JSON as nodes: [SocketAddresses], src_server: 'name of source server', dest_server: 'name of destination server', src_share: 'name of source share', dest_share: 'name of destination share'")
-                .long("config")
+            Arg::with_name("configdir")
+                .default_value("/etc/forklift")
+                .help("The directory where the configuration file can be found")
+                .long("configdir")
                 .short("c")
                 .takes_value(true)
-                .value_name("CONFIGFILE")
+                .value_name("CONFIGDIR")
                 .number_of_values(1)
-                .required(true)
-        ).arg(
+                .required(false),
+        )
+        .arg(
             Arg::with_name("username")
                 .help("The username of the owner of the share")
                 .long("username")
@@ -157,8 +178,9 @@ fn init_args() -> ForkliftResult<(String, String, Input)> {
                 .takes_value(true)
                 .value_name("USERNAME")
                 .number_of_values(1)
-                .required(true)
-        ).arg(
+                .required(true),
+        )
+        .arg(
             Arg::with_name("password")
                 .help("The password of the owner of the share")
                 .long("password")
@@ -166,8 +188,9 @@ fn init_args() -> ForkliftResult<(String, String, Input)> {
                 .takes_value(true)
                 .value_name("PASSWORD")
                 .number_of_values(1)
-                .required(true)
-        ).arg(
+                .required(true),
+        )
+        .arg(
             Arg::with_name("logfile")
                 .default_value("debuglog")
                 .help("Logs debug statements to file debuglog")
@@ -175,12 +198,9 @@ fn init_args() -> ForkliftResult<(String, String, Input)> {
                 .short("l")
                 .takes_value(true)
                 .required(false),
-        ).arg(
-            Arg::with_name("v")
-                .short("v")
-                .multiple(true)
-                .help("Sets the level of verbosity"),
-        ).get_matches();
+        )
+        .arg(Arg::with_name("v").short("v").multiple(true).help("Sets the level of verbosity"))
+        .get_matches();
     let level = match matches.occurrences_of("v") {
         0 => simplelog::LevelFilter::Info,
         1 => simplelog::LevelFilter::Debug,
@@ -204,13 +224,20 @@ fn init_args() -> ForkliftResult<(String, String, Input)> {
     init_logs(&path, level)?;
     debug!("Log path: {:?}", logfile);
     info!("Logs made");
-
-    let input = parse_matches(&matches)?;
+    let config_dir = Path::new(matches.value_of("configdir").unwrap());
+    if !config_dir.exists() {
+        warn!("Config directory {} doesn't exist. Creating", config_dir.display());
+        if let Err(e) = create_dir(config_dir) {
+            error!("Unable to create directory {}: {}", config_dir.display(), e.to_string());
+            return Err(ForkliftError::CLIError("Unable to create Config directory".to_string()));
+        }
+    }
+    let input = load_config(config_dir, "forklift.json")?;
 
     Ok((username.to_string(), password.to_string(), input))
 }
 
-/// Main takes in a config file, username, password, debuglevel, and debug path. the 'v' flag
+/// Main takes in a config directory, username, password, debuglevel, and debug path. the 'v' flag
 /// is used to determine debug level of the program
 fn main() -> ForkliftResult<()> {
     let (username, password, input) = init_args()?;
