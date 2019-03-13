@@ -9,7 +9,7 @@ pub struct Pulse {
     /// The time of the last heartbeat
     c_time: Instant,
     /// The amount of time b/t each heartbeat as a Duration
-    timeout: Duration,
+    pub timeout: Duration,
 }
 
 impl Pulse {

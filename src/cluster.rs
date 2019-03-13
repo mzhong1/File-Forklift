@@ -3,7 +3,7 @@ use api;
 
 use crossbeam::channel::{Receiver, Sender, TryRecvError};
 use log::*;
-use nanomsg::{Error, PollFd, PollInOut, PollRequest, Socket};
+use nng::{Aio, ErrorKind, Message as NanoMessage, Socket};
 use std::net::SocketAddr;
 
 use crate::error::{ForkliftError, ForkliftResult};
@@ -77,7 +77,7 @@ impl Cluster {
     pub fn connect_node(&mut self, node_address: &SocketAddr) -> ForkliftResult<()> {
         debug!("Try to connect router to {}", node_address);
         let tcp: String = format!("tcp://{}", node_address.to_string());
-        self.router.connect(&tcp)?;
+        self.router.dial(&tcp)?;
         Ok(())
     }
 
@@ -102,8 +102,8 @@ impl Cluster {
     }
 
     /// send a GETLIST message to a node with the socket address of the current node
-    pub fn send_getlist(&mut self, request: &PollRequest<'_>) -> ForkliftResult<()> {
-        if request.get_fds()[0].can_write() && self.pulse.beat() {
+    pub fn send_getlist(&mut self) -> ForkliftResult<()> {
+        if self.pulse.beat() {
             trace!("Send a GETLIST from {}", self.node_address);
             let msg =
                 message::create_message(MessageType::GETLIST, &[self.node_address.to_string()])?;
@@ -144,20 +144,23 @@ impl Cluster {
 
     /// broadcast a message to the cluster
     fn send_message(&mut self, msg: &[u8], success: &str) -> ForkliftResult<()> {
-        match self.router.nb_write(msg) {
+        let message = NanoMessage::try_from(msg)?;
+        match self.router.send(message) {
             Ok(_) => debug!("{}", success),
-            Err(Error::TryAgain) => {
-                self.send_log(LogMessage::ErrorType(
-                    ErrorType::NanomsgError,
-                    "Receiver not ready, message can't be sent".to_string(),
-                ))?;
-            }
-            Err(err) => {
-                self.send_log(LogMessage::ErrorType(
-                    ErrorType::NanomsgError,
-                    format!("Error {:?}. Problem while writing", err),
-                ))?;
-            }
+            Err((_, e)) => match e.kind() {
+                ErrorKind::TryAgain => {
+                    self.send_log(LogMessage::ErrorType(
+                        ErrorType::NanomsgError,
+                        "Receiver not ready, message can't be sent".to_string(),
+                    ))?;
+                }
+                _ => {
+                    self.send_log(LogMessage::ErrorType(
+                        ErrorType::NanomsgError,
+                        format!("Error {:?}. Problem while writing", e),
+                    ))?;
+                }
+            },
         };
         Ok(())
     }
@@ -199,9 +202,9 @@ impl Cluster {
     }
 
     /// broadcast a heartbeat to the cluster and tick down nodes
-    pub fn send_and_tickdown(&mut self, request: &PollRequest<'_>) -> ForkliftResult<()> {
+    pub fn send_and_tickdown(&mut self) -> ForkliftResult<()> {
         self.is_valid_cluster()?;
-        if request.get_fds()[0].can_write() && self.pulse.beat() {
+        if self.pulse.beat() {
             self.send_heartbeat()?;
             self.tickdown_nodes()?;
         }
@@ -209,24 +212,14 @@ impl Cluster {
     }
 
     /// get the next message queued to the router
-    pub fn read_message_to_u8(&mut self) -> ForkliftResult<Vec<u8>> {
-        let mut buffer = Vec::new();
-        match self.router.nb_read_to_end(&mut buffer) {
-            Ok(_) => debug!("Read message {} bytes!", buffer.len()),
-            Err(Error::TryAgain) => {
-                self.send_log(LogMessage::ErrorType(
-                    ErrorType::NanomsgError,
-                    "Nothing to be read".to_string(),
-                ))?;
-            }
-            Err(err) => {
-                self.send_log(LogMessage::ErrorType(
-                    ErrorType::NanomsgError,
-                    format!("Error {:?}. Problem while writing", err),
-                ))?;
-            }
+    pub fn read_message_to_u8(&mut self, aio: &mut Aio) -> ForkliftResult<NanoMessage> {
+        trace!("Attempting to read message");
+        aio.wait();
+        let mess = match aio.get_msg() {
+            Some(m) => m,
+            None => NanoMessage::new()?,
         };
-        Ok(buffer)
+        Ok(mess)
     }
 
     /// parse a NODELIST message into a list of nodes and create/add the nodes to the cluster
@@ -302,33 +295,56 @@ impl Cluster {
     /// Read incoming messages and send out heartbeats every interval milliseconds.
     pub fn read_and_heartbeat(
         &mut self,
-        request: &PollRequest<'_>,
+        aio: &mut Aio,
         has_nodelist: &mut bool,
     ) -> ForkliftResult<()> {
         self.is_valid_cluster()?;
-        if request.get_fds()[0].can_read() {
-            //check message type
-            let msg = self.read_message_to_u8()?;
-            let msgtype = message::get_message_type(&msg)?;
-            let msg_body = message::read_message(&msg)?;
-            match msgtype {
-                MessageType::NODELIST => {
-                    debug!("Can read message of type NODELIST");
-                    self.parse_nodelist_message(has_nodelist, &msg)?;
-                }
-                MessageType::GETLIST => {
-                    debug!("Can read message of type GETLIST");
-                    self.send_nodelist(&msg_body)?;
-                }
-                MessageType::HEARTBEAT => {
-                    debug!("Can read message of type HEARTBEAT");
-                    self.heartbeat_heard(&msg_body)?;
-                    if !*has_nodelist {
-                        self.send_getlist(request)?;
+        //check message type
+        match self.router.recv_async(&aio) {
+            Ok(_) => {
+                let msg = self.read_message_to_u8(aio)?;
+                if !msg.is_empty() {
+                    let msgtype = if msg.len() == 0 {
+                        message::get_message_type(&Vec::new())?
+                    } else {
+                        message::get_message_type(&msg)?
+                    };
+                    let msg_body = message::read_message(&msg)?;
+                    match msgtype {
+                        MessageType::NODELIST => {
+                            debug!("Can read message of type NODELIST");
+                            self.parse_nodelist_message(has_nodelist, &msg)?;
+                        }
+                        MessageType::GETLIST => {
+                            debug!("Can read message of type GETLIST");
+                            self.send_nodelist(&msg_body)?;
+                        }
+                        MessageType::HEARTBEAT => {
+                            debug!("Can read message of type HEARTBEAT");
+                            self.heartbeat_heard(&msg_body)?;
+                            if !*has_nodelist {
+                                self.send_getlist()?;
+                            }
+                        }
                     }
                 }
             }
+            Err(e) => match e.kind() {
+                ErrorKind::TryAgain => {
+                    self.send_log(LogMessage::ErrorType(
+                        ErrorType::NanomsgError,
+                        "Nothing to be read".to_string(),
+                    ))?;
+                }
+                _ => {
+                    self.send_log(LogMessage::ErrorType(
+                        ErrorType::NanomsgError,
+                        format!("Error {:?}. Problem while writing", e),
+                    ))?;
+                }
+            },
         }
+
         Ok(())
     }
 
@@ -354,6 +370,8 @@ impl Cluster {
         end_heartbeat_input: &Receiver<EndState>,
     ) -> ForkliftResult<()> {
         let mut countdown = 0;
+        let mut aio = Aio::new().unwrap();
+        aio.set_timeout(Some(self.pulse.timeout));
         loop {
             match end_heartbeat_input.try_recv() {
                 Ok(_) => {
@@ -374,16 +392,12 @@ impl Cluster {
             }
             std::thread::sleep(std::time::Duration::from_millis(10));
             countdown += 10;
-            let mut items: Vec<PollFd> = vec![self.router.new_pollfd(PollInOut::InOut)];
-            let mut request = PollRequest::new(&mut items);
-            trace!("Attempting to poll the socket");
-            Socket::poll(&mut request, self.pulse.interval as isize)?;
-
+            trace!("checking socket");
             if !*has_nodelist {
-                self.send_getlist(&request)?;
+                self.send_getlist()?;
             }
-            self.read_and_heartbeat(&request, has_nodelist)?;
-            self.send_and_tickdown(&request)?;
+            self.read_and_heartbeat(&mut aio, has_nodelist)?;
+            self.send_and_tickdown()?;
         }
         Ok(())
     }
