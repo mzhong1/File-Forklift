@@ -72,7 +72,7 @@ Note:
 - database_url is optional, only include it if you want to log data to a database, it will slow down the processes.
 - if you are configuring a file for adding a node to a cluster, only include two socket addresses in the nodes section,the socket address of the node to be added, and the socket address of some node in the running cluster
 3. Initialize the forklift.  On each node in your cluster, type ./filesystem_forklift -u "" -p "" (if you configured the forklift.json in /etc/forklift).  Otherwise, type ./filesystem_forklift -c path_to_directory_containing_config_file -u "" -p ""
-```
+---
 Note: the reason why we leave the username and password flag as "" is because they are required, but are not actually used in the forklift since this for an NFS share and not a Samba share.  Since a Samba context is still initialized but unused, they are necessary, but non-"" entries may result in an error when Samba attempts to authenticate.  
 
 ### Samba/CIFS
@@ -105,7 +105,7 @@ Example:
     "dest_path": "smb://192.88.88.88/destination_share/",
     "database_url": "postgresql://postgres:meow@127.0.0.1:8080"
 }
-```
+---
 Note:
 - if you are using a glusterfs share, sometimes you are unable to edit the root directory.  In this case, create a subdirectory in the share(s) and change the src_path and dest_path accordingly.  Ex: "smb://10.0.0.24/src_share/sub_dir/", "smb://192.88.88.88/dest_share/sub_dir"
 - lifetime can be adjusted, default is 5 seconds
