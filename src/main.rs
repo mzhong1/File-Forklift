@@ -7,7 +7,7 @@ use nanomsg::{Protocol, Socket};
 use rendezvous_hash::{DefaultNodeHasher, RendezvousNodes};
 use simplelog::{CombinedLogger, Config, SharedLogger, TermLogger, WriteLogger};
 
-use std::fs::{create_dir, read_to_string, File};
+use std::fs::{create_dir, File};
 use std::net::SocketAddr;
 use std::path::Path;
 use std::sync::{Arc, Mutex};

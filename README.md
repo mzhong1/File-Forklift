@@ -38,4 +38,4 @@ Fields for this file are:
 1. libnanomsg-dev
 2. libsmbclient-dev
 3. libnfs-dev
-4. nanomsg (libnanomsg.so.5)
+4. nanomsg (libnanomsg.so.5), libnanomsg#
