@@ -114,15 +114,21 @@ impl Input {
             }
             FileSystemType::Samba => {
                 input.src_path = Path::new(&format!(
-                    "smb:/{}/{}{:?}",
-                    input.src_server, input.src_share, input.src_path
+                    "smb://{}{}{}",
+                    input.src_server,
+                    input.src_share,
+                    input.src_path.to_string_lossy()
                 ))
                 .to_path_buf();
+                println!("{:?}", input.src_path);
                 input.dest_path = Path::new(&format!(
-                    "smb:/{}/{}{:?}",
-                    input.dest_server, input.dest_share, input.dest_path
+                    "smb://{}{}{}",
+                    input.dest_server,
+                    input.dest_share,
+                    input.dest_path.to_string_lossy()
                 ))
                 .to_path_buf();
+                println!("{:?}", input.dest_path);
             }
         }
         Ok(input)
