@@ -1,6 +1,7 @@
 use crate::error::{ForkliftError, ForkliftResult};
 use crate::filesystem::{DebugLevel, FileSystemType};
 
+use log::*;
 use serde_derive::*;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
@@ -39,7 +40,7 @@ pub struct Input {
     #[serde(default = "default_path")]
     pub dest_path: PathBuf,
     /// URL of database to log errors to, or NULL if not logging to database
-    /// format is probably postgresql://postgres:password@ip:port
+    /// format is probably database://username:password@ip:port
     pub database_url: Option<String>,
 }
 /// default workgroup helper
@@ -120,7 +121,7 @@ impl Input {
                     input.src_path.to_string_lossy()
                 ))
                 .to_path_buf();
-                println!("{:?}", input.src_path);
+                debug!("{:?}", input.src_path);
                 input.dest_path = Path::new(&format!(
                     "smb://{}{}{}",
                     input.dest_server,
@@ -128,7 +129,7 @@ impl Input {
                     input.dest_path.to_string_lossy()
                 ))
                 .to_path_buf();
-                println!("{:?}", input.dest_path);
+                debug!("{:?}", input.dest_path);
             }
         }
         Ok(input)
