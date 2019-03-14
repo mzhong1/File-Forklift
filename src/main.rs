@@ -8,6 +8,7 @@ use rendezvous_hash::{DefaultNodeHasher, RendezvousNodes};
 use simplelog::{CombinedLogger, Config, SharedLogger, TermLogger, WriteLogger};
 
 use std::fs::{create_dir, File};
+use std::io::{stdin, stdout, Write};
 use std::net::SocketAddr;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
@@ -35,12 +36,18 @@ mod walk_worker;
 use crate::cluster::Cluster;
 use crate::console_output::ConsoleProgressOutput;
 use crate::error::{ForkliftError, ForkliftResult};
+use crate::filesystem::FileSystemType;
 use crate::input::*;
 use crate::node::*;
 use crate::postgres_logger::*;
 use crate::rsync::*;
 use crate::socket_node::*;
 use crate::tables::*;
+
+#[cfg(windows)]
+const LINE_ENDING: &'static str = "\r\n";
+#[cfg(not(windows))]
+const LINE_ENDING: &'static str = "\n";
 
 #[test]
 fn test_init_router() {
@@ -174,23 +181,25 @@ fn init_args() -> ForkliftResult<(String, String, Input)> {
         )
         .arg(
             Arg::with_name("username")
+                .default_value("")
                 .help("The username of the owner of the share")
                 .long("username")
                 .short("u")
                 .takes_value(true)
                 .value_name("USERNAME")
                 .number_of_values(1)
-                .required(true),
+                .required(false),
         )
         .arg(
             Arg::with_name("password")
+                .default_value("")
                 .help("The password of the owner of the share")
                 .long("password")
                 .short("p")
                 .takes_value(true)
                 .value_name("PASSWORD")
                 .number_of_values(1)
-                .required(true),
+                .required(false),
         )
         .arg(
             Arg::with_name("logfile")
@@ -215,14 +224,6 @@ fn init_args() -> ForkliftResult<(String, String, Input)> {
             return Err(ForkliftError::CLIError("Home directory not found".to_string()));
         }
     };
-    let mut username = matches.value_of("username").unwrap();
-    if username.is_empty() {
-        username = "guest";
-    }
-    let mut password = matches.value_of("password").unwrap();
-    if password.is_empty() {
-        password = "\n";
-    }
     init_logs(&path, level)?;
     debug!("Log path: {:?}", logfile);
     info!("Logs made");
@@ -236,7 +237,41 @@ fn init_args() -> ForkliftResult<(String, String, Input)> {
     }
     let input = load_config(config_dir, "forklift.json")?;
 
-    Ok((username.to_string(), password.to_string(), input))
+    let mut username = matches.value_of("username").unwrap().to_string();
+    let mut password = matches.value_of("password").unwrap().to_string();
+    let mut iter = 0;
+    while username.is_empty() || password.is_empty() || username == LINE_ENDING.to_string() {
+        if iter != 0 {
+            username = String::new();
+            password = String::new();
+            println!("Username cannot be \\n");
+        }
+        match input.system {
+            FileSystemType::Nfs => {
+                if username.is_empty() {
+                    username = "guest".to_string();
+                }
+                if password.is_empty() {
+                    password = LINE_ENDING.to_string();
+                }
+            }
+            FileSystemType::Samba => {
+                if username.is_empty() || username == LINE_ENDING.to_string() {
+                    print!("Please enter your username: ");
+                    stdout().flush()?;
+                    stdin().read_line(&mut username)?;
+                }
+                if password.is_empty() {
+                    print!("Please enter your password: ");
+                    stdout().flush()?;
+                    stdin().read_line(&mut password)?;
+                }
+            }
+        }
+        iter += 1;
+    }
+
+    Ok((username, password, input))
 }
 
 /// Main takes in a config directory, username, password, debuglevel, and debug path. the 'v' flag
