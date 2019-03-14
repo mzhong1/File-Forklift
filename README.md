@@ -131,6 +131,5 @@ or
 ./filesystem_forklift -c path_to_directory_containing_config_file -u "username" -p "password"
 ```
 If you do not include either the -u or -p flags, the program will prompt you for your Samba username and password.
----
 Note:
 The username and password should be the same on both shares.
