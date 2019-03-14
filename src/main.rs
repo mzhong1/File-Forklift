@@ -3,7 +3,7 @@ use clap::{App, Arg};
 use crossbeam::channel;
 use crossbeam::channel::{Receiver, Sender, TryRecvError};
 use log::*;
-use nanomsg::{Protocol, Socket};
+use nng::{Protocol, Socket};
 use rendezvous_hash::{DefaultNodeHasher, RendezvousNodes};
 use simplelog::{CombinedLogger, Config, SharedLogger, TermLogger, WriteLogger};
 
@@ -60,11 +60,13 @@ fn test_init_router() {
 /// input address
 fn init_router(full_address: &SocketAddr) -> ForkliftResult<Socket> {
     debug!("Initializing router");
-    let mut router = Socket::new(Protocol::Bus)?;
+    let mut router = Socket::new(Protocol::Bus0)?;
     debug!("New router bus created");
     let current_port = full_address.port();
-    router.bind(&format!("tcp://*:{}", current_port))?;
+    router.listen(&format!("tcp://*:{}", current_port))?;
     debug!("router bound to port {}", current_port);
+    router.set_nonblocking(true);
+    debug!("router set to nonblocking");
     Ok(router)
 }
 

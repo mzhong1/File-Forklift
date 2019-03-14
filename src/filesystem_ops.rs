@@ -505,7 +505,7 @@ pub fn checksum_copy(
         file_create(&dest_path, dest_context, &dest_err)?;
     }
     let dest_file = open_file(dest_path, dest_context, OFlag::O_CREAT | OFlag::O_RDWR, &dest_err)?;
-    
+
     //loop until end, count the number of times we needed to update the file
     let (mut src_total, mut dest_total): (Vec<u8>, Vec<u8>) = (vec![], vec![]);
     let (mut offset, mut counter) = (0, 0);
@@ -860,7 +860,6 @@ pub fn map_names_and_copy(
                 let temp_ace = (mapped.clone(), atype, aflags, mask);
                 if !creator_reached {
                     copied = copy_acl(dest_path, dest_ctx, temp_ace, dest_acls)?;
-                    
                 }
                 creator_reached = false;
             }
@@ -872,12 +871,15 @@ pub fn map_names_and_copy(
         }
         count += 1;
     }
-    let mut new_dest_acls = get_acl_list(dest_path, dest_ctx, false)?;
-    for dest_acl in new_dest_acls{
+    let new_dest_acls = get_acl_list(dest_path, dest_ctx, false)?;
+    for dest_acl in new_dest_acls {
         match dest_acl {
             SmbcAclValue::Acl(ACE::Numeric(SidType::Numeric(Some(dest_sid)), a, f, m)) => {
                 //if not \\CREATOR Owner or Creator Group or EveryOne
-                if !(dest_sid == Sid(vec![3, 0]) || dest_sid == Sid(vec![3, 1]) || dest_sid == Sid(vec![1, 0])) {
+                if !(dest_sid == Sid(vec![3, 0])
+                    || dest_sid == Sid(vec![3, 1])
+                    || dest_sid == Sid(vec![1, 0]))
+                {
                     let ace = ACE::Numeric(SidType::Numeric(Some(dest_sid)), a, f, m);
                     if let Err(e) = dest_ctx
                         .removexattr(dest_path, &SmbcXAttr::AclAttr(SmbcAclAttr::Acl(ace.clone())))

@@ -3,7 +3,7 @@ use crate::filesystem::{DebugLevel, FileSystemType};
 
 use serde_derive::*;
 use std::net::SocketAddr;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 /// Config File Input
@@ -30,11 +30,13 @@ pub struct Input {
     /// The workgroup of the user (Please default to WORKGROUP if not using Samba)
     #[serde(default = "default_workgroup")]
     pub workgroup: String,
-    /// NFS is always "/" (unless using subdirectory),
-    /// Samba smb url to root or subdirectory (if Glusterfs, MUST be subdirectory)
+    /// Path where source sync starts
+    /// Use "/" for the root directory, and "/subdir/" for a subdirectory, etc.
+    #[serde(default = "default_path")]
     pub src_path: PathBuf,
-    /// NFS is always "/" (unless using subdirectory),
-    /// Samba smb url to root or subdirectory (if Glusterfs, MUST be subdirectory)
+    /// Path where destination sync starts
+    /// Use "/" for the root directory, and "/subdir/" for a subdirectory, etc.
+    #[serde(default = "default_path")]
     pub dest_path: PathBuf,
     /// URL of database to log errors to, or NULL if not logging to database
     /// format is probably postgresql://postgres:password@ip:port
@@ -48,33 +50,17 @@ fn default_workgroup() -> String {
 fn default_lifetime() -> u64 {
     5
 }
-/// Check if given path is an smburl
-/// NOTE: the smburl format is smb://server/share.  Other
-/// smburl syntax, such as smb://username:password@server/share will not
-/// work, though they will pass the is_smb_path test, as whether or not
-/// the url will work depends entirely on the smbclient you are using.
-/// In general, refrain from using additional parts and input them in
-/// the command line as opposed to in the smburl for security at the very least.  
-pub fn is_smb_path(path: &PathBuf) -> bool {
-    let p = path.to_string_lossy().into_owned();
-    // Why 8?  6 for smb://, + 1 for minimum server name + 1 for /, + 1 for minimum share name
-    if p.len() < 9 {
-        return false;
-    }
-    let (prefix, suffix) = p.split_at(6);
-    prefix == "smb://"
-        && match suffix.find('/') {
-            Some(0) => false,
-            Some(_) => true,
-            None => false,
-        }
+/// default source/dest path
+fn default_path() -> PathBuf {
+    let mut p = PathBuf::new();
+    p.push("/");
+    p
 }
-
 impl Input {
     //NOTE, send invalid config error when panicking
     /// create new Input object from config file
     pub fn new_input(config: &str) -> ForkliftResult<Self> {
-        let input: Input = match serde_json::from_str(config) {
+        let mut input: Input = match serde_json::from_str(config) {
             Ok(e) => e,
             Err(e) => {
                 return Err(ForkliftError::InvalidConfigError(format!(
@@ -127,19 +113,22 @@ impl Input {
                 }
             }
             FileSystemType::Samba => {
-                // if the input is not an smburl, 'smb://server/share', exit
-                if !is_smb_path(&input.src_path) {
-                    return Err(ForkliftError::InvalidConfigError(
-                        "Improperly formatted source path, should be smb://server/share"
-                            .to_string(),
-                    ));
-                }
-                if !is_smb_path(&input.dest_path) {
-                    return Err(ForkliftError::InvalidConfigError(
-                        "Improperly formatted destination path, should beto smb://server/share"
-                            .to_string(),
-                    ));
-                }
+                input.src_path = Path::new(&format!(
+                    "smb://{}{}{}",
+                    input.src_server,
+                    input.src_share,
+                    input.src_path.to_string_lossy()
+                ))
+                .to_path_buf();
+                println!("{:?}", input.src_path);
+                input.dest_path = Path::new(&format!(
+                    "smb://{}{}{}",
+                    input.dest_server,
+                    input.dest_share,
+                    input.dest_path.to_string_lossy()
+                ))
+                .to_path_buf();
+                println!("{:?}", input.dest_path);
             }
         }
         Ok(input)

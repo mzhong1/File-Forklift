@@ -2,7 +2,7 @@
 
 use crossbeam::channel::RecvError;
 use derive_error as de;
-use nanomsg::Error as NanomsgError;
+use nng::Error as NanomsgError;
 use postgres::Error as PostgresError;
 use protobuf::ProtobufError;
 use r2d2::Error as R2D2Error;
