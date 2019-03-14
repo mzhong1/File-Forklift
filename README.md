@@ -108,7 +108,7 @@ Example:
     "dest_path": "/",
     "database_url": "postgresql://postgres:meow@127.0.0.1:8080"
 }
----
+```
 Note:
 - if you are using a glusterfs share, sometimes you are unable to edit the root directory.  In this case, create a subdirectory in the share(s) and change the src_path and dest_path accordingly.  Ex: "/sub_dir/"
 - lifetime can be adjusted, default is 5 seconds
