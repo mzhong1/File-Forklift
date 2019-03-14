@@ -547,10 +547,11 @@ pub fn checksum_copy(
     }
     let (src_check, dest_check) = (hash(&src_total, &mut hasher), hash(&dest_total, &mut hasher));
     if src_check != dest_check {
-        return Err(ForkliftError::ChecksumError(format!(
+        let mess = LogMessage::Error(ForkliftError::ChecksumError(format!(
             "{} has source checksum {:?}, destination checksum {:?}",
             path, src_check, dest_check
         )));
+        send_mess(mess, logs_send)?
     }
     if counter == 0 {
         return Ok(SyncOutcome::UpToDate);
