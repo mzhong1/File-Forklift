@@ -81,7 +81,14 @@ impl RsyncWorker {
         let rel_path = get_rel_path(&src_entry.path(), &self.source)?;
         let dest_path = &self.destination.join(&rel_path);
         let (src_context, dest_context) = (&self.src_context, &self.dest_context);
-        make_dir_all(&src_entry.path(), &dest_path, &self.destination, src_context, dest_context)?;
+        make_dir_all(
+            &src_entry.path(),
+            &dest_path,
+            &self.destination,
+            src_context,
+            dest_context,
+            &self.log_output,
+        )?;
         let dest_entry = Entry::new(&dest_path, dest_context);
         let mut outcome = sync_entry(
             src_entry,
@@ -98,7 +105,13 @@ impl RsyncWorker {
             }
         };
         if !is_dir {
-            let temp_outcome = copy_permissions(src_entry, &dest_entry, src_context, dest_context)?;
+            let temp_outcome = copy_permissions(
+                src_entry,
+                &dest_entry,
+                src_context,
+                dest_context,
+                &self.log_output,
+            )?;
             let current_outcome = outcome.clone();
             outcome = match (outcome, temp_outcome) {
                 (SyncOutcome::UpToDate, SyncOutcome::PermissionsUpdated) => {
