@@ -242,8 +242,6 @@ fn init_args() -> ForkliftResult<(String, String, Input)> {
     let mut iter = 0;
     while username.is_empty() || password.is_empty() || username == LINE_ENDING.to_string() {
         if iter != 0 {
-            username = String::new();
-            password = String::new();
             println!("Username cannot be \\n");
         }
         match input.system {
@@ -260,11 +258,13 @@ fn init_args() -> ForkliftResult<(String, String, Input)> {
                     print!("Please enter your username: ");
                     stdout().flush()?;
                     stdin().read_line(&mut username)?;
+                    username = (&username).trim_end().to_string();
                 }
                 if password.is_empty() {
                     print!("Please enter your password: ");
                     stdout().flush()?;
                     stdin().read_line(&mut password)?;
+                    password = (&password).trim_end().to_string();
                 }
             }
         }
