@@ -7,7 +7,7 @@ use postgres::Error as PostgresError;
 use protobuf::ProtobufError;
 use r2d2::Error as R2D2Error;
 use serde_json::Error as SerdeJsonError;
-use smbc::Error as SmbcError;
+use smbc::SmbcError;
 use std::io::Error as IoError;
 use std::net::AddrParseError;
 use std::string::{FromUtf16Error, FromUtf8Error, ParseError as StringParseError};

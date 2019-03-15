@@ -77,25 +77,6 @@ fn init_router(full_address: &SocketAddr) -> ForkliftResult<Socket> {
     Ok(router)
 }
 
-/// parse the command line entry for the config file.  
-fn parse_matches(matches: &clap::ArgMatches<'_>) -> ForkliftResult<Input> {
-    let path = match matches.value_of("config") {
-        None => Path::new(""),
-        Some(t) => Path::new(t),
-    };
-    let input = match std::fs::read_to_string(path) {
-        Ok(e) => e,
-        Err(e) => {
-            error!("{:?}, Unable to read file", e);
-            return Err(ForkliftError::InvalidConfigError(format!(
-                "Error {:?}, unable to read file",
-                e
-            )));
-        }
-    };
-    Ok(Input::new_input(&input)?)
-}
-
 /// run the heartbeat protocol
 fn heartbeat(
     lifetime: u64,

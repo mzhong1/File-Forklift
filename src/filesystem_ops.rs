@@ -60,6 +60,18 @@ pub enum SyncOutcome {
     ChecksumUpdated(String, Vec<u8>, Vec<u8>, i64, NaiveDateTime),
 }
 
+#[derive(Clone)]
+pub struct FileSystemOps {
+    /// source context
+    src_context: ProtocolContext,
+    /// destination context
+    dest_context: ProtocolContext,
+    /// channel to send progress
+    progress_output: Sender<ProgressMessage>,
+    /// channel to send logs to postgres
+    pub log_output: Sender<LogMessage>,
+}
+
 /// checks if a path is valid
 pub fn exist(path: &Path, context: &ProtocolContext) -> bool {
     context.stat(path).is_ok()
@@ -140,6 +152,7 @@ pub fn make_dir(
     dest_path: &Path,
     src_context: &ProtocolContext,
     dest_context: &ProtocolContext,
+    logs_send: &Sender<LogMessage>,
 ) -> ForkliftResult<SyncOutcome> {
     let outcome: SyncOutcome;
     let exists = exist(dest_path, dest_context);
@@ -158,7 +171,8 @@ pub fn make_dir(
     let (src_entry, dest_entry) =
         (Entry::new(&src_path, src_context), Entry::new(&dest_path, dest_context));
     // make sure permissions match
-    let copy_outcome = copy_permissions(&src_entry, &dest_entry, &src_context, &dest_context)?;
+    let copy_outcome =
+        copy_permissions(&src_entry, &dest_entry, &src_context, &dest_context, logs_send)?;
     debug!("Copy permissions successful");
     match (exists, copy_outcome) {
         (false, _) => outcome = SyncOutcome::DirectoryCreated,
@@ -178,6 +192,7 @@ pub fn make_dir_all(
     root_file_path: &Path,
     src_context: &ProtocolContext,
     dest_context: &ProtocolContext,
+    logs_send: &Sender<LogMessage>,
 ) -> ForkliftResult<()> {
     let (mut stack, mut src_stack) = (vec![], vec![]);
     let (mut dest_parent, mut src_parent) = (dest_path.parent(), src_path.parent());
@@ -214,7 +229,7 @@ pub fn make_dir_all(
             }
         };
         if !exist(&path, dest_context) {
-            make_dir(srcpath, &path, src_context, dest_context)?;
+            make_dir(srcpath, &path, src_context, dest_context, logs_send)?;
             debug!("made dir {:?}", path);
         }
     }
@@ -440,7 +455,7 @@ fn write_file(path: &Path, file: &FileType, buffer: &[u8], offset: u64) -> Forkl
     match file.write(buffer, offset) {
         Ok(n) => Ok(n),
         Err(e) => {
-            let err = format!("Error {}, Could not write to {:?}", e, path);
+            let err = format!("Error {}, Could not write to {:?} at offset {}", e, path, offset);
             Err(ForkliftError::FSError(err))
         }
     }
@@ -593,7 +608,7 @@ pub fn sync_entry(
     match src.is_dir() {
         Some(true) => {
             trace!("Is directory!");
-            return make_dir(src.path(), dest.path(), src_context, dest_context);
+            return make_dir(src.path(), dest.path(), src_context, dest_context, logs_send);
         }
         Some(false) => (),
         None => {
@@ -833,6 +848,7 @@ pub fn map_names_and_copy(
     src_acls: &[SmbcAclValue],
     src_acls_plus: &[SmbcAclValue],
     dest_acls: &mut Vec<SmbcAclValue>,
+    logs_send: &Sender<LogMessage>,
 ) -> ForkliftResult<bool> {
     let mut map = match SID_NAME_MAP.lock() {
         Ok(hm) => hm,
@@ -863,6 +879,13 @@ pub fn map_names_and_copy(
                     copied = copy_acl(dest_path, dest_ctx, temp_ace, dest_acls)?;
                 }
                 creator_reached = false;
+            }
+            (SmbcAclValue::AclPlus(ACE::Numeric(SidType::Numeric(Some(sid)), _, _, _)), _) => {
+                let mess = LogMessage::ErrorType(
+                    ErrorType::FSError,
+                    format!("input src acls sid {:?} are not formatted correctly!!", sid),
+                );
+                send_mess(mess, logs_send)?;
             }
             (..) => {
                 return Err(ForkliftError::FSError(
@@ -958,6 +981,7 @@ pub fn copy_permissions(
     dest: &Entry,
     src_context: &ProtocolContext,
     dest_context: &ProtocolContext,
+    logs_send: &Sender<LogMessage>,
 ) -> ForkliftResult<SyncOutcome> {
     let src_mode = match (src.is_link(), src.metadata()) {
         (Some(false), Some(stat)) => stat.mode(),
@@ -987,7 +1011,14 @@ pub fn copy_permissions(
             let src_acl = &get_acl_list(src_path, src_ctx, false)?;
             let src_plus_acl = &get_acl_list(src_path, src_ctx, true)?;
             let dest_acl = &mut get_acl_list(dest_path, dest_ctx, false)?;
-            let copied = map_names_and_copy(dest_path, dest_ctx, src_acl, src_plus_acl, dest_acl)?;
+            let copied = map_names_and_copy(
+                dest_path,
+                dest_ctx,
+                src_acl,
+                src_plus_acl,
+                dest_acl,
+                logs_send,
+            )?;
             match has_different_permissions(src, dest, src_context, dest_context) {
                 Ok(true) => {
                     trace!("src mode {}", src_mode);
