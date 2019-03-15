@@ -40,8 +40,7 @@ Fields for this file are:
 
 ## Quick Start Guide
 ### NFS
-1. Download and build any dependencies for the forklift (see above).  Nanomsg-1.1.4 can be found here:
-- https://github.com/nanomsg/nanomsg
+1. Download and build any dependencies for the forklift (see above)
 2. Configure your forklift.json file on every node in your cluster
 Example:
 ```
@@ -79,8 +78,7 @@ Note:
 ```
 ---
 ### Samba/CIFS
-1. Download and build any dependencies for the forklift (see above).  Nanomsg-1.1.4 can be found here:
-- https://github.com/nanomsg/nanomsg
+1. Download and build any dependencies for the forklift (see above).
 2. Configure your smb.conf file on both shares.  You will need to do the following:
 - set the netbios name to the same name for both shares
 - set vfs objects = acl_xattr
