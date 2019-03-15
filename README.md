@@ -114,19 +114,19 @@ Note:
 - if you are configuring a file for adding a node to a cluster, only include two socket addresses in the nodes section,the socket address of the node to be added, and the socket address of some node in the running cluster.
 4. Initialize the forklift.  On each node in your cluster, type 
 ```
-./filesystem_forklift 
+sudo ./filesystem_forklift 
 ```
 or 
 ```
-./filesystem_forklift -u "username" -p "password" (if you configured the forklift.json in /etc/forklift)
+sudo ./filesystem_forklift -u "username" -p "password" (if you configured the forklift.json in /etc/forklift)
 ```
 Otherwise, type 
 ```
-./filesystem_forklift -c path_to_directory_containing_config_file
+sudo ./filesystem_forklift -c path_to_directory_containing_config_file
 ```
 or 
 ```
-./filesystem_forklift -c path_to_directory_containing_config_file -u "username" -p "password"
+sudo ./filesystem_forklift -c path_to_directory_containing_config_file -u "username" -p "password"
 ```
 If you do not include either the -u or -p flags, the program will prompt you for your Samba username and password.
 Note:
