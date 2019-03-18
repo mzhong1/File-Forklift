@@ -33,6 +33,8 @@ pub struct Cluster {
     pub node_change_output: Sender<ChangeList>,
     /// channel to postgres logger
     pub log_output: Sender<LogMessage>,
+    /// whether the program will automaticall rerun or not
+    pub rerun: bool,
 }
 
 impl Cluster {
@@ -43,6 +45,7 @@ impl Cluster {
         node_address: &SocketAddr,
         node_change_output: Sender<ChangeList>,
         log_output: Sender<LogMessage>,
+        rerun: bool,
     ) -> Self {
         let mut names = NodeList::new();
         names.add_node_to_list(node_address);
@@ -55,6 +58,7 @@ impl Cluster {
             node_address: *node_address,
             node_change_output,
             log_output,
+            rerun,
         }
     }
 
@@ -105,8 +109,11 @@ impl Cluster {
     pub fn send_getlist(&mut self) -> ForkliftResult<()> {
         if self.pulse.beat() {
             trace!("Send a GETLIST from {}", self.node_address);
-            let msg =
-                message::create_message(MessageType::GETLIST, &[self.node_address.to_string()])?;
+            let msg = message::create_message(
+                MessageType::GETLIST,
+                &[self.node_address.to_string()],
+                self.rerun,
+            )?;
             self.send_message(&msg, "Getlist sent!")?;
         }
         Ok(())
@@ -122,7 +129,7 @@ impl Cluster {
     /// Do nothing if the GETLIST request is empty
     pub fn send_nodelist(&mut self, msg_body: &[String]) -> ForkliftResult<()> {
         let address_names = self.names.to_string_vector();
-        let msg = message::create_message(MessageType::NODELIST, &address_names)?;
+        let msg = message::create_message(MessageType::NODELIST, &address_names, self.rerun)?;
         self.is_valid_cluster()?;
         if !msg_body.is_empty() {
             match &msg_body[0].parse::<SocketAddr>() {
@@ -169,7 +176,7 @@ impl Cluster {
     pub fn send_heartbeat(&mut self) -> ForkliftResult<()> {
         debug!("Send a HEARTBEAT!");
         let buffer = vec![self.node_address.to_string()];
-        let msg = message::create_message(MessageType::HEARTBEAT, &buffer)?;
+        let msg = message::create_message(MessageType::HEARTBEAT, &buffer, self.rerun)?;
         self.send_message(&msg, "Heeartbeat sent!")?;
         Ok(())
     }
@@ -334,11 +341,14 @@ impl Cluster {
             Ok(_) => {
                 let msg = self.read_message_to_u8(aio)?;
                 if !msg.is_empty() {
-                    let msgtype = if msg.len() == 0 {
-                        message::get_message_type(&Vec::new())?
+                    let (msgtype, rerun) = if msg.len() == 0 {
+                        (message::get_message_type(&Vec::new())?, message::get_rerun(&Vec::new())?)
                     } else {
-                        message::get_message_type(&msg)?
+                        (message::get_message_type(&msg)?, message::get_rerun(&msg)?)
                     };
+                    if rerun {
+                        self.rerun = rerun;
+                    }
                     let msg_body = message::read_message(&msg)?;
                     match msgtype {
                         MessageType::NODELIST => {
@@ -383,6 +393,29 @@ impl Cluster {
         Ok(())
     }
 
+    pub fn rerun(&self) -> Option<bool> {
+        let mut died = false;
+        let mut ended = true;
+        for (_, node) in self.nodes.node_map.iter() {
+            match node.node_status {
+                NodeStatus::NodeAlive => {
+                    ended = false;
+                }
+                NodeStatus::NodeDied => {
+                    died = true;
+                }
+                NodeStatus::NodeFinished => (),
+            }
+        }
+        if !self.rerun {
+            Some(false)
+        } else if !ended {
+            None
+        } else {
+            Some(died)
+        }
+    }
+
     /// run the heartbeat protocol.  
     /// This Protocol will poll the current node's socket every interval for messages and handle them as such:
     /// if !has_nodelist: send GETLIST to connected nodes
@@ -403,12 +436,45 @@ impl Cluster {
         &mut self,
         has_nodelist: &mut bool,
         end_heartbeat_input: &Receiver<EndState>,
+        check_rerun: Receiver<EndState>,
+        send_rerun: Sender<EndState>,
     ) -> ForkliftResult<()> {
         let mut countdown = 0;
         let mut aio = Aio::new().unwrap();
         let mut responded = false;
         aio.set_timeout(Some(self.pulse.timeout));
+        let mut check_if_rerun = false;
         loop {
+            match check_rerun.try_recv() {
+                Ok(EndState::EndProgram) => {
+                    check_if_rerun = true;
+                } //check if rerunable and send
+                Ok(_) => {
+                    error!("False EndState");
+                    return Err(ForkliftError::HeartbeatError("False EndState".to_string()));
+                } //this shouldn't happen ever
+                Err(TryRecvError::Empty) => (),
+                Err(_) => {
+                    println!("Channel to progress worker broken!");
+                    return Err(ForkliftError::CrossbeamChannelError(
+                        "Channel to progress worker broken".to_string(),
+                    ));
+                }
+            }
+            if check_if_rerun {
+                match self.rerun() {
+                    None => (), //not finished,
+                    Some(true) => {
+                        send_rerun
+                            .send(EndState::Rerun)
+                            .expect("Channel to progress worker broken!");
+                        check_if_rerun = false;
+                    } //rerun
+                    Some(false) => send_rerun
+                        .send(EndState::EndProgram)
+                        .expect("Channel to progress worker broken!"), //end
+                }
+            }
             match end_heartbeat_input.try_recv() {
                 Ok(_) => {
                     println!("Got exit");
@@ -417,7 +483,9 @@ impl Cluster {
                 Err(TryRecvError::Empty) => (),
                 Err(_) => {
                     println!("Channel to heartbeat broken!");
-                    break;
+                    return Err(ForkliftError::CrossbeamChannelError(
+                        "Channel to heartbeat broken".to_string(),
+                    ));
                 }
             }
             if countdown > 5000 {
@@ -442,6 +510,7 @@ impl Cluster {
                 responded = true;
             }
         }
+
         Ok(())
     }
 

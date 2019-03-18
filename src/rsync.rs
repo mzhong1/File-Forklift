@@ -4,6 +4,7 @@ use crate::filesystem::*;
 use crate::filesystem_entry::Entry;
 use crate::filesystem_ops::SyncOutcome;
 use crate::input::Input;
+use crate::postgres_logger::{send_mess, EndState};
 use crate::progress_message::*;
 use crate::progress_worker::*;
 use crate::rsync_worker::*;
@@ -12,7 +13,7 @@ use crate::walk_worker::*;
 use crate::LogMessage;
 
 use crossbeam::channel;
-use crossbeam::channel::Sender;
+use crossbeam::channel::{Receiver, Sender};
 use log::*;
 use rendezvous_hash::{DefaultNodeHasher, RendezvousNodes};
 use std::path::PathBuf;
@@ -175,11 +176,14 @@ impl Rsyncer {
         (username, password): (&str, &str),
         nodelist: Arc<Mutex<RendezvousNodes<SocketNode, DefaultNodeHasher>>>,
         current_node: SocketNode,
+        is_rerun: Sender<EndState>,
+        end_run: Receiver<EndState>,
     ) -> ForkliftResult<()> {
         let (num_threads, src_share, dest_share) =
             (config.num_threads, &config.src_share, &config.dest_share);
         let (send_prog, rec_prog) = channel::unbounded::<ProgressMessage>();
         let (send_prog_thread, copy_log_output) = (send_prog.clone(), self.log_output.clone());
+        let (get_signal, restart_signal) = channel::unbounded::<EndState>();
         let contexts = self.create_contexts(config, username, password)?;
         //create workers
         let (send_handles, syncers) = self.create_syncers(&contexts, &send_prog);
@@ -193,51 +197,74 @@ impl Rsyncer {
             send_handles,
             send_prog,
         );
-        let progress_worker =
-            ProgressWorker::new(src_share, dest_share, self.progress_info, rec_prog);
+        let progress_worker = ProgressWorker::new(
+            src_share,
+            dest_share,
+            self.progress_info,
+            rec_prog,
+            is_rerun,
+            end_run,
+        );
+
         rayon::spawn(move || {
-            progress_worker.start(&copy_log_output).expect("Progress Worker Failed");
+            progress_worker.start(&copy_log_output, &get_signal).expect("Progress Worker Failed");
         });
         let pool = rayon::ThreadPoolBuilder::new()
             .num_threads(num_threads as usize)
             .breadth_first()
             .build()
             .expect("Unable to build ThreadPool");
-
-        if num_threads == 1 {
-            walk_worker.s_walk()?;
-            walk_worker.stop()?;
-        }
-        pool.install(|| {
-            if num_threads > 1 {
-                if let Err(e) = walk_worker.t_walk(src_path, &pool) {
-                    return Err(e);
-                }
+        loop {
+            if num_threads == 1 {
+                walk_worker.s_walk()?;
                 walk_worker.stop()?;
             }
-            rayon::scope(|spawner| {
-                for syncer in syncers {
-                    spawner.spawn(|_| {
-                        let input = syncer.input.clone();
-                        if let Err(e) = syncer.start(&pool) {
-                            let mess = ProgressMessage::SendError(e);
-                            send_prog_thread.send(mess).expect("Unable to send progress");
-                        };
-                        debug!(
-                            "Syncer Stopped, Thread {:?}, num left {:?}",
-                            pool.current_thread_index(),
-                            input.len()
-                        );
-                    });
+            let rsyncers = syncers.clone();
+            pool.install(|| {
+                if num_threads > 1 {
+                    if let Err(e) = walk_worker.t_walk(src_path, &pool) {
+                        return Err(e);
+                    }
+                    walk_worker.stop()?;
                 }
-            });
-            if send_prog_thread.send(ProgressMessage::EndSync).is_err() {
-                return Err(ForkliftError::CrossbeamChannelError(
-                    "Unable to send End signal to progress_worker".to_string(),
-                ));
-            };
-            Ok(())
-        })?;
+                rayon::scope(|spawner| {
+                    for syncer in rsyncers {
+                        spawner.spawn(|_| {
+                            let input = syncer.input.clone();
+                            if let Err(e) = syncer.start(&pool) {
+                                let mess = ProgressMessage::SendError(e);
+                                send_prog_thread.send(mess).expect("Unable to send progress");
+                            };
+                            debug!(
+                                "Syncer Stopped, Thread {:?}, num left {:?}",
+                                pool.current_thread_index(),
+                                input.len()
+                            );
+                        });
+                    }
+                });
+                if send_prog_thread.send(ProgressMessage::EndSync).is_err() {
+                    return Err(ForkliftError::CrossbeamChannelError(
+                        "Unable to send End signal to progress_worker".to_string(),
+                    ));
+                };
+                Ok(())
+            })?;
+            match restart_signal.recv() {
+                Ok(EndState::EndProgram) => break Ok(()),
+                Ok(EndState::Rerun) => (),
+                Err(e) => {
+                    let mess = LogMessage::Error(ForkliftError::CrossbeamChannelError(
+                        "Unable to get end/restart signal from heartbeat".to_string(),
+                    ));
+                    if send_mess(mess, &self.log_output.clone()).is_err() {
+                        break Err(ForkliftError::CrossbeamChannelError(
+                            "Unable to log error to postgres".to_string(),
+                        ));
+                    }
+                }
+            }
+        }?;
         Ok(())
     }
 }
