@@ -16,4 +16,5 @@ enum MessageType{
 message Message{
     required MessageType mtype = 1;
     repeated string members = 2;
+    required bool rerun = 3;
 }

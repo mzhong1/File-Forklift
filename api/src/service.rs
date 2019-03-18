@@ -26,6 +26,7 @@ pub struct Message {
     // message fields
     mtype: ::std::option::Option<MessageType>,
     members: ::protobuf::RepeatedField<::std::string::String>,
+    rerun: ::std::option::Option<bool>,
     // special fields
     pub unknown_fields: ::protobuf::UnknownFields,
     pub cached_size: ::protobuf::CachedSize,
@@ -79,11 +80,33 @@ impl Message {
     pub fn get_members(&self) -> &[::std::string::String] {
         &self.members
     }
+
+    // required bool rerun = 3;
+
+    pub fn clear_rerun(&mut self) {
+        self.rerun = ::std::option::Option::None;
+    }
+
+    pub fn has_rerun(&self) -> bool {
+        self.rerun.is_some()
+    }
+
+    // Param is passed by value, moved
+    pub fn set_rerun(&mut self, v: bool) {
+        self.rerun = ::std::option::Option::Some(v);
+    }
+
+    pub fn get_rerun(&self) -> bool {
+        self.rerun.unwrap_or(false)
+    }
 }
 
 impl ::protobuf::Message for Message {
     fn is_initialized(&self) -> bool {
         if self.mtype.is_none() {
+            return false;
+        }
+        if self.rerun.is_none() {
             return false;
         }
         true
@@ -98,6 +121,13 @@ impl ::protobuf::Message for Message {
                 },
                 2 => {
                     ::protobuf::rt::read_repeated_string_into(wire_type, is, &mut self.members)?;
+                },
+                3 => {
+                    if wire_type != ::protobuf::wire_format::WireTypeVarint {
+                        return ::std::result::Result::Err(::protobuf::rt::unexpected_wire_type(wire_type));
+                    }
+                    let tmp = is.read_bool()?;
+                    self.rerun = ::std::option::Option::Some(tmp);
                 },
                 _ => {
                     ::protobuf::rt::read_unknown_or_skip_group(field_number, wire_type, is, self.mut_unknown_fields())?;
@@ -117,6 +147,9 @@ impl ::protobuf::Message for Message {
         for value in &self.members {
             my_size += ::protobuf::rt::string_size(2, &value);
         };
+        if let Some(v) = self.rerun {
+            my_size += 2;
+        }
         my_size += ::protobuf::rt::unknown_fields_size(self.get_unknown_fields());
         self.cached_size.set(my_size);
         my_size
@@ -129,6 +162,9 @@ impl ::protobuf::Message for Message {
         for v in &self.members {
             os.write_string(2, &v)?;
         };
+        if let Some(v) = self.rerun {
+            os.write_bool(3, v)?;
+        }
         os.write_unknown_fields(self.get_unknown_fields())?;
         ::std::result::Result::Ok(())
     }
@@ -181,6 +217,11 @@ impl ::protobuf::Message for Message {
                     |m: &Message| { &m.members },
                     |m: &mut Message| { &mut m.members },
                 ));
+                fields.push(::protobuf::reflect::accessor::make_option_accessor::<_, ::protobuf::types::ProtobufTypeBool>(
+                    "rerun",
+                    |m: &Message| { &m.rerun },
+                    |m: &mut Message| { &mut m.rerun },
+                ));
                 ::protobuf::reflect::MessageDescriptor::new::<Message>(
                     "Message",
                     fields,
@@ -205,6 +246,7 @@ impl ::protobuf::Clear for Message {
     fn clear(&mut self) {
         self.clear_mtype();
         self.clear_members();
+        self.clear_rerun();
         self.unknown_fields.clear();
     }
 }
@@ -338,12 +380,12 @@ impl ::protobuf::reflect::ProtobufValue for MessageType {
 }
 
 static file_descriptor_proto_data: &'static [u8] = b"\
-    \n\rservice.proto\x12\0\"=\n\x07Message\x12\x1d\n\x05mtype\x18\x01\x20\
+    \n\rservice.proto\x12\0\"N\n\x07Message\x12\x1d\n\x05mtype\x18\x01\x20\
     \x02(\x0e2\x0c.MessageTypeB\0\x12\x11\n\x07members\x18\x02\x20\x03(\tB\0\
-    :\0*\x1f\n\nResultType\x12\x06\n\x02OK\x10\0\x12\x07\n\x03ERR\x10\x01\
-    \x1a\0*K\n\x0bMessageType\x12\x0b\n\x07GETLIST\x10\0\x12\x0c\n\x08NODELI\
-    ST\x10\x01\x12\r\n\tHEARTBEAT\x10\x02\x12\x10\n\x0cNODEFINISHED\x10\x03\
-    \x1a\0B\0b\x06proto2\
+    \x12\x0f\n\x05rerun\x18\x03\x20\x02(\x08B\0:\0*\x1f\n\nResultType\x12\
+    \x06\n\x02OK\x10\0\x12\x07\n\x03ERR\x10\x01\x1a\0*K\n\x0bMessageType\x12\
+    \x0b\n\x07GETLIST\x10\0\x12\x0c\n\x08NODELIST\x10\x01\x12\r\n\tHEARTBEAT\
+    \x10\x02\x12\x10\n\x0cNODEFINISHED\x10\x03\x1a\0B\0b\x06proto2\
 ";
 
 static mut file_descriptor_proto_lazy: ::protobuf::lazy::Lazy<::protobuf::descriptor::FileDescriptorProto> = ::protobuf::lazy::Lazy {
