@@ -314,6 +314,7 @@ impl Cluster {
                         MessageType::GETLIST => {
                             debug!("Can read message of type GETLIST");
                             self.send_nodelist(&msg_body)?;
+                            *has_nodelist = false;
                         }
                         MessageType::HEARTBEAT => {
                             debug!("Can read message of type HEARTBEAT");
