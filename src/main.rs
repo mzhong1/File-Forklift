@@ -366,7 +366,7 @@ fn main() -> ForkliftResult<()> {
             }
         });
 
-        rayon::join(
+        match rayon::join(
             || match heartbeat(
                 lifetime,
                 node_names,
@@ -387,7 +387,12 @@ fn main() -> ForkliftResult<()> {
                 Ok(_) => Ok(()),
                 Err(e) => send_mess(LogMessage::Error(e), &log_output),
             },
-        )
+        ) {
+            (Err(e1), Err(e2)) => error!("{:?}, {:?}", e1, e2),
+            (Err(e), _) => error!("{:?}", e),
+            (_, Err(e)) => error!("{:?}", e),
+            (..) => (),
+        }
     });
     Ok(())
 }
