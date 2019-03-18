@@ -223,7 +223,6 @@ impl Cluster {
     }
 
     /// parse a NODELIST message into a list of nodes and create/add the nodes to the cluster
-    /// @note: if has_nodelist is true, then exit without changing anything
     pub fn parse_nodelist_message(
         &mut self,
         has_nodelist: &mut bool,
@@ -231,9 +230,6 @@ impl Cluster {
     ) -> ForkliftResult<()> {
         self.is_valid_cluster()?;
         let mut ignored_address = false;
-        if *has_nodelist {
-            return Ok(());
-        }
         debug!("Parse the NODELIST!");
         let node_list = message::read_message(msg)?;
         for address in &node_list {
