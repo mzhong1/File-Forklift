@@ -368,6 +368,7 @@ impl Cluster {
     ) -> ForkliftResult<()> {
         let mut countdown = 0;
         let mut aio = Aio::new().unwrap();
+        let mut responded = false;
         aio.set_timeout(Some(self.pulse.timeout));
         loop {
             match end_heartbeat_input.try_recv() {
@@ -381,11 +382,15 @@ impl Cluster {
                     break;
                 }
             }
-            if countdown > 5000 && !*has_nodelist {
-                return Err(ForkliftError::TimeoutError(format!(
-                    "{} has not responded for a lifetime, please join to a different ip:port",
-                    self.node_address
-                )));
+            if countdown > 5000 {
+                if !responded {
+                    return Err(ForkliftError::TimeoutError(format!(
+                        "{} has not responded for a lifetime, please join to a different ip:port",
+                        self.node_address
+                    )));
+                }
+                countdown = 0;
+                responded = false;
             }
             std::thread::sleep(std::time::Duration::from_millis(10));
             countdown += 10;
@@ -395,6 +400,9 @@ impl Cluster {
             }
             self.read_and_heartbeat(&mut aio, has_nodelist)?;
             self.send_and_tickdown()?;
+            if *has_nodelist {
+                responded = true;
+            }
         }
         Ok(())
     }
