@@ -435,7 +435,7 @@ fn rendezvous(
                 ChangeType::AddNode => {
                     info!("Add Node {:?} to active list!", change.socket_node);
                     list.insert(change.socket_node);
-                    let node = Nodes::new(NodeStatus::NodeAdded)?;
+                    let node = Nodes::new(NodeStatus::NodeAlive)?;
                     send_mess(LogMessage::Nodes(node), &log_output)?;
                     info!("The current list is {:?}", list.calc_candidates(&1).collect::<Vec<_>>());
                 }

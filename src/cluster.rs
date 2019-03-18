@@ -12,7 +12,7 @@ use crate::node::*;
 use crate::postgres_logger::{send_mess, LogMessage};
 use crate::pulse::*;
 use crate::socket_node::*;
-use crate::tables::ErrorType;
+use crate::tables::{ErrorType, NodeStatus};
 use crate::EndState;
 
 /// An object representing a cluster of nodes
@@ -288,6 +288,40 @@ impl Cluster {
         Ok(())
     }
 
+    /// updates the hashmap to end a node
+    pub fn node_finished(&mut self, msg_body: &[String]) -> ForkliftResult<()> {
+        self.is_valid_cluster()?;
+        if msg_body.is_empty() {
+            return Ok(());
+        }
+        match &msg_body[0].parse::<SocketAddr>() {
+            Ok(sent_address) => {
+                let node_change_output = &self.node_change_output;
+                let log_output = &self.log_output;
+                self.nodes.node_map.entry(*sent_address).and_modify(|n| {
+                    let change_list =
+                        ChangeList::new(ChangeType::RemNode, SocketNode::new(*sent_address));
+                    n.node_status = NodeStatus::NodeFinished;
+                    if node_change_output.send(change_list).is_err() {
+                        let mess = LogMessage::ErrorType(
+                            ErrorType::CrossbeamChannelError,
+                            "Channel to rendezvous is broken".to_string(),
+                        );
+                        send_mess(mess, log_output).expect("Channel to rendezvous is broken!");
+                    }
+                });
+            }
+            Err(e) => {
+                self.send_log(LogMessage::ErrorType(
+                    ErrorType::AddrParseError,
+                    format!("Error {:?}, unable to parse socket address", e),
+                ))?;
+            }
+        };
+
+        Ok(())
+    }
+
     /// Read incoming messages and send out heartbeats every interval milliseconds.
     pub fn read_and_heartbeat(
         &mut self,
@@ -322,6 +356,10 @@ impl Cluster {
                             if !*has_nodelist {
                                 self.send_getlist()?;
                             }
+                        }
+                        MessageType::NODEFINISHED => {
+                            debug!("Can read a message of type NODEFINISHED");
+                            self.node_finished(&msg_body)?;
                         }
                     }
                 }

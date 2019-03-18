@@ -28,8 +28,8 @@ pub enum LogMessage {
 pub enum EndState {
     /// End the process
     EndProgram,
-    // Rerun the program
-    //Rerun,
+    /// Rerun the program
+    Rerun,
 }
 
 pub struct PostgresLogger {
@@ -41,6 +41,8 @@ pub struct PostgresLogger {
     end_heartbeat: Sender<EndState>,
     /// channel to send rendezvous loop end signal
     end_rendezvous: Sender<EndState>,
+    /// get nodelist state
+    //rendezvous_state: Receiver<>,
     /// channel to send exit to postgres loop
     send_exit: Sender<EndState>,
     /// channel to receive exit from postgres loop

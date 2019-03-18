@@ -281,6 +281,7 @@ pub enum MessageType {
     GETLIST = 0,
     NODELIST = 1,
     HEARTBEAT = 2,
+    NODEFINISHED = 3,
 }
 
 impl ::protobuf::ProtobufEnum for MessageType {
@@ -293,6 +294,7 @@ impl ::protobuf::ProtobufEnum for MessageType {
             0 => ::std::option::Option::Some(MessageType::GETLIST),
             1 => ::std::option::Option::Some(MessageType::NODELIST),
             2 => ::std::option::Option::Some(MessageType::HEARTBEAT),
+            3 => ::std::option::Option::Some(MessageType::NODEFINISHED),
             _ => ::std::option::Option::None
         }
     }
@@ -302,6 +304,7 @@ impl ::protobuf::ProtobufEnum for MessageType {
             MessageType::GETLIST,
             MessageType::NODELIST,
             MessageType::HEARTBEAT,
+            MessageType::NODEFINISHED,
         ];
         values
     }
@@ -338,8 +341,9 @@ static file_descriptor_proto_data: &'static [u8] = b"\
     \n\rservice.proto\x12\0\"=\n\x07Message\x12\x1d\n\x05mtype\x18\x01\x20\
     \x02(\x0e2\x0c.MessageTypeB\0\x12\x11\n\x07members\x18\x02\x20\x03(\tB\0\
     :\0*\x1f\n\nResultType\x12\x06\n\x02OK\x10\0\x12\x07\n\x03ERR\x10\x01\
-    \x1a\0*9\n\x0bMessageType\x12\x0b\n\x07GETLIST\x10\0\x12\x0c\n\x08NODELI\
-    ST\x10\x01\x12\r\n\tHEARTBEAT\x10\x02\x1a\0B\0b\x06proto2\
+    \x1a\0*K\n\x0bMessageType\x12\x0b\n\x07GETLIST\x10\0\x12\x0c\n\x08NODELI\
+    ST\x10\x01\x12\r\n\tHEARTBEAT\x10\x02\x12\x10\n\x0cNODEFINISHED\x10\x03\
+    \x1a\0B\0b\x06proto2\
 ";
 
 static mut file_descriptor_proto_lazy: ::protobuf::lazy::Lazy<::protobuf::descriptor::FileDescriptorProto> = ::protobuf::lazy::Lazy {
