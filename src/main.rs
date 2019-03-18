@@ -45,9 +45,9 @@ use crate::socket_node::*;
 use crate::tables::*;
 
 #[cfg(windows)]
-const LINE_ENDING: &'static str = "\r\n";
+const LINE_ENDING: &str = "\r\n";
 #[cfg(not(windows))]
-const LINE_ENDING: &'static str = "\n";
+const LINE_ENDING: &str = "\n";
 
 #[test]
 fn test_init_router() {
@@ -221,7 +221,7 @@ fn init_args() -> ForkliftResult<(String, String, Input)> {
     let mut username = matches.value_of("username").unwrap().to_string();
     let mut password = matches.value_of("password").unwrap().to_string();
     let mut iter = 0;
-    while username.is_empty() || password.is_empty() || username == LINE_ENDING.to_string() {
+    while username.is_empty() || password.is_empty() || username == LINE_ENDING {
         if iter != 0 {
             println!("Username cannot be \\n");
         }
@@ -235,7 +235,7 @@ fn init_args() -> ForkliftResult<(String, String, Input)> {
                 }
             }
             FileSystemType::Samba => {
-                if username.is_empty() || username == LINE_ENDING.to_string() {
+                if username.is_empty() || username == LINE_ENDING {
                     print!("Please enter your username: ");
                     stdout().flush()?;
                     stdin().read_line(&mut username)?;

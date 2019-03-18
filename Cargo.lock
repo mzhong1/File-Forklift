@@ -1167,7 +1167,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 [[package]]
 name = "smbc"
 version = "0.1.0"
-source = "git+ssh://git@github.comcast.com/SDS/smbc.git#9cd7f646a16a657309601c493c2430c528dac1ed"
+source = "git+ssh://git@github.comcast.com/SDS/smbc.git#5fe0ba86bfe8d4b60d71e0b7c5b8f221c5403532"
 dependencies = [
  "bitflags 1.0.4 (registry+https://github.com/rust-lang/crates.io-index)",
  "chrono 0.4.6 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -1184,7 +1184,7 @@ dependencies = [
 [[package]]
 name = "smbclient-sys"
 version = "0.1.0"
-source = "git+ssh://git@github.comcast.com/SDS/smbclient-sys.git#a39cf36472be287546cc8877718a725ca32e2c2b"
+source = "git+ssh://git@github.comcast.com/SDS/smbclient-sys.git#a86f18b11e0371b9ed9b4e02e17dec6246d442b2"
 dependencies = [
  "bindgen 0.47.3 (registry+https://github.com/rust-lang/crates.io-index)",
  "libc 0.2.50 (registry+https://github.com/rust-lang/crates.io-index)",
