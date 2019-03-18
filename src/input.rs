@@ -42,6 +42,10 @@ pub struct Input {
     /// URL of database to log errors to, or NULL if not logging to database
     /// format is probably database://username:password@ip:port
     pub database_url: Option<String>,
+    /// True if the program should wait for all nodes to finish then rerun if node(s) died
+    /// False if program exits on finish.  By default rerun
+    #[serde(default = "default_rerun")]
+    pub rerun: bool,
 }
 /// default workgroup helper
 fn default_workgroup() -> String {
@@ -56,6 +60,10 @@ fn default_path() -> PathBuf {
     let mut p = PathBuf::new();
     p.push("/");
     p
+}
+
+fn default_rerun() -> bool {
+    true
 }
 impl Input {
     //NOTE, send invalid config error when panicking
