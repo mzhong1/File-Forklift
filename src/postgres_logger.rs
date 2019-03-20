@@ -116,10 +116,11 @@ impl PostgresLogger {
 /// Send a message to PostgresLogger input
 pub fn send_mess(log: LogMessage, send_log: &Sender<LogMessage>) -> ForkliftResult<()> {
     trace!("Sending {:?} to postgres", log);
-    if send_log.send(log).is_err() {
-        return Err(ForkliftError::CrossbeamChannelError(
-            "Unable to send error to postgres_logger".to_string(),
-        ));
+    if let Err(e) = send_log.send(log) {
+        return Err(ForkliftError::CrossbeamChannelError(format!(
+            "{:?}, Unable to send log to postgres_logger",
+            e
+        )));
     }
     Ok(())
 }

@@ -223,7 +223,6 @@ impl Cluster {
     }
 
     /// parse a NODELIST message into a list of nodes and create/add the nodes to the cluster
-    /// @note: if has_nodelist is true, then exit without changing anything
     pub fn parse_nodelist_message(
         &mut self,
         has_nodelist: &mut bool,
@@ -231,9 +230,6 @@ impl Cluster {
     ) -> ForkliftResult<()> {
         self.is_valid_cluster()?;
         let mut ignored_address = false;
-        if *has_nodelist {
-            return Ok(());
-        }
         debug!("Parse the NODELIST!");
         let node_list = message::read_message(msg)?;
         for address in &node_list {
@@ -318,6 +314,7 @@ impl Cluster {
                         MessageType::GETLIST => {
                             debug!("Can read message of type GETLIST");
                             self.send_nodelist(&msg_body)?;
+                            *has_nodelist = false;
                         }
                         MessageType::HEARTBEAT => {
                             debug!("Can read message of type HEARTBEAT");
@@ -371,6 +368,7 @@ impl Cluster {
     ) -> ForkliftResult<()> {
         let mut countdown = 0;
         let mut aio = Aio::new().unwrap();
+        let mut responded = false;
         aio.set_timeout(Some(self.pulse.timeout));
         loop {
             match end_heartbeat_input.try_recv() {
@@ -384,11 +382,15 @@ impl Cluster {
                     break;
                 }
             }
-            if countdown > 5000 && !*has_nodelist {
-                return Err(ForkliftError::TimeoutError(format!(
-                    "{} has not responded for a lifetime, please join to a different ip:port",
-                    self.node_address
-                )));
+            if countdown > 5000 {
+                if !responded {
+                    return Err(ForkliftError::TimeoutError(format!(
+                        "{} has not responded for a lifetime, please join to a different ip:port",
+                        self.node_address
+                    )));
+                }
+                countdown = 0;
+                responded = false;
             }
             std::thread::sleep(std::time::Duration::from_millis(10));
             countdown += 10;
@@ -398,6 +400,9 @@ impl Cluster {
             }
             self.read_and_heartbeat(&mut aio, has_nodelist)?;
             self.send_and_tickdown()?;
+            if *has_nodelist {
+                responded = true;
+            }
         }
         Ok(())
     }

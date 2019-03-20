@@ -81,7 +81,6 @@ fn init_router(full_address: &SocketAddr) -> ForkliftResult<Socket> {
 fn heartbeat(
     lifetime: u64,
     node_names: NodeList,
-    joined: &mut bool,
     node_address: SocketAddr,
     heartbeat_input: &Receiver<EndState>,
     node_change_output: Sender<ChangeList>,
@@ -106,7 +105,7 @@ fn heartbeat(
                                                                                                     //sleep for a bit to let other nodes start up
     cluster.names = node_names;
     cluster.init_connect()?;
-    cluster.heartbeat_loop(joined, &heartbeat_input)
+    cluster.heartbeat_loop(&mut false, &heartbeat_input)
 }
 
 /// initialize Loggers to console and file
@@ -332,7 +331,6 @@ fn main() -> ForkliftResult<()> {
     if let Err(e) = set_current_node(&current_address) {
         send_mess(LogMessage::Error(e), &log_output)?;
     };
-    let mut joined = input.nodes.len() != 2;
     let console_info = ConsoleProgressOutput::new();
     let system = input.system;
 
@@ -368,11 +366,10 @@ fn main() -> ForkliftResult<()> {
             }
         });
 
-        rayon::join(
+        match rayon::join(
             || match heartbeat(
                 lifetime,
                 node_names,
-                &mut joined,
                 full_address,
                 &heartbeat_input,
                 node_change_output,
@@ -390,7 +387,12 @@ fn main() -> ForkliftResult<()> {
                 Ok(_) => Ok(()),
                 Err(e) => send_mess(LogMessage::Error(e), &log_output),
             },
-        )
+        ) {
+            (Err(e1), Err(e2)) => error!("{:?}, {:?}", e1, e2),
+            (Err(e), _) => error!("{:?}", e),
+            (_, Err(e)) => error!("{:?}", e),
+            (..) => (),
+        }
     });
     Ok(())
 }
