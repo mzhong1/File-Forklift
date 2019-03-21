@@ -57,16 +57,11 @@ impl Node {
         let just_died = self.liveness == 1;
         if self.liveness > 0 {
             self.liveness -= 1;
-            NodeStatus::NodeDied;
+            self.node_status = NodeStatus::NodeDied;
         }
         self.has_heartbeat = false;
         debug!("Tickdown Node {}, liveness {}", self.name, self.liveness);
         just_died
-    }
-
-    /// checks if node is dead
-    pub fn is_dead(&self) -> bool {
-        self.liveness <= 0
     }
 }
 impl Hash for Node {
