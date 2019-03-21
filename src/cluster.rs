@@ -35,6 +35,8 @@ pub struct Cluster {
     pub log_output: Sender<LogMessage>,
     /// whether the program will automaticall rerun or not
     pub rerun: bool,
+    /// whether the program has sent a message within a lifetime
+    pub sent_message: bool,
 }
 
 impl Cluster {
@@ -59,6 +61,7 @@ impl Cluster {
             node_change_output,
             log_output,
             rerun,
+            sent_message: false,
         }
     }
 
@@ -153,7 +156,10 @@ impl Cluster {
     fn send_message(&mut self, msg: &[u8], success: &str) -> ForkliftResult<()> {
         let message = NanoMessage::try_from(msg)?;
         match self.router.send(message) {
-            Ok(_) => debug!("{}", success),
+            Ok(_) => {
+                self.sent_message = true;
+                debug!("{}", success)
+            }
             Err((_, e)) => match e.kind() {
                 ErrorKind::TryAgain => {
                     self.send_log(LogMessage::ErrorType(
@@ -177,7 +183,15 @@ impl Cluster {
         debug!("Send a HEARTBEAT!");
         let buffer = vec![self.node_address.to_string()];
         let msg = message::create_message(MessageType::HEARTBEAT, &buffer, self.rerun)?;
-        self.send_message(&msg, "Heeartbeat sent!")?;
+        self.send_message(&msg, "Heartbeat sent!")?;
+        Ok(())
+    }
+
+    pub fn send_nodefinished(&mut self) -> ForkliftResult<()> {
+        debug!("Send a NODEFINISHED!");
+        let buffer = vec![self.node_address.to_string()];
+        let msg = message::create_message(MessageType::NODEFINISHED, &buffer, self.rerun)?;
+        self.send_message(&msg, "Nodefinished sent!")?;
         Ok(())
     }
 
@@ -416,6 +430,22 @@ impl Cluster {
         }
     }
 
+    pub fn rerun_setup(&mut self) {
+        let mut indexes = Vec::new();
+        for (i, address) in self.names.node_list.iter().enumerate() {
+            if let Some(node) = self.nodes.node_map.get(address) {
+                if node.node_status == NodeStatus::NodeDied && *address != self.node_address {
+                    self.nodes.node_map.remove(address);
+                    indexes.push(i);
+                }
+            }
+        }
+        while !indexes.is_empty() {
+            if let Some(index) = indexes.pop() {
+                self.names.node_list.remove(index);
+            }
+        }
+    }
     /// run the heartbeat protocol.  
     /// This Protocol will poll the current node's socket every interval for messages and handle them as such:
     /// if !has_nodelist: send GETLIST to connected nodes
@@ -441,13 +471,15 @@ impl Cluster {
     ) -> ForkliftResult<()> {
         let mut countdown = 0;
         let mut aio = Aio::new().unwrap();
-        let mut responded = false;
         aio.set_timeout(Some(self.pulse.timeout));
         let mut check_if_rerun = false;
         loop {
             match check_rerun.try_recv() {
                 Ok(EndState::EndProgram) => {
+                    println!("Check Rerun HEARTBEAT");
                     check_if_rerun = true;
+                    //sent node finished message
+                    self.send_nodefinished()?;
                 } //check if rerunable and send
                 Ok(_) => {
                     error!("False EndState");
@@ -463,8 +495,14 @@ impl Cluster {
             }
             if check_if_rerun {
                 match self.rerun() {
-                    None => (), //not finished,
+                    None => {
+                        println!("NOT FINISHED: {:?}", self.nodes);
+                    } //not finished,
                     Some(true) => {
+                        println!("SEND RERUN: {:?}", self.nodes);
+                        // remove dead nodes from nodelist
+                        self.rerun_setup();
+                        println!("Nodes after reset: {:?}", self.nodes);
                         send_rerun
                             .send(EndState::Rerun)
                             .expect("Channel to progress worker broken!");
@@ -489,14 +527,14 @@ impl Cluster {
                 }
             }
             if countdown > 5000 {
-                if !responded {
+                if !self.sent_message {
                     return Err(ForkliftError::TimeoutError(format!(
                         "{} has not responded for a lifetime, please join to a different ip:port",
                         self.node_address
                     )));
                 }
                 countdown = 0;
-                responded = false;
+                self.sent_message = false;
             }
             std::thread::sleep(std::time::Duration::from_millis(10));
             countdown += 10;
@@ -506,9 +544,6 @@ impl Cluster {
             }
             self.read_and_heartbeat(&mut aio, has_nodelist)?;
             self.send_and_tickdown()?;
-            if *has_nodelist {
-                responded = true;
-            }
         }
 
         Ok(())
