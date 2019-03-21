@@ -268,6 +268,7 @@ fn main() -> ForkliftResult<()> {
     let (log_output, log_input) = channel::unbounded::<LogMessage>();
     let (is_rerun, check_rerun) = channel::unbounded::<EndState>();
     let (send_rerun, end_rerun) = channel::unbounded::<EndState>();
+    let (send_exit, recv_exit) = channel::unbounded::<EndState>();
     let config = input.clone();
     //get database url and check if we are logging anything to database
     //SOME if yes, NONE if not logging to DB
@@ -282,8 +283,13 @@ fn main() -> ForkliftResult<()> {
     } else {
         None
     };
-    let postgres_logger =
-        PostgresLogger::new(conn, log_input, end_heartbeat.clone(), end_rendezvous.clone());
+    let postgres_logger = PostgresLogger::new(
+        conn,
+        log_input,
+        end_heartbeat.clone(),
+        end_rendezvous.clone(),
+        recv_exit,
+    );
     rayon::spawn(move || postgres_logger.start().expect("unable to log to Postgres"));
     if input.nodes.len() < 2 {
         let mess = LogMessage::ErrorType(
@@ -393,7 +399,10 @@ fn main() -> ForkliftResult<()> {
                 send_rerun,
             ) {
                 Ok(_) => Ok(()),
-                Err(e) => send_mess(LogMessage::Error(e), &log_output),
+                Err(e) => {
+                    debug!("HEARTBEAT Errored out: {:?}", e);
+                    send_mess(LogMessage::Error(e), &log_output)
+                }
             },
             || match rendezvous(
                 &mut active_nodes.clone(),
@@ -402,7 +411,10 @@ fn main() -> ForkliftResult<()> {
                 &log_output,
             ) {
                 Ok(_) => Ok(()),
-                Err(e) => send_mess(LogMessage::Error(e), &log_output),
+                Err(e) => {
+                    debug!("Rendezvous errored out: {:?}", e);
+                    send_mess(LogMessage::Error(e), &log_output)
+                }
             },
         ) {
             (Err(e1), Err(e2)) => error!("{:?}, {:?}", e1, e2),
@@ -410,6 +422,8 @@ fn main() -> ForkliftResult<()> {
             (_, Err(e)) => error!("{:?}", e),
             (..) => (),
         }
+
+        send_exit.send(EndState::EndProgram).expect("Channel to postgres_end broken");
     });
 
     Ok(())

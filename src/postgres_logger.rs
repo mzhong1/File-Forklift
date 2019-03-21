@@ -41,10 +41,6 @@ pub struct PostgresLogger {
     end_heartbeat: Sender<EndState>,
     /// channel to send rendezvous loop end signal
     end_rendezvous: Sender<EndState>,
-    /// get nodelist state
-    //rendezvous_state: Receiver<>,
-    /// channel to send exit to postgres loop
-    send_exit: Sender<EndState>,
     /// channel to receive exit from postgres loop
     recv_exit: Receiver<EndState>,
 }
@@ -56,9 +52,9 @@ impl PostgresLogger {
         input: Receiver<LogMessage>,
         end_heartbeat: Sender<EndState>,
         end_rendezvous: Sender<EndState>,
+        recv_exit: Receiver<EndState>,
     ) -> Self {
-        let (send_exit, recv_exit) = crossbeam::channel::unbounded::<EndState>();
-        PostgresLogger { conn_pool, input, end_heartbeat, end_rendezvous, send_exit, recv_exit }
+        PostgresLogger { conn_pool, input, end_heartbeat, end_rendezvous, recv_exit }
     }
     /// Start logging messages to postgres
     pub fn start(&self) -> ForkliftResult<()> {
@@ -95,9 +91,6 @@ impl PostgresLogger {
                         self.end_rendezvous.send(EndState::EndProgram).expect(
                             "Channel to rendezvous thread broken, unable to end rendezvous",
                         );
-                        self.send_exit
-                            .send(EndState::EndProgram)
-                            .expect("Channel to postgres_end broken");
                     }
                 }
             });
@@ -120,7 +113,7 @@ pub fn send_mess(log: LogMessage, send_log: &Sender<LogMessage>) -> ForkliftResu
     trace!("Sending {:?} to postgres", log);
     if let Err(e) = send_log.send(log) {
         return Err(ForkliftError::CrossbeamChannelError(format!(
-            "{:?}, Unable to send log to postgres_logger",
+            "{:?}, Unable to send to postgres_logger",
             e
         )));
     }

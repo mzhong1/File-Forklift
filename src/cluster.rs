@@ -474,6 +474,19 @@ impl Cluster {
         aio.set_timeout(Some(self.pulse.timeout));
         let mut check_if_rerun = false;
         loop {
+            match end_heartbeat_input.try_recv() {
+                Ok(_) => {
+                    println!("Got exit");
+                    break;
+                }
+                Err(TryRecvError::Empty) => (),
+                Err(_) => {
+                    println!("Channel to heartbeat broken!");
+                    return Err(ForkliftError::CrossbeamChannelError(
+                        "Channel to heartbeat broken".to_string(),
+                    ));
+                }
+            }
             match check_rerun.try_recv() {
                 Ok(EndState::EndProgram) => {
                     println!("Check Rerun HEARTBEAT");
@@ -511,19 +524,6 @@ impl Cluster {
                     Some(false) => send_rerun
                         .send(EndState::EndProgram)
                         .expect("Channel to progress worker broken!"), //end
-                }
-            }
-            match end_heartbeat_input.try_recv() {
-                Ok(_) => {
-                    println!("Got exit");
-                    break;
-                }
-                Err(TryRecvError::Empty) => (),
-                Err(_) => {
-                    println!("Channel to heartbeat broken!");
-                    return Err(ForkliftError::CrossbeamChannelError(
-                        "Channel to heartbeat broken".to_string(),
-                    ));
                 }
             }
             if countdown > 5000 {
