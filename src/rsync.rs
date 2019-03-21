@@ -83,6 +83,20 @@ impl SyncStats {
             SyncOutcome::DirectoryCreated => self.directory_created += 1,
         }
     }
+    pub fn reset(&mut self) {
+        self.tot_files = 0;
+        self.tot_size = 0;
+        self.up_to_date = 0;
+        self.checksum_updated = 0;
+        self.directory_created = 0;
+        self.directory_updated = 0;
+        self.num_synced = 0;
+        self.permissions_update = 0;
+        self.symlink_created = 0;
+        self.symlink_skipped = 0;
+        self.symlink_updated = 0;
+        self.copied = 0;
+    }
 }
 
 /// Struct to build and run Rsync
@@ -253,7 +267,7 @@ impl Rsyncer {
             match restart_signal.recv() {
                 Ok(EndState::EndProgram) => break Ok(()),
                 Ok(EndState::Rerun) => (),
-                Err(e) => {
+                Err(_) => {
                     let mess = LogMessage::Error(ForkliftError::CrossbeamChannelError(
                         "Unable to get end/restart signal from heartbeat".to_string(),
                     ));
