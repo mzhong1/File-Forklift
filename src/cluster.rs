@@ -401,6 +401,9 @@ impl Cluster {
     pub fn rerun(&self) -> Option<bool> {
         let mut died = false;
         let mut ended = true;
+        if !self.rerun {
+            return Some(false);
+        }
         for (_, node) in self.nodes.node_map.iter() {
             match node.node_status {
                 NodeStatus::NodeAlive => {
@@ -412,9 +415,7 @@ impl Cluster {
                 NodeStatus::NodeFinished => (),
             }
         }
-        if !self.rerun {
-            Some(false)
-        } else if !ended {
+        if !ended {
             None
         } else {
             Some(died)
