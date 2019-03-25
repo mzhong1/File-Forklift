@@ -276,7 +276,7 @@ impl Cluster {
 
     /// updates the hashmap to either add a new node if the heartbeat came from a new node,
     /// or updates the liveness of the node
-    pub fn heartbeat_heard(&mut self, msg_body: &[String]) -> ForkliftResult<()> {
+    pub fn heartbeat_heard(&mut self, msg_body: &[String], restart: bool) -> ForkliftResult<()> {
         self.is_valid_cluster()?;
         if msg_body.is_empty() {
             return Ok(());
@@ -289,7 +289,7 @@ impl Cluster {
                 self.nodes.node_map.entry(*sent_address).and_modify(|n| {
                     let change_list =
                         ChangeList::new(ChangeType::AddNode, SocketNode::new(*sent_address));
-                    if n.heartbeat() && node_change_output.send(change_list).is_err() {
+                    if n.heartbeat(restart) && node_change_output.send(change_list).is_err() {
                         let mess = LogMessage::ErrorType(
                             ErrorType::CrossbeamChannelError,
                             "Channel to rendezvous is broken".to_string(),
@@ -317,19 +317,8 @@ impl Cluster {
         }
         match &msg_body[0].parse::<SocketAddr>() {
             Ok(sent_address) => {
-                let node_change_output = &self.node_change_output;
-                let log_output = &self.log_output;
                 self.nodes.node_map.entry(*sent_address).and_modify(|n| {
-                    let change_list =
-                        ChangeList::new(ChangeType::RemNode, SocketNode::new(*sent_address));
                     n.node_status = NodeStatus::NodeFinished;
-                    if node_change_output.send(change_list).is_err() {
-                        let mess = LogMessage::ErrorType(
-                            ErrorType::CrossbeamChannelError,
-                            "Channel to rendezvous is broken".to_string(),
-                        );
-                        send_mess(mess, log_output).expect("Channel to rendezvous is broken!");
-                    }
                 });
             }
             Err(e) => {
@@ -348,6 +337,7 @@ impl Cluster {
         &mut self,
         aio: &mut Aio,
         has_nodelist: &mut bool,
+        restart: bool,
     ) -> ForkliftResult<()> {
         self.is_valid_cluster()?;
         //check message type
@@ -376,7 +366,7 @@ impl Cluster {
                         }
                         MessageType::HEARTBEAT => {
                             debug!("Can read message of type HEARTBEAT");
-                            self.heartbeat_heard(&msg_body)?;
+                            self.heartbeat_heard(&msg_body, restart)?;
                             if !*has_nodelist {
                                 self.send_getlist()?;
                             }
@@ -384,6 +374,7 @@ impl Cluster {
                         MessageType::NODEFINISHED => {
                             debug!("Can read a message of type NODEFINISHED");
                             self.node_finished(&msg_body)?;
+                            self.heartbeat_heard(&msg_body, restart)?;
                         }
                     }
                 }
@@ -433,10 +424,12 @@ impl Cluster {
     pub fn rerun_setup(&mut self) {
         let mut indexes = Vec::new();
         for (i, address) in self.names.node_list.iter().enumerate() {
-            if let Some(node) = self.nodes.node_map.get(address) {
+            if let Some(node) = self.nodes.node_map.get_mut(address) {
                 if node.node_status == NodeStatus::NodeDied && *address != self.node_address {
                     self.nodes.node_map.remove(address);
                     indexes.push(i);
+                } else {
+                    node.node_status = NodeStatus::NodeAlive;
                 }
             }
         }
@@ -476,6 +469,7 @@ impl Cluster {
         loop {
             match end_heartbeat_input.try_recv() {
                 Ok(_) => {
+                    self.send_nodefinished()?;
                     println!("Got exit");
                     break;
                 }
@@ -489,10 +483,8 @@ impl Cluster {
             }
             match check_rerun.try_recv() {
                 Ok(EndState::EndProgram) => {
-                    println!("Check Rerun HEARTBEAT");
+                    debug!("Check Rerun HEARTBEAT");
                     check_if_rerun = true;
-                    //sent node finished message
-                    self.send_nodefinished()?;
                 } //check if rerunable and send
                 Ok(_) => {
                     error!("False EndState");
@@ -506,26 +498,36 @@ impl Cluster {
                     ));
                 }
             }
-            if check_if_rerun {
+            let restart = if check_if_rerun {
+                self.send_nodefinished()?;
                 match self.rerun() {
                     None => {
-                        println!("NOT FINISHED: {:?}", self.nodes);
+                        debug!("NOT FINISHED: {:?}", self.nodes);
+                        false
                     } //not finished,
                     Some(true) => {
-                        println!("SEND RERUN: {:?}", self.nodes);
+                        debug!("SEND RERUN: {:?}", self.nodes);
                         // remove dead nodes from nodelist
                         self.rerun_setup();
-                        println!("Nodes after reset: {:?}", self.nodes);
+                        debug!("Nodes after reset: {:?}", self.nodes);
                         send_rerun
                             .send(EndState::Rerun)
                             .expect("Channel to progress worker broken!");
                         check_if_rerun = false;
+                        true
                     } //rerun
-                    Some(false) => send_rerun
+                    Some(false) => {
+                        for _ in 0..9{
+                            std::thread::sleep(std::time::Duration::from_millis(100));
+                            self.send_nodefinished()?;
+                        }
+                        send_rerun
                         .send(EndState::EndProgram)
-                        .expect("Channel to progress worker broken!"), //end
+                        .expect("Channel to progress worker broken!");  false} //end
                 }
-            }
+            } else {
+                false
+            };
             if countdown > 5000 {
                 if !self.sent_message {
                     return Err(ForkliftError::TimeoutError(format!(
@@ -542,7 +544,7 @@ impl Cluster {
             if !*has_nodelist {
                 self.send_getlist()?;
             }
-            self.read_and_heartbeat(&mut aio, has_nodelist)?;
+            self.read_and_heartbeat(&mut aio, has_nodelist, restart)?;
             self.send_and_tickdown()?;
         }
 

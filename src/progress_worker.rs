@@ -1,4 +1,5 @@
 use crossbeam::channel::{Receiver, Sender};
+use log::*;
 use std::time::Instant;
 
 use crate::error::{ForkliftError, ForkliftResult};
@@ -136,7 +137,7 @@ impl ProgressWorker {
                 send_mess(LogMessage::TotalSync(stats), send_log)?;
             }
             self.progress_info.end(&stats);
-            println!("Check if restart");
+            debug!("Check if restart");
             if self.is_rerun.send(EndState::EndProgram).is_err() {
                 println!("RERUN ERROR");
                 let mess = LogMessage::Error(ForkliftError::CrossbeamChannelError("Channel to Heartbeat for is rerun broken! Cannot determine if program should rerun".to_string()));
@@ -145,18 +146,17 @@ impl ProgressWorker {
 
             match self.end_run.recv() {
                 Ok(EndState::EndProgram) => {
-                    println!("End the Program");
+                    debug!("End the Program");
                     break;
                 }
                 Ok(EndState::Rerun) => {
-                    println!("RERUN");
+                    debug!("RERUN");
                     if let Err(_) = get_signal.send(EndState::Rerun) {
                         let mess = LogMessage::Error(ForkliftError::CrossbeamChannelError("Channel to RSync for rerun is broken! Cannot determine if program should rerun".to_string()));
                         send_mess(mess, send_log)?;
                     }
                 }
                 Err(_) => {
-                    println!("IT BROKE");
                     let err = ForkliftError::CrossbeamChannelError("Channel to Heartbeat for is rerun broken! Cannot determine if program should rerun".to_string());
                     let mess = LogMessage::Error(err);
                     send_mess(mess, send_log)?;

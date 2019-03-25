@@ -40,12 +40,16 @@ impl Node {
 
     /// beats the heart of a node, resetting liveness to lifetime.
     /// ENSURES: returns true if the node was "dead" before the heartbeat was called
-    pub fn heartbeat(&mut self) -> bool {
+    pub fn heartbeat(&mut self, restart: bool) -> bool {
         trace!("Before Heartbeat: Node {}, liveness {}", self.name, self.liveness);
         let was_dead = self.liveness <= 0;
         self.liveness = self.lifetime as i64;
         self.has_heartbeat = true;
-        self.node_status = NodeStatus::NodeAlive;
+        if self.node_status == NodeStatus::NodeFinished && !restart {
+            self.node_status = NodeStatus::NodeFinished;
+        } else {
+            self.node_status = NodeStatus::NodeAlive;
+        }
         debug!("Heartbeat Node {}, liveness {}", self.name, self.liveness);
         was_dead
     }
@@ -57,6 +61,8 @@ impl Node {
         let just_died = self.liveness == 1;
         if self.liveness > 0 {
             self.liveness -= 1;
+        }
+        if self.liveness == 0 && self.node_status != NodeStatus::NodeFinished {
             self.node_status = NodeStatus::NodeDied;
         }
         self.has_heartbeat = false;
@@ -212,7 +218,7 @@ fn test_heartbeat() {
         3,
         false,
     );
-    n.heartbeat();
+    n.heartbeat(true);
     assert_eq!(n.liveness, 5);
     assert_eq!(n.has_heartbeat, true);
 }
