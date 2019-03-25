@@ -346,7 +346,7 @@ impl Cluster {
                 let msg = self.read_message_to_u8(aio)?;
                 if !msg.is_empty() {
                     let (msgtype, rerun) = if msg.len() == 0 {
-                        (message::get_message_type(&Vec::new())?, message::get_rerun(&Vec::new())?)
+                        (message::get_message_type(&[])?, message::get_rerun(&[])?)
                     } else {
                         (message::get_message_type(&msg)?, message::get_rerun(&msg)?)
                     };
