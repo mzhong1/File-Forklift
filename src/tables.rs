@@ -158,7 +158,7 @@ impl TotalSync {
     /// create a new TotalSync from SyncStats
     pub fn new(stats: &SyncStats) -> Self {
         TotalSync {
-            total_files: stats.tot_files as i64,
+            total_files: stats.num_files as i64,
             total_size: stats.tot_size as i64,
             num_synced: stats.num_synced as i64,
             up_to_date: stats.up_to_date as i64,

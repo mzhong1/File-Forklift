@@ -10,7 +10,7 @@ pub enum ProgressMessage {
     /// start syncing a file
     StartSync(String),
     /// update number of files to sync + size
-    Todo { num_files: u64, total_size: usize },
+    Todo { num_files: u64, tot_size: usize },
     /// Error message
     SendError(ForkliftError),
     /// sync in progress

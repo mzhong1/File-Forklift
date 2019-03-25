@@ -64,9 +64,9 @@ impl ProgressWorker {
             self.progress_info.start(&self.src_share, &self.dest_share);
             for progress in self.input.iter() {
                 match progress {
-                    ProgressMessage::Todo { num_files, total_size } => {
-                        stats.tot_files += num_files;
-                        stats.tot_size += total_size;
+                    ProgressMessage::Todo { num_files, tot_size } => {
+                        stats.num_files += num_files;
+                        stats.tot_size += tot_size;
                     }
                     ProgressMessage::StartSync(x) => {
                         self.progress_info.new_file(&x);
@@ -125,7 +125,7 @@ impl ProgressWorker {
                             total_done,
                             total_size: stats.tot_size,
                             index,
-                            num_files: stats.tot_files as usize,
+                            num_files: stats.num_files as usize,
                             eta,
                         };
                         self.progress_info.progress(&detailed_progress);

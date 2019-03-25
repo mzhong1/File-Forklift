@@ -23,7 +23,7 @@ use std::sync::{Arc, Mutex};
 /// Hold the total stats of all files synced
 pub struct SyncStats {
     /// total number of files in the source
-    pub tot_files: u64,
+    pub num_files: u64,
     /// Total size of all files in the source
     pub tot_size: usize,
     /// Number of files transferred from source
@@ -54,7 +54,7 @@ impl SyncStats {
     /// create a new zeroed SyncStats
     pub fn new() -> SyncStats {
         SyncStats {
-            tot_files: 0,
+            num_files: 0,
             tot_size: 0,
             num_synced: 0,
             up_to_date: 0,
@@ -84,7 +84,7 @@ impl SyncStats {
         }
     }
     pub fn reset(&mut self) {
-        self.tot_files = 0;
+        self.num_files = 0;
         self.tot_size = 0;
         self.up_to_date = 0;
         self.checksum_updated = 0;
