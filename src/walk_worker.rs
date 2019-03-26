@@ -167,7 +167,7 @@ impl WalkWorker {
         if let Some(meta) = meta {
             if let Err(e) = self
                 .progress_output
-                .send(ProgressMessage::Todo { num_files: 1, total_size: meta.size() as usize })
+                .send(ProgressMessage::Todo { num_files: 1, tot_size: meta.size() as usize })
             {
                 return Err(ForkliftError::CrossbeamChannelError(format!(
                     "Error: {:?}, unable to send progress",

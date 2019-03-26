@@ -26,11 +26,13 @@ pub enum ConvertStringError {
 #[derive(Debug, de::Error)]
 /// custom error types for Filesystem Forklift
 pub enum ForkliftError {
+    /// Failed to parse Socket Address
     AddrParseError(AddrParseError),
     #[error(msg_embedded, non_std, no_from)]
     CLIError(String),
     #[error(msg_embedded, non_std, no_from)]
     ChecksumError(String),
+    /// Failed to convert String to/from bytes
     ConvertStringError(ConvertStringError),
     #[error(msg_embedded, non_std, no_from)]
     CrossbeamChannelError(String),
@@ -43,15 +45,23 @@ pub enum ForkliftError {
     IoError(IoError),
     #[error(msg_embedded, non_std, no_from)]
     IpLocalError(String),
+    /// Nanomsg Error
     NanomsgError(NanomsgError),
+    /// Postgres Error
     PostgresError(PostgresError),
+    /// Protobuf Error
     ProtobufError(ProtobufError),
+    /// Crossbeam receiver error
     RecvError(RecvError),
+    /// Config Parsing Error
     SerdeJsonError(SerdeJsonError),
+    /// Samba Error
     SmbcError(SmbcError),
+    /// System Time Error
     SystemTimeError(SystemTimeError),
     #[error(msg_embedded, non_std, no_from)]
     TimeoutError(String),
+    /// R2D2 error
     R2D2Error(R2D2Error),
 }
 

@@ -10,9 +10,11 @@ enum MessageType{
     GETLIST = 0;
     NODELIST = 1;
     HEARTBEAT = 2;
+    NODEFINISHED = 3;
 }
 
 message Message{
     required MessageType mtype = 1;
     repeated string members = 2;
+    required bool rerun = 3;
 }

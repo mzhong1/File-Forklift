@@ -129,10 +129,10 @@ impl Nodes {
     }
 }
 
-#[derive(Debug, Clone, ToSql, FromSql)]
+#[derive(Debug, Clone, ToSql, FromSql, PartialEq, Eq, Copy)]
 /// The current state of a node
 pub enum NodeStatus {
-    NodeAdded,
+    NodeAlive,
     NodeDied,
     NodeFinished,
 }
@@ -158,7 +158,7 @@ impl TotalSync {
     /// create a new TotalSync from SyncStats
     pub fn new(stats: &SyncStats) -> Self {
         TotalSync {
-            total_files: stats.tot_files as i64,
+            total_files: stats.num_files as i64,
             total_size: stats.tot_size as i64,
             num_synced: stats.num_synced as i64,
             up_to_date: stats.up_to_date as i64,
@@ -364,7 +364,7 @@ pub fn get_current_node() -> ForkliftResult<SocketNode> {
 /// otherwise, store the most recent change message
 pub fn update_nodes(node: &Nodes, conn: &Connection) -> ForkliftResult<()> {
     if let NodeStatus::NodeDied = node.node_status {
-        let mut status: NodeStatus = NodeStatus::NodeAdded;
+        let mut status: NodeStatus = NodeStatus::NodeAlive;
         for row in &conn.query(
             "SELECT node_status FROM Nodes WHERE ip = $1 AND port = $2",
             &[&node.node_ip, &node.node_port],

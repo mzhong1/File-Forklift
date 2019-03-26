@@ -1,6 +1,7 @@
 use log::*;
 
 use crate::error::*;
+use crate::tables::NodeStatus;
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
@@ -17,6 +18,8 @@ pub struct Node {
     pub liveness: i64,
     /// a heartbeat was heard
     pub has_heartbeat: bool,
+    /// current node status
+    pub node_status: NodeStatus,
 }
 
 impl Node {
@@ -27,20 +30,26 @@ impl Node {
             lifetime,
             liveness: 0, //Note, new Nodes start as "Dead", so when a heartbeat is heard the list of active nodes is updated
             has_heartbeat: false,
+            node_status: NodeStatus::NodeDied,
         }
     }
     /// create a new node
     pub fn node_new(name: SocketAddr, lifetime: u64, liveness: i64, has_heartbeat: bool) -> Self {
-        Node { name, lifetime, liveness, has_heartbeat }
+        Node { name, lifetime, liveness, has_heartbeat, node_status: NodeStatus::NodeAlive }
     }
 
     /// beats the heart of a node, resetting liveness to lifetime.
     /// ENSURES: returns true if the node was "dead" before the heartbeat was called
-    pub fn heartbeat(&mut self) -> bool {
+    pub fn heartbeat(&mut self, restart: bool) -> bool {
         trace!("Before Heartbeat: Node {}, liveness {}", self.name, self.liveness);
         let was_dead = self.liveness <= 0;
         self.liveness = self.lifetime as i64;
         self.has_heartbeat = true;
+        if self.node_status == NodeStatus::NodeFinished && !restart {
+            self.node_status = NodeStatus::NodeFinished;
+        } else {
+            self.node_status = NodeStatus::NodeAlive;
+        }
         debug!("Heartbeat Node {}, liveness {}", self.name, self.liveness);
         was_dead
     }
@@ -52,6 +61,9 @@ impl Node {
         let just_died = self.liveness == 1;
         if self.liveness > 0 {
             self.liveness -= 1;
+        }
+        if self.liveness == 0 && self.node_status != NodeStatus::NodeFinished {
+            self.node_status = NodeStatus::NodeDied;
         }
         self.has_heartbeat = false;
         debug!("Tickdown Node {}, liveness {}", self.name, self.liveness);
@@ -206,7 +218,7 @@ fn test_heartbeat() {
         3,
         false,
     );
-    n.heartbeat();
+    n.heartbeat(true);
     assert_eq!(n.liveness, 5);
     assert_eq!(n.has_heartbeat, true);
 }
