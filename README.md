@@ -150,7 +150,7 @@ Unfortunately, depending on the version of Samba, there are various bugs associa
 ##### DOS Attributes
 Since Samba is meant for WINDOWS CIFS shares, permissions do not follow Unix permission patterns.  While Samba uses the same 9 bits to set its DOS attributes, that is about all it shares in common with the Unix 'mode' attribute.
 ![Samba Vs Unix Attributes]
-(https://github.comcast.com/SDS/File-Forklift/SambaPermissions.png)
+(File-Forklift/SambaPermissions.png)
 Unlike Unix permissions, DOS permissions are as such: R (Read-Only), H (Hidden), S (System), and A (Archive).  In Windows, if a file has none of these attributes, it is given the N (Normal) attribute.  These values are mapped to the Unix permission bits, which can lead to a discrepancy between Unix permissions on two files with the same DOS attributes.  Read-Only is raised when OWNER permission bits raise both read and write, and GROUP and OTHER/WORLD do not have write permissions.  Archive is mapped to OWNER execute, System to GROUP execute, and Archive to the OTHER/WORLD execute bit.  Of course, this means that, a file with Archive permission only could be 523, 563, 531 etc. Therefore, when copying permissions from one file to another, it is entirely possible that the Unix permissions look different.  Even using the chmod command to try to keep the two Unix permissions the same is a hit or miss, considering how chmod works in Samba. To be more precise, depending on the attributes of your Samba config file, chmod might not work at all, especially once ACL attributes are thrown into the mix.
 
 It is important to note that by default, Samba creates files with with 744 (Unix) permissions and directories with 755 permissions unless configured otherwise.  
