@@ -32,7 +32,7 @@ crossbeam = "0.7.1"
 rayon = "1.0.3"
 rand = "0.6.5"
 chrono = "0.4.6"
-smbc = {git = "ssh://git@github.comcast.com/SDS/smbc.git"}
+rust-smb = {git = "https://github.com/mzhong1/rust-smb.git"}
 meowhash = "0.1.2"
 digest = "0.8.0"
 nom = "4.2.0"
