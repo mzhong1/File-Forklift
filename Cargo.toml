@@ -3,6 +3,7 @@ name = "filesystem_forklift"
 version = "0.1.0"
 authors = ["Michelle Zhong <mzhong37@gmail.com>"]
 description = "Tool for migrating NFS and CIFS shares"
+license = "MIT"
 readme = "README.md"
 edition = "2018"
 
