@@ -233,8 +233,8 @@ fn test_get_full_address() {
         SocketAddr::new(::std::net::IpAddr::V4(::std::net::Ipv4Addr::new(172, 17, 0, 1)), 7654),
     ];
     let expected_result =
-        SocketAddr::new(::std::net::IpAddr::V4(::std::net::Ipv4Addr::new(172, 17, 0, 2)), 5555);
-    assert_eq!(Some(expected_result), names.get_full_address("172.17.0.4"));
+        SocketAddr::new(::std::net::IpAddr::V4(::std::net::Ipv4Addr::new(172, 17, 0, 2)), 5671);
+    assert_eq!(Some(expected_result), names.get_full_address("172.17.0.2"));
     assert_eq!(None, names.get_full_address("172.17.5.4"))
 }
 

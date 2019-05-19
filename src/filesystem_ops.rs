@@ -1,4 +1,4 @@
-use ::smbc::*;
+use ::rust_smb::*;
 use chrono::NaiveDateTime;
 use crossbeam::channel::Sender;
 use digest::Digest;

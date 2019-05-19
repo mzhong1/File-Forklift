@@ -1,6 +1,6 @@
 use crate::error::*;
 
-use ::smbc::*;
+use ::rust_smb::*;
 use chrono::*;
 use libnfs::*;
 use log::*;
